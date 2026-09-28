@@ -136,23 +136,44 @@ annular/slug failures re-run at 250 diameters and 1-diameter mesh spacing
 to correct, still overwhelmingly predicted "stratified". This rules out
 *mesh under-resolution alone* as the explanation.
 
-**Root-cause finding.** A representative failing case (D = 51 mm, Vsl =
-0.0025 m/s, Vsg = 25 m/s, 1 deg incline, labeled annular) was inspected
-directly: even at 1-diameter mesh spacing and 10+ pipe residence times,
-the liquid film height along the back half of the pipe is essentially flat
-(1-2% variation -- numerical noise, not a growing wave). Yet querying the
-solver's own interfacial-friction closure at the same local conditions
-gives F = 0.66 against the Andreussi & Persen (1987) threshold F0 = 0.36
-(see `Closures.hpp`), i.e. **the closure itself reports this point as
-being in the enhanced-shear, unstable regime** (an 11.9x enhancement of
-the interfacial friction factor over its smooth-wall value) -- but the
-explicit time-marching solution is not amplifying the seeded disturbance
-into a growing wave. That combination (unstable-per-closure, stable-in-
-practice) points to the disturbance not growing fast enough under this
-codebase's explicit/semi-implicit momentum treatment, rather than to a
-wrong closure choice. This is a genuine, reproducible limitation of the
-current implementation, not a data or methodology artifact, and is the
-most concrete lead for follow-up work (see "Recommended follow-up" below).
+**Root-cause finding (original, 2024).** A representative failing case
+(D = 51 mm, Vsl = 0.0025 m/s, Vsg = 25 m/s, 1 deg incline, labeled annular)
+was inspected directly: even at 1-diameter mesh spacing and 10+ pipe
+residence times, the liquid film height along the back half of the pipe is
+essentially flat (1-2% variation -- numerical noise, not a growing wave).
+Yet querying the solver's own interfacial-friction closure at the same
+local conditions gives F = 0.66 against the Andreussi & Persen (1987)
+threshold F0 = 0.36 (see `Closures.hpp`), i.e. **the closure itself
+reports this point as being in the enhanced-shear, unstable regime** (an
+11.9x enhancement of the interfacial friction factor over its smooth-wall
+value) -- but the explicit time-marching solution is not amplifying the
+seeded disturbance into a growing wave. That combination (unstable-per-
+closure, stable-in-practice) points to the disturbance not growing fast
+enough under this codebase's explicit/semi-implicit momentum treatment,
+rather than to a wrong closure choice. This is a genuine, reproducible
+limitation of the current implementation, not a data or methodology
+artifact, and is the most concrete lead for follow-up work.
+
+**Resolution (see "Recommended follow-up" item 1, Update 5, below): this
+was a mis-framed comparison, not a solver deficiency.** F0 = 0.36 is
+Andreussi & Persen's *empirical* threshold for onset of enhanced
+interfacial friction (a wavy, rough-but-not-necessarily-exponentially-
+growing interface) -- it is not the threshold for actual inviscid
+Kelvin-Helmholtz exponential wave growth, which is F = 1 (recoverable from
+this model's own governing equations; see below). At the case's inlet
+condition (eL = 0.05) F = 1.14, genuinely above the F = 1 growth
+threshold, and the solver does grow the disturbance there, fast, exactly
+as it should. But Vsl = 0.0025 m/s is small enough that the film's true
+equilibrium thickness is much less than the arbitrary eL = 0.05 starting
+point, and as it drains toward that equilibrium (the same "draining
+transient" seen throughout this file's mesh/advection/pressure-coupling
+follow-up work), F **drops below 1 well before reaching the F = 0.66 point
+quoted above** (the crossing is at eL ~ 0.027) -- so by the time the film
+reaches the thickness this finding actually queried, growth has correctly
+stopped, because the flow is no longer inviscid-unstable there, even
+though it is still past the *different* F0 threshold. The flat back-half
+profile was the model getting this right, not failing to grow a wave it
+should have grown.
 
 ## Interpretation
 
@@ -161,25 +182,36 @@ most concrete lead for follow-up work (see "Recommended follow-up" below).
   (100% on horizontal, 85% on inclined, using the *same* closures at every
   angle, no regime-specific tuning) -- directly supporting the paper's
   central claim and the specific horizontal/inclined comparison asked for.
-- **Wave growth into annular/slug/bubbly regimes is under-predicted** in
-  the current implementation once conditions call for it, at every
-  inclination (not specifically worse at steep angles) -- this is a real,
-  now well-localised gap, not a vague "needs more validation" caveat.
-- The picture is therefore: *the model correctly stays stratified when
-  the flow should be stratified, and correctly resolves stratified
+- **Wave growth into annular/slug/bubbly regimes is under-*predicted by
+  the regime classifier's comparison***, at least for the representative
+  case this file traced to ground -- but see the Update below: this
+  turned out to be a mis-framed comparison rather than a solver defect,
+  for that case. The classifier miss (labeling it "stratified" when
+  Shoham's data says "annular") is still real and still stands.
+- The original picture here was: *the model correctly stays stratified
+  when the flow should be stratified, and correctly resolves stratified
   behaviour identically well from horizontal through steep incline, but
   currently under-predicts the growth of disturbances into the other
-  regimes.* That's a meaningfully different (and more actionable)
-  conclusion than either "it works" or "it doesn't".
-- **Update:** follow-up work (see "Recommended follow-up" item 1) has
-  since ruled out mesh resolution, both advection schemes, and the
-  semi-implicit pressure-velocity coupling as the cause of the
-  under-predicted growth, each via a direct numerical experiment rather
-  than by inspection. The solution converges cleanly under spatial *and*
-  temporal refinement, which points away from "the numerical scheme is
-  suppressing real growth" and toward this being what these closures'
-  converged solution actually does at this condition -- i.e. a modelling/
-  closure question now, more than a numerical one.
+  regimes.* Follow-up work (below) revised the second half of that.
+- **Update (resolved):** follow-up work (see "Recommended follow-up" item
+  1) ruled out mesh resolution, both advection schemes, and the
+  semi-implicit pressure-velocity coupling as numerical causes of the
+  "flat profile" -- the solution converges cleanly under spatial *and*
+  temporal refinement. That refinement work turned out to be looking for
+  a numerical bug that wasn't there: directly deriving and measuring the
+  disturbance's growth rate (item 1, Update 5) shows the solver *does*
+  grow the disturbance fast, exactly where the model's own inviscid
+  Kelvin-Helmholtz criterion (F > 1, not the different, smaller F0 = 0.36
+  friction-enhancement threshold used in the original root-cause finding
+  above) says it should -- and correctly stops once the film drains to a
+  thickness where that criterion is no longer met. The "flat downstream
+  profile" was the converged, physically-consistent behaviour of this
+  closure set for that specific case's liquid rate, not an
+  under-prediction. Whether the *same* eL-dependent F0-vs-F=1 mechanism
+  explains the other 23 originally-failing annular/slug cases is untested
+  and a natural next step (item 1, Update 5, final paragraph) -- so the
+  classifier's overall accuracy numbers above still stand as measured; what
+  changed is the explanation for the representative case, not the score.
 
 ## Limitations of this validation pass itself
 
@@ -290,17 +322,105 @@ most concrete lead for follow-up work (see "Recommended follow-up" below).
    prediction (the original ask in this item) is now the most direct way
    to distinguish those two remaining explanations, and is the specific
    next step.
+   **Update 5 (resolves this item):** we derived a growth rate to compare
+   against, then measured it directly.
+   - *Derivation.* Linearizing this model's own layer continuity +
+     momentum equations (`updateContinuity()`/`updateLayerMomentum()`),
+     in the inviscid limit (no wall/interfacial friction, no entrainment
+     -- the same limit the `F` closure's own threshold is based on),
+     around a uniform stratified base state gives a 2-layer dispersion
+     relation for perturbations `exp(i*k*z - i*omega*t)`:
+     `(a+b)*omega^2 - 2k(a*u1+b*u2)*omega + [k^2(a*u1^2+b*u2^2) - C] = 0`,
+     with `a = rho_l/A1`, `b = rho_g/A2`, `C = (rho_l-rho_g)*g*cos(theta)*k^2/Si`.
+     The instability threshold this implies, `(Ug-Ul)^2 > (rho_l-rho_g)*
+     g*cos(theta)*(A2/rho_g + A1/rho_l)/Si`, is k-independent (as it must
+     be, matching `F`'s own k-independence) and reduces *exactly* to the
+     code's own `kelvinHelmholtzParameterF() > 1` criterion in the
+     heavy-liquid limit (`rho_l/A1 >> rho_g/A2`) -- confirmed numerically
+     at the stuck case's conditions, where that ratio is ~16,000, i.e. an
+     excellent approximation there. This is a useful cross-check that the
+     derivation is self-consistent with the code it's meant to describe,
+     not an independent, unrelated formula. Where unstable, the growth
+     rate is `sigma = Im(omega) = sqrt(4*(a*b*k^2*(u1-u2)^2 - (a+b)*C)) /
+     (2*(a+b))`.
+   - **Key finding: `sigma(k)` is unbounded, growing linearly with `k`**
+     (shorter wavelengths always grow faster, with no most-unstable finite
+     wavelength) -- this model's governing equations, as coded, have no
+     surface-tension or other short-wave-regularizing term (the paper's
+     own Appendix A drops the slip-flux term as small, and no interfacial-
+     pressure-difference term is present either), so the continuum problem
+     is the classic **short-wave ill-posed two-fluid model** documented in
+     the literature (Stewart & Wendroff 1984; Ramshaw & Trapp 1978) for
+     exactly this reason: without such a term, growth rate diverges as
+     wavelength shrinks toward zero.
+   - **`F` at the case's own conditions is above the *true* inviscid
+     threshold, not just F0.** Querying `kelvinHelmholtzParameterF()`
+     directly at the inlet condition (eL = 0.05) gives **F = 1.14**,
+     genuinely past F = 1 -- this is a stronger statement than the
+     original root-cause finding's "F = 0.66 > F0 = 0.36", which used a
+     downstream, already-drained eL and the wrong (empirical, friction-
+     enhancement) threshold for judging exponential growth.
+   - **Direct numerical confirmation the solver does grow disturbances
+     fast when the model says it should.** Seeding a small perturbation
+     (as an initial condition, `bc.seedDisturbance=false` so no inlet
+     forcing confounds the measurement) at the same base state, on a
+     well-resolved mesh (200 cells/wavelength, `lambda=20D`), the default
+     (first-order upwind) solver amplifies it explosively: even starting
+     from *pure floating-point roundoff* (~1e-13, no deliberate seed at
+     all) it reaches macroscopic amplitude within about 1-1.5 s, at both
+     that fine resolution and the original 1-cell/diameter resolution --
+     confirming growth is genuinely present in the solver's dynamics at
+     this condition, not suppressed by either scheme or mesh. (The
+     measured early-time rate, ~1.2-1.4 /s and accelerating, ran faster
+     than the single-wavelength `sigma(20D)=0.62/s` prediction and kept
+     accelerating over time, consistent with shorter, faster-growing
+     content increasingly dominating, per the ill-posedness above -- so
+     this confirms growth *happens* and *fast*, without claiming a clean
+     single-mode quantitative match, which the ill-posedness makes
+     impossible to isolate cleanly by construction.)
+   - **The resolution: F is not constant along the pipe -- it falls as
+     the film drains, and crosses back below the true threshold.**
+     Computing F(eL) at this case's fixed Vsl/Vsg/theta: F = 1.14 at
+     eL = 0.05 (the arbitrary initial/inlet condition), crossing **F = 1
+     at eL ~ 0.027**, and continuing down to **F = 0.63 at eL = 0.0025**
+     (matching the original root-cause finding's downstream F = 0.66
+     almost exactly -- confirming this is the same regime). Because
+     Vsl = 0.0025 m/s is small, the film's true equilibrium thickness is
+     far below the arbitrary eL = 0.05 starting point, and as it drains
+     toward that equilibrium -- the same "draining transient" observed
+     throughout the mesh/advection/pressure-coupling follow-up work above
+     -- F drops below the true instability threshold before the film
+     reaches the thickness the original finding queried. **The solver
+     was never under-predicting growth: it grows the disturbance while
+     F > 1 near the inlet, then correctly stops once the draining film's
+     own F drops below 1**, which happens well before it reaches the
+     point originally used to diagnose a "stuck" model. F0 = 0.36 (an
+     empirical onset of *enhanced interfacial friction/roughness*, not of
+     exponential growth) and F = 1 (the *actual* inviscid growth
+     threshold, recoverable from this model's own equations) are two
+     different thresholds that happened to get conflated in the original
+     framing.
+   - **Scope of this resolution.** This explains the specific
+     representative case traced through this file in detail. Whether the
+     same eL-dependent F-crossing mechanism explains the other 23
+     originally-failing annular/slug cases in the Shoham sweep (some may
+     have inlet/equilibrium conditions where F stays above 1 throughout,
+     where genuine sustained growth -- and a real classifier-vs-solver gap
+     -- might still be expected) is untested and the natural next step,
+     rather than assuming this generalizes without checking.
 2. Try a liquid-height-based (or relative) fluctuation criterion in the
    classifier for thin-film conditions, per the limitation noted above.
-3. **Tried (see item 1, Updates 2-4):** flux-limited, less-diffusive
-   advection was added for both the field continuity equations and the
-   layer momentum equations' own advection term, and the semi-implicit
-   pressure-velocity coupling was tested directly via time-step
-   refinement and a relaxation sweep. None of these produced genuine wave
-   growth on the stuck case, or even meaningfully changed its magnitude
-   -- ruling out numerical diffusion in the advection schemes *and* the
-   pressure-velocity coupling as the explanation. See item 1's Update 4
-   for what that leaves as the likely remaining explanation.
+3. **Tried, then resolved (see item 1, Updates 2-5):** flux-limited,
+   less-diffusive advection was added for both the field continuity
+   equations and the layer momentum equations' own advection term, and
+   the semi-implicit pressure-velocity coupling was tested directly via
+   time-step refinement and a relaxation sweep. None of these changed the
+   stuck case's qualitative behaviour, because none of them were the
+   cause: directly deriving and measuring the growth rate (item 1, Update
+   5) shows the solver already grows the disturbance correctly while
+   F > 1, and correctly stops once the draining film's F drops below 1 --
+   a real, physically-driven transition in the base state, not a
+   numerical deficiency in any of the schemes tested.
 4. For a quantitative (not just regime-label) inclined validation,
    transcribe a small set of published holdup/pressure-drop points from
    Barnea, Shoham, Taitel & Dukler's inclined-pipe papers (no open dataset

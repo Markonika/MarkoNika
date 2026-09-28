@@ -395,16 +395,70 @@ direct experiment -- and the solution converging cleanly under both
 spatial and temporal refinement -- the likely explanation has shifted away
 from "a fixable numerical artifact is suppressing real growth" and toward
 this being what these closures' *converged* solution actually does at
-this specific condition. The Andreussi & Persen `F` correlation is an
-empirical friction-factor enhancement fit to steady wavy-stratified data,
-not a first-principles linear-stability growth rate, so `F > F0` flagging
-"enhanced interfacial friction" does not necessarily imply that this exact
-closure combination's converged solution amplifies a small perturbation
-exponentially -- or the seeded disturbance's amplitude/frequency may
-simply be a poor match to whatever this system's actual most-unstable mode
-is. Directly measuring the disturbance's growth rate against the inviscid
-KH prediction (VALIDATION.md item 1) is the most direct way left to tell
-those two apart, and is the concrete next step.
+this specific condition. Directly measuring the disturbance's growth rate
+against the inviscid KH prediction (VALIDATION.md item 1) is the most
+direct way left to settle it, and is the next section.
+
+### Direct growth-rate measurement: resolving the stuck-case question
+
+The last, most direct check: derive what growth rate this model's own
+equations actually predict, and measure what the solver actually does,
+rather than continuing to test numerical-scheme candidates one at a time.
+
+**Derivation.** Linearizing the layer continuity + momentum equations
+(inviscid limit: no friction, no entrainment -- the same limit `F`'s own
+threshold is based on) around a uniform stratified base state gives a
+2-layer dispersion relation whose instability threshold reduces *exactly*
+to the code's own `kelvinHelmholtzParameterF() > 1` in the heavy-liquid
+limit (confirmed numerically at this case's conditions, where that
+approximation is excellent) -- a useful check that the derivation is
+self-consistent with the code it describes. See VALIDATION.md item 1,
+Update 5 for the full dispersion relation and growth-rate formula.
+
+**Finding 1: the growth rate is unbounded in wavenumber.** This model's
+governing equations have no surface-tension or other short-wave-
+regularizing term (the paper's own Appendix A drops the slip-flux term as
+small), so shorter wavelengths always grow faster, without limit -- the
+classic short-wave ill-posedness of the two-fluid model documented in the
+literature (Stewart & Wendroff 1984; Ramshaw & Trapp 1978) for exactly
+this reason.
+
+**Finding 2: F at the stuck case's own inlet condition is 1.14 -- above
+the *true* inviscid threshold (F=1), not just the empirical F0=0.36** used
+in the original root-cause finding. Seeding a small perturbation there (as
+an initial condition, not inlet forcing, on a well-resolved mesh) confirms
+the solver amplifies it explosively -- even from pure floating-point
+roundoff (~1e-13), reaching macroscopic amplitude within ~1-1.5s, at both
+fine and the original coarse resolution. **The solver does grow the
+disturbance, fast, exactly where the model says it should.**
+
+**Finding 3 (the resolution): F falls as the film drains, and crosses back
+below the true threshold before reaching the point originally used to
+diagnose a "stuck" model.** At this case's fixed Vsl/Vsg/theta, F = 1.14
+at the eL=0.05 starting point, crosses **F=1 at eL~0.027**, and continues
+down to **F=0.63 at eL=0.0025** -- matching the original finding's
+downstream F=0.66 almost exactly, confirming it's the same regime.
+Vsl=0.0025 m/s is small enough that the film's true equilibrium thickness
+is far below the arbitrary eL=0.05 starting point, and as it drains there
+(the same "draining transient" this README's mesh/advection/pressure-
+coupling sections above all separately observed), F drops below the true
+growth threshold before the film reaches the thickness the original
+finding queried.
+
+**The solver was never under-predicting growth.** It grows the
+disturbance while F>1 near the inlet, then correctly stops once the
+draining film's own F drops below 1 -- a real, physically-driven
+transition in the base state, not a deficiency in any of the numerical
+schemes tested above. F0=0.36 (empirical onset of enhanced interfacial
+*friction/roughness*) and F=1 (the actual inviscid *growth* threshold) are
+two different thresholds that got conflated in the original framing.
+
+This resolves the specific representative case traced through this
+investigation. Whether the same eL-dependent F-crossing mechanism explains
+the other annular/slug misses in the Shoham validation sweep (some may
+have equilibrium conditions where F stays above 1 throughout, where a real
+classifier-vs-solver gap might still exist) is untested and the natural
+next step -- see VALIDATION.md for the full writeup and that scope note.
 
 ## Validation against experimental data
 
@@ -413,13 +467,18 @@ regime against Shoham's (1982) classic experimental dataset spanning the
 full -90 deg to +90 deg inclination range (182 cases, zero numerical
 failures). Headline result: **91.7% agreement on stratified-labeled
 conditions across every inclination tested (100% horizontal, 85%
-inclined)**, but poor agreement (0%) on annular/slug conditions, traced to
-a specific, reproducible finding -- the interfacial friction closure
-itself reports these conditions as unstable, but the explicit time-
-marching solution isn't amplifying the seeded disturbance into a growing
-wave. Read VALIDATION.md for the full methodology, breakdown, and
-recommended follow-up. The validation driver (`validate_shoham`, built by
-default) and its input/output CSVs are in `validation/`.
+inclined)**, but poor agreement (0%) on annular/slug conditions. For the
+representative case traced in detail (see "Direct growth-rate
+measurement" above), this is *not* the solver under-predicting wave
+growth -- it grows disturbances correctly while the model's own inviscid
+Kelvin-Helmholtz criterion is exceeded, and correctly stops once the film
+drains to a thickness where it no longer is; the classifier miss there
+reflects a real flow-regime transition this model doesn't capture at that
+condition, not a growth-suppression bug. Whether that explanation
+generalizes to the rest of the annular/slug misses is untested. Read
+VALIDATION.md for the full methodology, breakdown, and recommended
+follow-up. The validation driver (`validate_shoham`, built by default) and
+its input/output CSVs are in `validation/`.
 
 ## Building
 
