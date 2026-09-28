@@ -170,6 +170,28 @@ void FourFieldSolver::computeClosures() {
 }
 
 namespace {
+    // MUSCL/TVD-limited face value (Sweby 1984 "high resolution" flux
+    // form): donor + 0.5*psi(r)*(accept-donor), where donor/accept are the
+    // upwind/downwind cell values straddling the face and farUpwindVal is
+    // the next cell further upwind of donor (or the inlet boundary value
+    // standing in for it at the first interior face), used to form
+    // r = (donor-farUpwind)/(accept-donor). Falls back to first-order
+    // upwind (returns donorVal unchanged) when: the limiter is None, no
+    // far-upwind value is available (one cell shy of the far boundary,
+    // where the 3-point stencil doesn't exist), or the local gradient
+    // (accept-donor) is ~0 (r would be ill-conditioned there, but the
+    // reconstruction reduces to first order anyway since a limiter's whole
+    // point is moot on a flat profile).
+    inline double limitedFaceValue(double donorVal, double acceptVal, double farUpwindVal,
+                                    bool haveFarUpwind, FluxLimiterType limiter) {
+        if (!haveFarUpwind || limiter == FluxLimiterType::None) return donorVal;
+        const double denom = acceptVal - donorVal;
+        if (std::fabs(denom) < 1.0e-12) return donorVal;
+        const double r = (donorVal - farUpwindVal) / denom;
+        const double psi = fluxLimiterPsi(limiter, r);
+        return donorVal + 0.5 * psi * denom;
+    }
+
     inline double rho1Of(const FlowState& s, const std::vector<double>& rhoGasCell, double rhoL, int i) {
         const double e1 = s.e1(i);
         return (s.el[i] * rhoL + s.eb[i] * rhoGasCell[i]) / std::max(e1, small_e);
@@ -521,10 +543,26 @@ void FourFieldSolver::updateContinuity(double dt) {
     const int N = state_.N;
     const double rhoL = fluid_.rhoLiquid;
 
+    // Interior faces get a MUSCL/TVD-limited reconstruction (see
+    // limitedFaceValue() above) when options_.advectionLimiter != None;
+    // the inlet Dirichlet value stands in as the far-upwind ghost value at
+    // the first interior face (f==1, flow forward), extending the
+    // high-resolution stencil all the way to the first cell. The very last
+    // interior face under backflow (f==N-1, vel<0) has no far-upwind
+    // neighbour within the domain and falls back to first order there.
     auto upwind = [&](const std::vector<double>& cellVals, int f, double vel, double inletVal) -> double {
         if (f == 0) return inletVal;
         if (f == N) return cellVals[N - 1];
-        return (vel >= 0.0) ? cellVals[f - 1] : cellVals[f];
+        const int cL = f - 1, cR = f;
+        if (vel >= 0.0) {
+            const bool haveFar = true; // inlet value substitutes for cL-1 when cL==0
+            const double farVal = (cL - 1 >= 0) ? cellVals[cL - 1] : inletVal;
+            return limitedFaceValue(cellVals[cL], cellVals[cR], farVal, haveFar, options_.advectionLimiter);
+        } else {
+            const bool haveFar = (cR + 1 <= N - 1);
+            const double farVal = haveFar ? cellVals[cR + 1] : 0.0;
+            return limitedFaceValue(cellVals[cR], cellVals[cL], farVal, haveFar, options_.advectionLimiter);
+        }
     };
 
     std::vector<double> edNew(N), ebNew(N), eLNew(N), eGNew(N);

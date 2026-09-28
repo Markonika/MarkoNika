@@ -35,6 +35,14 @@
 //                         the point is a much sharper captured front,
 //                         since resolution isn't bounded by any minimum
 //                         cell width.
+//   mfs_demo horizontal_limiter
+//                         The same horizontal case, on the SAME fixed
+//                         N=300 grid throughout, comparing first-order
+//                         upwind against MUSCL/TVD flux-limited advection
+//                         (SolverOptions::advectionLimiter: Minmod, Van
+//                         Leer, Superbee) in the field continuity
+//                         equations. Reduces numerical diffusion of a
+//                         forming front without touching the mesh itself.
 //
 // Each case writes a CSV time-series of cell-centred fields to
 // "<case>_output.csv" (one block of rows per snapshot) and prints a
@@ -121,7 +129,8 @@ mfs::FluidProperties airWater() {
 struct HorizontalRunStats { int finalN; int steps; double maxHoldupGradient; };
 
 HorizontalRunStats runHorizontalCase(bool useAmr, bool useMovingMesh, const std::string& outputPath,
-                                      bool quiet = false) {
+                                      bool quiet = false,
+                                      mfs::FluxLimiterType limiter = mfs::FluxLimiterType::None) {
     if (!quiet) {
         std::cout << "=== Horizontal stratified -> slug transient (cf. Section 4/5.2)"
                    << (useAmr ? ", with AMR ===\n" : useMovingMesh ? ", with moving mesh ===\n" : " ===\n");
@@ -132,6 +141,7 @@ HorizontalRunStats runHorizontalCase(bool useAmr, bool useMovingMesh, const std:
     mfs::SolverOptions opt;
     opt.amr.enabled = useAmr;
     opt.movingMesh.enabled = useMovingMesh;
+    opt.advectionLimiter = limiter;
     mfs::FourFieldSolver solver(D, L, N, airWater(), opt);
     solver.setInclinationConstant(0.0);
 
@@ -236,6 +246,43 @@ void runHorizontalMovingMeshComparison() {
     std::cout << "Wrote horizontal_fixed2_output.csv and horizontal_movingmesh_output.csv\n\n";
 }
 
+void runHorizontalLimiterComparison() {
+    std::cout << "=== Flux-limiter (MUSCL/TVD) vs. first-order-upwind comparison on the\n"
+                 "    horizontal slug-formation case: unlike the mesh-adaptivity demos above,\n"
+                 "    this changes the FACE-VALUE RECONSTRUCTION used by the field continuity\n"
+                 "    equations (updateContinuity()) on the SAME fixed N=300 grid -- the point\n"
+                 "    is less numerical diffusion of a forming front, at a modest per-step\n"
+                 "    cost (~one extra ratio + limiter evaluation per face). See README and\n"
+                 "    SolverOptions::advectionLimiter. ===\n";
+
+    struct Case { const char* name; mfs::FluxLimiterType limiter; const char* path; };
+    const Case cases[] = {
+        {"First-order upwind (None)", mfs::FluxLimiterType::None, "horizontal_limiter_none_output.csv"},
+        {"Minmod", mfs::FluxLimiterType::Minmod, "horizontal_limiter_minmod_output.csv"},
+        {"Van Leer", mfs::FluxLimiterType::VanLeer, "horizontal_limiter_vanleer_output.csv"},
+        {"Superbee", mfs::FluxLimiterType::Superbee, "horizontal_limiter_superbee_output.csv"},
+    };
+
+    HorizontalRunStats noneStats{};
+    double noneSec = 0.0;
+    for (const auto& c : cases) {
+        std::cout << "Running " << c.name << "...\n";
+        auto t0 = std::chrono::steady_clock::now();
+        const auto stats = runHorizontalCase(false, false, c.path, /*quiet=*/true, c.limiter);
+        auto t1 = std::chrono::steady_clock::now();
+        const double sec = std::chrono::duration<double>(t1 - t0).count();
+        if (c.limiter == mfs::FluxLimiterType::None) { noneStats = stats; noneSec = sec; }
+        std::cout << "  " << stats.steps << " steps, " << sec
+                  << " s, steepest captured |d(eL)/dz| = " << stats.maxHoldupGradient << " /m";
+        if (c.limiter != mfs::FluxLimiterType::None && noneSec > 0.0) {
+            std::cout << " (" << (stats.maxHoldupGradient / noneStats.maxHoldupGradient)
+                       << "x sharper than upwind, " << (sec / noneSec) << "x the cost)";
+        }
+        std::cout << "\n";
+    }
+    std::cout << "Wrote horizontal_limiter_{none,minmod,vanleer,superbee}_output.csv\n\n";
+}
+
 void runVerticalCase() {
     std::cout << "=== Vertical bubbly flow (theta = 90 deg; extrapolation beyond the paper's\n"
                  "    validated near-horizontal range -- see README) ===\n";
@@ -335,16 +382,19 @@ int main(int argc, char** argv) {
         runHorizontalAmrComparison();
     } else if (caseName == "horizontal_movingmesh") {
         runHorizontalMovingMeshComparison();
+    } else if (caseName == "horizontal_limiter") {
+        runHorizontalLimiterComparison();
     } else if (caseName == "all") {
         runHorizontalCase(/*useAmr=*/false, /*useMovingMesh=*/false, "horizontal_output.csv");
         runVerticalCase();
         runTerrainCase();
         runHorizontalAmrComparison();
         runHorizontalMovingMeshComparison();
+        runHorizontalLimiterComparison();
     } else {
         std::cerr << "Unknown case '" << caseName
                    << "'. Use one of: horizontal, vertical, terrain, horizontal_amr, "
-                      "horizontal_movingmesh, all\n";
+                      "horizontal_movingmesh, horizontal_limiter, all\n";
         return 1;
     }
     return 0;

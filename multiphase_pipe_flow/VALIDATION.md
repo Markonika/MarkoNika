@@ -208,14 +208,33 @@ most concrete lead for follow-up work (see "Recommended follow-up" below).
    section and comparing the growth rate to the inviscid KH rate implied
    by F. **Update:** we tried the mesh-resolution angle first (see below)
    and it did *not* resolve this, narrowing the likely cause toward the
-   scheme's disturbance-growth treatment itself rather than resolution --
-   this is now the more specific next step.
+   scheme's disturbance-growth treatment itself rather than resolution.
+   **Update 2:** we then tried MUSCL/TVD flux-limited advection in the
+   field continuity equations (`SolverOptions::advectionLimiter`, see
+   README.md's "Higher-order / flux-limited advection") on the same stuck
+   case. This *did* reveal substantially more holdup-field structure than
+   plain upwind (peak gradient up ~50x), but tracking it over time shows
+   that structure is a sharper-resolved transient (the solver draining
+   from its initial condition toward the true thin-film inlet state) that
+   saturates within ~2x rather than continuing to amplify -- not genuine
+   growing wave behaviour. That rules out general numerical diffusion in
+   the *mass-transport* equations as well, narrowing the cause specifically
+   to the **layer momentum equations'** own advection treatment
+   (`updateLayerMomentum()`), which was deliberately left untouched this
+   pass (non-conservative `u*du/dz` form needs a different TVD derivation
+   than the flux-form limiting used for continuity) -- this is now the
+   most specific next step.
 2. Try a liquid-height-based (or relative) fluctuation criterion in the
    classifier for thin-film conditions, per the limitation noted above.
-3. If (1) confirms excess numerical damping, consider a higher-order or
-   less-diffusive advection scheme for the layer momentum equations, or
-   revisit the semi-implicit pressure-velocity coupling's effect on
-   disturbance growth.
+3. **Partially tried (see item 1, Update 2):** a flux-limited, less-
+   diffusive advection scheme was added for the field continuity
+   equations and did not by itself produce genuine wave growth on the
+   stuck case, narrowing this specifically to the layer momentum
+   equations' own (still first-order upwind) advection term -- extending
+   the same TVD approach there needs its own derivation, since that term
+   is in non-conservative `u*du/dz` form rather than a flux divergence.
+   Revisiting the semi-implicit pressure-velocity coupling's effect on
+   disturbance growth remains untried.
 4. For a quantitative (not just regime-label) inclined validation,
    transcribe a small set of published holdup/pressure-drop points from
    Barnea, Shoham, Taitel & Dukler's inclined-pipe papers (no open dataset

@@ -3,6 +3,7 @@
 #include "mfs/Closures.hpp"
 #include "mfs/FlowState.hpp"
 #include "mfs/FluidProperties.hpp"
+#include "mfs/FluxLimiter.hpp"
 #include "mfs/PipeGeometry.hpp"
 
 #include <functional>
@@ -83,6 +84,32 @@ struct SolverOptions {
     // keeps that amplification bounded (to 1/momentumFractionFloor)
     // without perturbing the volume-fraction fields themselves.
     double momentumFractionFloor = 0.05;
+
+    // Higher-order / flux-limited (MUSCL/TVD, Sweby 1984 form) face-value
+    // reconstruction for the field continuity equations' advective fluxes
+    // (updateContinuity(), the el/ed/eg/eb transport), in place of the
+    // plain first-order donor-cell upwinding used when this is None (the
+    // default, so existing behaviour and the VALIDATION.md numbers are
+    // unchanged unless this is opted into). First-order upwind is highly
+    // numerically diffusive on the wave/front-sharpening physics this model
+    // targets -- exactly the mechanism flagged in VALIDATION.md as a
+    // candidate explanation for why some F>F0 (Kelvin-Helmholtz unstable)
+    // conditions fail to grow into the slug/roll-wave regime in this
+    // explicit time-marching scheme. A limited high-resolution
+    // reconstruction is formally second-order in smooth regions while
+    // remaining Total-Variation-Diminishing (no new overshoot/oscillation)
+    // at a front, via the limiter itself falling back to first order there.
+    // The pressure-correction system (solvePressureCorrection()) is
+    // deliberately left on plain upwind regardless of this setting -- a
+    // standard "deferred correction" split: the correction step only needs
+    // a stable, well-conditioned linearization to drive the pressure
+    // iteration, not the final transport accuracy, and its Gf coefficients
+    // were tuned/validated against the robustness work in this file.
+    // Van Leer is a reasonable general-purpose default once enabled
+    // (less compressive/more diffusive than Superbee, so less prone to
+    // artificially steepening an already-sharp front, but still markedly
+    // less diffusive than first-order upwind).
+    FluxLimiterType advectionLimiter = FluxLimiterType::None;
 
     // Adaptive (non-uniform) mesh refinement, off by default so existing
     // behaviour at a fixed uniform resolution is unchanged unless opted
