@@ -206,7 +206,10 @@ most concrete lead for follow-up work (see "Recommended follow-up" below).
    case identified above (D=51mm, Vsl=0.0025, Vsg=25, 1 deg) -- e.g. by
    tracking disturbance amplitude vs. z on a short, well-resolved pipe
    section and comparing the growth rate to the inviscid KH rate implied
-   by F.
+   by F. **Update:** we tried the mesh-resolution angle first (see below)
+   and it did *not* resolve this, narrowing the likely cause toward the
+   scheme's disturbance-growth treatment itself rather than resolution --
+   this is now the more specific next step.
 2. Try a liquid-height-based (or relative) fluctuation criterion in the
    classifier for thin-film conditions, per the limitation noted above.
 3. If (1) confirms excess numerical damping, consider a higher-order or
@@ -218,3 +221,20 @@ most concrete lead for follow-up work (see "Recommended follow-up" below).
    Barnea, Shoham, Taitel & Dukler's inclined-pipe papers (no open dataset
    found) and extend `validate_shoham.cpp`'s comparison logic to numeric
    fields instead of (or alongside) regime labels.
+5. **Tried:** two mesh-adaptivity strategies were added and tested
+   directly against the D=51mm/Vsl=0.0025/Vsg=25/1deg case above -- an
+   h-refinement AMR (`SolverOptions::amr`) and a moving/r-adaptive mesh
+   (`SolverOptions::movingMesh`), both driven by the same Kelvin-Helmholtz
+   `F` indicator this section discusses. Neither produced genuine wave
+   growth on that case, even the moving mesh at 1-diameter-mesh-equivalent
+   fine resolution: the liquid film stayed essentially flat downstream
+   regardless of how finely it was resolved. On a *different* case where a
+   front does form (the horizontal slug-formation demo), the moving mesh
+   demonstrably sharpens the captured gradient by ~8.7x over the fixed
+   grid, showing the remap/relocation machinery itself works correctly --
+   so the stuck case's flat profile is not a meshing bug. This is a
+   meaningful (negative) result: it rules out mesh resolution as the
+   explanation for that specific case and points toward the momentum
+   scheme's growth-rate treatment (item 1) as the more likely cause. See
+   README.md, "Adaptive mesh refinement" and "Moving-mesh (r-adaptive)
+   tracking", for the full writeup and how to reproduce both tests.

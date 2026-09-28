@@ -208,13 +208,73 @@ noise of the fixed-grid case) -- reproduce with:
 ```
 
 This h-refinement approach is one of two AMR strategies in the two-phase
-pipe-flow literature for this class of model; the other is a *moving-grid
-tracking* scheme (grid points move with wave/slug fronts instead of a
-fixed grid being locally refined -- see Nydal & Banerjee 1996, De Leebeeck
-2010), which eliminates numerical diffusion of fronts entirely rather than
-just resolving it more finely, at the cost of a substantially larger
-architectural change (front detection, merging colliding fronts, fronts
-crossing inclination changes). That alternative is not implemented here.
+pipe-flow literature for this class of model; the other -- a *moving-grid*
+scheme, where grid points move with fronts instead of a fixed grid being
+locally refined -- is implemented too, see below.
+
+### Moving-mesh (r-adaptive) tracking
+
+Off by default (`SolverOptions::movingMesh.enabled = false`), and
+mutually exclusive with `amr` by convention (both change the mesh; combining
+them is untested). Where h-refinement keeps a fixed background resolution
+and adds/removes cells within a budget, this keeps the cell count **fixed**
+and instead continuously relocates every node toward wherever a monitor
+function is largest, via the classical equidistribution principle (de Boor,
+1974): the mesh is chosen so that the integral of the monitor function is
+equal over every cell. A monitor built from the local liquid-holdup
+gradient (the classical "arc-length" monitor, Huang & Russell) does the
+tracking itself, once a front exists; a smaller term from the same
+Kelvin-Helmholtz `F` used by `amr` gives it anticipatory pull toward a
+forming front before its holdup gradient is yet sharp. Relocation happens
+every step by default (`relocateEveryNSteps`), under-relaxed
+(`relaxation`) to avoid the mesh itself oscillating near a still-forming
+front, with the new mesh's fields obtained by exact conservative remapping
+(cell-centred fields) or linear interpolation (the point-sampled
+velocities) from the old one -- see `FourFieldSolver.cpp`,
+`computeMonitorFunction()` and `relocateMesh()`.
+
+Because resolution here is limited only by the total point budget N, not
+by any minimum-cell-width floor (h-refinement's `minCellWidthFraction`
+explicitly forbids refining past the initial spacing by default), this can
+concentrate resolution on a sharp front far more tightly than h-refinement
+can. On the horizontal slug-formation demo (`mfs_demo
+horizontal_movingmesh`), the steepest captured liquid-holdup gradient at
+the same simulated time is **~8.7x sharper** than the fixed grid achieves
+(down to cells ~0.1 diameter wide right at the front, an order of
+magnitude finer than either the fixed grid or AMR's baseline-floor
+resolution there). This is **not** a speed optimisation the way AMR is --
+relocating and remapping the whole field every step costs more per step
+than the fixed grid, and the much finer local cells it creates also force
+a smaller Courant-limited time step (more, smaller steps overall); the
+same demo case runs roughly 24x *slower* wall-clock for that 8.7x sharper
+front. The trade being made is accuracy (less numerically diffused fronts)
+for cost, which is exactly the trade the moving-grid/tracking literature
+for this model class describes (see Nydal & Banerjee, 1996; De Leebeeck,
+2010, "A roll wave and slug tracking scheme for gas-liquid pipe flow").
+
+This implementation is a **periodic-equidistribution r-adaptive** scheme
+(relocate the existing point budget every step via de Boor's algorithm),
+which is simpler to implement robustly than -- and should not be confused
+with -- the object-oriented **Lagrangian slug-tracking** schemes in that
+same literature (Nydal & Banerjee 1996; Renault 2007's LASSI), where
+individual slugs and bubbles are tracked as discrete objects with their
+own integral mass/momentum balances rather than as a locally dense region
+of an otherwise-Eulerian field. That alternative is a materially different
+model, not just a different mesh strategy, and is not implemented here.
+
+We used this scheme to follow up directly on a finding from
+[VALIDATION.md](VALIDATION.md): that the model's interfacial closure
+reports several annular-labelled test conditions as unstable (`F` past its
+own threshold) while the fixed-grid solution shows no growing wave even at
+the paper's own stated converged resolution. Moving-mesh tracking **does**
+sharpen a front that is already forming (the 8.7x result above), but on
+the specific stuck case from VALIDATION.md it did **not** produce genuine
+wave growth from an initially smooth interface -- there was no existing
+gradient for the monitor function to concentrate resolution around. That
+narrows the likely root cause: it points away from *mesh resolution alone*
+and toward the explicit/semi-implicit momentum scheme's treatment of the
+disturbance-growth mechanism itself, which is now the more specific target
+for further investigation (see VALIDATION.md's "Recommended follow-up").
 
 This is a research/reference-grade implementation: faithful to the
 described physics and defensible in every numerical choice it had to make
@@ -251,11 +311,12 @@ Requires a C++17 compiler and CMake >= 3.15. No external dependencies.
 ## Running
 
 ```sh
-./build/mfs_demo horizontal      # stratified -> slug transient, cf. Section 4/5.2
-./build/mfs_demo vertical        # vertical bubbly riser (extrapolated closures)
-./build/mfs_demo terrain         # terrain-following V-section pipeline
-./build/mfs_demo horizontal_amr  # fixed-grid vs. adaptive-mesh timing comparison
-./build/mfs_demo all             # runs all four
+./build/mfs_demo horizontal             # stratified -> slug transient, cf. Section 4/5.2
+./build/mfs_demo vertical               # vertical bubbly riser (extrapolated closures)
+./build/mfs_demo terrain                # terrain-following V-section pipeline
+./build/mfs_demo horizontal_amr         # fixed-grid vs. h-refinement AMR: speed comparison
+./build/mfs_demo horizontal_movingmesh  # fixed-grid vs. moving mesh: front-sharpness comparison
+./build/mfs_demo all                    # runs all five (the last two take a while)
 ```
 
 Each case writes a CSV time series (`<case>_output.csv`) of cell-centred

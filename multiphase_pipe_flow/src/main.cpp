@@ -24,6 +24,17 @@
 //                         interface is quiescent and never refining finer
 //                         than the baseline resolution by default -- see
 //                         FourFieldSolver.hpp, SolverOptions::amr.
+//   mfs_demo horizontal_movingmesh
+//                         The same horizontal case, fixed grid vs. a moving
+//                         (r-adaptive) mesh that keeps the cell count fixed
+//                         and continuously relocates all N points toward
+//                         wherever a monitor function is largest (see
+//                         SolverOptions::movingMesh). Unlike AMR this is
+//                         NOT about speed (it costs more per step, since
+//                         the whole field is remapped every relocation) --
+//                         the point is a much sharper captured front,
+//                         since resolution isn't bounded by any minimum
+//                         cell width.
 //
 // Each case writes a CSV time-series of cell-centred fields to
 // "<case>_output.csv" (one block of rows per snapshot) and prints a
@@ -100,21 +111,27 @@ mfs::FluidProperties airWater() {
 
 // useAmr: enables SolverOptions::amr at the (default) conservative setting
 // -- coarsen quiescent regions, never refine finer than the baseline N.
+// useMovingMesh: enables SolverOptions::movingMesh instead (mutually
+// exclusive with useAmr by convention -- see FourFieldSolver.hpp).
 // quiet: suppress the per-snapshot stdout diagnostics (used when this is
-// called twice back-to-back for the horizontal_amr timing comparison).
-// Returns the final cell count and total step count for that comparison.
-struct HorizontalRunStats { int finalN; int steps; };
+// called back-to-back for the comparison runs below).
+// Returns stats for those comparisons, including the steepest captured
+// |d(eL)/dz| at the end of the run -- the moving-mesh comparison's point
+// is front sharpness (reduced numerical diffusion), not cell count or speed.
+struct HorizontalRunStats { int finalN; int steps; double maxHoldupGradient; };
 
-HorizontalRunStats runHorizontalCase(bool useAmr, const std::string& outputPath, bool quiet = false) {
+HorizontalRunStats runHorizontalCase(bool useAmr, bool useMovingMesh, const std::string& outputPath,
+                                      bool quiet = false) {
     if (!quiet) {
         std::cout << "=== Horizontal stratified -> slug transient (cf. Section 4/5.2)"
-                   << (useAmr ? ", with AMR ===\n" : " ===\n");
+                   << (useAmr ? ", with AMR ===\n" : useMovingMesh ? ", with moving mesh ===\n" : " ===\n");
     }
     const double D = 0.08, L = 30.0;
     const int N = 300; // ~1 diameter per cell, matching the paper's grid-independence finding (Fig. 2)
 
     mfs::SolverOptions opt;
     opt.amr.enabled = useAmr;
+    opt.movingMesh.enabled = useMovingMesh;
     mfs::FourFieldSolver solver(D, L, N, airWater(), opt);
     solver.setInclinationConstant(0.0);
 
@@ -162,19 +179,24 @@ HorizontalRunStats runHorizontalCase(bool useAmr, const std::string& outputPath,
             nextSnapshot += snapshotInterval;
         }
     }
+    double maxGrad = 0.0;
+    const auto& s = solver.state();
+    for (int i = 1; i < s.N; ++i) {
+        maxGrad = std::max(maxGrad, std::fabs(s.eL(i) - s.eL(i - 1)) / s.centerDistance(i - 1, i));
+    }
     if (!quiet) std::cout << "Wrote " << outputPath << "\n\n";
-    return {solver.state().N, steps};
+    return {s.N, steps, maxGrad};
 }
 
 void runHorizontalAmrComparison() {
     std::cout << "=== AMR vs. fixed-grid comparison on the horizontal slug-formation case ===\n";
     std::cout << "Running fixed grid (N=300)...\n";
     auto t0 = std::chrono::steady_clock::now();
-    const auto fixedStats = runHorizontalCase(false, "horizontal_fixed_output.csv", /*quiet=*/true);
+    const auto fixedStats = runHorizontalCase(false, false, "horizontal_fixed_output.csv", /*quiet=*/true);
     auto t1 = std::chrono::steady_clock::now();
 
     std::cout << "Running with AMR enabled...\n";
-    const auto amrStats = runHorizontalCase(true, "horizontal_amr_output.csv", /*quiet=*/true);
+    const auto amrStats = runHorizontalCase(true, false, "horizontal_amr_output.csv", /*quiet=*/true);
     auto t2 = std::chrono::steady_clock::now();
 
     const double fixedSec = std::chrono::duration<double>(t1 - t0).count();
@@ -186,6 +208,32 @@ void runHorizontalAmrComparison() {
     std::cout << "Wrote horizontal_fixed_output.csv and horizontal_amr_output.csv\n"
                  "(the AMR file's per-cell rows are at whatever local resolution that\n"
                  "snapshot's mesh had -- z spacing varies row to row within a snapshot).\n\n";
+}
+
+void runHorizontalMovingMeshComparison() {
+    std::cout << "=== Moving-mesh vs. fixed-grid comparison on the horizontal slug-formation\n"
+                 "    case: this method's point is reduced numerical diffusion of a forming\n"
+                 "    front (steeper captured gradient), NOT speed -- it relocates all N\n"
+                 "    points and remaps the full field every step, so it costs MORE per step\n"
+                 "    than the fixed grid, unlike AMR above. See README. ===\n";
+    std::cout << "Running fixed grid (N=300)...\n";
+    auto t0 = std::chrono::steady_clock::now();
+    const auto fixedStats = runHorizontalCase(false, false, "horizontal_fixed2_output.csv", /*quiet=*/true);
+    auto t1 = std::chrono::steady_clock::now();
+
+    std::cout << "Running with moving mesh enabled (this is slower; relocates every step)...\n";
+    const auto mmStats = runHorizontalCase(false, true, "horizontal_movingmesh_output.csv", /*quiet=*/true);
+    auto t2 = std::chrono::steady_clock::now();
+
+    const double fixedSec = std::chrono::duration<double>(t1 - t0).count();
+    const double mmSec = std::chrono::duration<double>(t2 - t1).count();
+    std::cout << "\nFixed grid   : " << fixedStats.steps << " steps, " << fixedSec
+              << " s, steepest captured |d(eL)/dz| = " << fixedStats.maxHoldupGradient << " /m\n";
+    std::cout << "Moving mesh  : " << mmStats.steps << " steps, " << mmSec << " s ("
+              << (mmSec / fixedSec) << "x slower), steepest captured |d(eL)/dz| = "
+              << mmStats.maxHoldupGradient << " /m ("
+              << (mmStats.maxHoldupGradient / fixedStats.maxHoldupGradient) << "x sharper)\n";
+    std::cout << "Wrote horizontal_fixed2_output.csv and horizontal_movingmesh_output.csv\n\n";
 }
 
 void runVerticalCase() {
@@ -278,21 +326,25 @@ int main(int argc, char** argv) {
     const std::string caseName = (argc > 1) ? argv[1] : "horizontal";
 
     if (caseName == "horizontal") {
-        runHorizontalCase(/*useAmr=*/false, "horizontal_output.csv");
+        runHorizontalCase(/*useAmr=*/false, /*useMovingMesh=*/false, "horizontal_output.csv");
     } else if (caseName == "vertical") {
         runVerticalCase();
     } else if (caseName == "terrain") {
         runTerrainCase();
     } else if (caseName == "horizontal_amr") {
         runHorizontalAmrComparison();
+    } else if (caseName == "horizontal_movingmesh") {
+        runHorizontalMovingMeshComparison();
     } else if (caseName == "all") {
-        runHorizontalCase(/*useAmr=*/false, "horizontal_output.csv");
+        runHorizontalCase(/*useAmr=*/false, /*useMovingMesh=*/false, "horizontal_output.csv");
         runVerticalCase();
         runTerrainCase();
         runHorizontalAmrComparison();
+        runHorizontalMovingMeshComparison();
     } else {
         std::cerr << "Unknown case '" << caseName
-                   << "'. Use one of: horizontal, vertical, terrain, horizontal_amr, all\n";
+                   << "'. Use one of: horizontal, vertical, terrain, horizontal_amr, "
+                      "horizontal_movingmesh, all\n";
         return 1;
     }
     return 0;

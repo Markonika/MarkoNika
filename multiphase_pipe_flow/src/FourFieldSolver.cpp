@@ -667,6 +667,10 @@ double FourFieldSolver::step(double dt) {
     if (options_.amr.enabled && stepCount_ % std::max(1, options_.amr.adaptEveryNSteps) == 0) {
         adaptMesh();
     }
+    if (options_.movingMesh.enabled &&
+        stepCount_ % std::max(1, options_.movingMesh.relocateEveryNSteps) == 0) {
+        relocateMesh();
+    }
     return dt;
 }
 
@@ -861,6 +865,160 @@ bool FourFieldSolver::adaptMesh() {
     phiDe_.assign(newN, 0.0);
     rhoGasCell_.assign(newN, fluid_.rhoGas(bc_.outletPressure));
 
+    return true;
+}
+
+namespace {
+    // Exact conservative interpolation of a piecewise-constant
+    // cell-centred field from one 1D partition onto another: for each new
+    // cell, integrate the old field over its overlap with each old cell it
+    // spans, divided by the new cell's width. Standard two-pointer sweep
+    // over two sorted face arrays sharing the same endpoints.
+    std::vector<double> conservativeRemapCellField(const std::vector<double>& oldVals,
+                                                     const std::vector<double>& oldFaceZ,
+                                                     const std::vector<double>& newFaceZ) {
+        const int nOld = static_cast<int>(oldVals.size());
+        const int nNew = static_cast<int>(newFaceZ.size()) - 1;
+        std::vector<double> out(nNew, 0.0);
+        int oi = 0;
+        for (int ni = 0; ni < nNew; ++ni) {
+            const double lo = newFaceZ[ni], hi = newFaceZ[ni + 1];
+            double acc = 0.0;
+            while (oi < nOld && oldFaceZ[oi] < hi) {
+                const double oLo = std::max(lo, oldFaceZ[oi]);
+                const double oHi = std::min(hi, oldFaceZ[oi + 1]);
+                if (oHi > oLo) acc += oldVals[oi] * (oHi - oLo);
+                if (oldFaceZ[oi + 1] > hi) break; // this old cell still overlaps the NEXT new cell too
+                ++oi;
+            }
+            out[ni] = acc / std::max(hi - lo, tiny);
+        }
+        return out;
+    }
+
+    // Linear interpolation of a face-centred (point-sampled) field from
+    // the old face positions onto the new ones. Not "conservative" in the
+    // integral sense above -- there is no natural integral of a point
+    // sample -- linear interpolation is the standard, appropriate
+    // treatment for this kind of data (matching how new interior faces
+    // were handled when splitting a cell in adaptMesh()).
+    std::vector<double> linearRemapFaceField(const std::vector<double>& oldVals,
+                                              const std::vector<double>& oldFaceZ,
+                                              const std::vector<double>& newFaceZ) {
+        const int nOldFaces = static_cast<int>(oldFaceZ.size());
+        std::vector<double> out(newFaceZ.size());
+        int k = 0;
+        for (std::size_t j = 0; j < newFaceZ.size(); ++j) {
+            const double z = newFaceZ[j];
+            while (k < nOldFaces - 2 && oldFaceZ[k + 1] < z) ++k;
+            const double z0 = oldFaceZ[k], z1 = oldFaceZ[k + 1];
+            const double t = (z1 > z0) ? (z - z0) / (z1 - z0) : 0.0;
+            out[j] = oldVals[k] + std::clamp(t, 0.0, 1.0) * (oldVals[k + 1] - oldVals[k]);
+        }
+        return out;
+    }
+}
+
+std::vector<double> FourFieldSolver::computeMonitorFunction() const {
+    const int N = state_.N;
+    std::vector<double> M(N, 1.0);
+    if (N < 2) return M;
+
+    const std::vector<double> F = computeIndicator();
+    const double L = state_.L;
+    const auto& opt = options_.movingMesh;
+    // Reused purely as a fixed reference scale (Andreussi & Persen's own
+    // F0), independent of whether h-refinement AMR is itself enabled.
+    const double F0 = options_.amr.refineThreshold;
+
+    for (int i = 0; i < N; ++i) {
+        const int iL = std::max(i - 1, 0);
+        const int iR = std::min(i + 1, N - 1);
+        const double dz = state_.centerDistance(iL, iR);
+        const double gradEl = (dz > 0.0) ? std::fabs(state_.eL(iR) - state_.eL(iL)) / dz : 0.0;
+        const double fTerm = std::min(F[i] / F0, opt.khIndicatorCap);
+        M[i] = 1.0 + opt.holdupGradientWeight * gradEl * L + opt.khIndicatorWeight * fTerm;
+    }
+
+    for (int pass = 0; pass < opt.monitorSmoothingPasses; ++pass) {
+        std::vector<double> Msmooth(N);
+        for (int i = 0; i < N; ++i) {
+            const int iL = std::max(i - 1, 0);
+            const int iR = std::min(i + 1, N - 1);
+            Msmooth[i] = 0.25 * M[iL] + 0.5 * M[i] + 0.25 * M[iR];
+        }
+        M = std::move(Msmooth);
+    }
+
+    for (double& v : M) v = std::min(v, opt.monitorCap);
+    return M;
+}
+
+bool FourFieldSolver::relocateMesh() {
+    const int N = state_.N;
+    if (N < 3) return false;
+
+    const std::vector<double> M = computeMonitorFunction();
+
+    // Cumulative integral of M (piecewise-constant per cell) over the OLD
+    // mesh, i.e. Theta at each OLD face.
+    std::vector<double> theta(N + 1, 0.0);
+    for (int i = 0; i < N; ++i) theta[i + 1] = theta[i] + M[i] * state_.cellWidth(i);
+    const double thetaTotal = theta[N];
+    if (thetaTotal <= 0.0) return false;
+
+    // Equidistribution (de Boor, 1974): the target new face j is where the
+    // cumulative monitor integral reaches (j/N) of its total. Theta is
+    // piecewise LINEAR in z (since M is piecewise constant), so inverting
+    // it within the bracketing old cell is a direct linear solve.
+    std::vector<double> targetZ(N + 1);
+    targetZ[0] = state_.faceZ[0];
+    targetZ[N] = state_.faceZ[N];
+    int oldCell = 0;
+    for (int j = 1; j < N; ++j) {
+        const double target = (static_cast<double>(j) / N) * thetaTotal;
+        while (oldCell < N - 1 && theta[oldCell + 1] < target) ++oldCell;
+        const double slope = M[oldCell];
+        const double frac = (slope > 0.0) ? (target - theta[oldCell]) / (slope * state_.cellWidth(oldCell)) : 0.0;
+        targetZ[j] = state_.faceZ[oldCell] + std::clamp(frac, 0.0, 1.0) * state_.cellWidth(oldCell);
+    }
+
+    // Under-relax toward the target (a full jump to the equidistributed
+    // mesh every relocation would let the grid itself oscillate violently
+    // near a sharp, still-forming front), then repair monotonicity: a
+    // heavily relaxed point could in principle end up on the wrong side of
+    // a neighbour if consecutive targets differ a lot, so nudge onto a
+    // strictly increasing sequence with a small minimum gap afterward.
+    std::vector<double> newZ(N + 1);
+    newZ[0] = state_.faceZ[0];
+    newZ[N] = state_.faceZ[N];
+    const double relax = std::clamp(options_.movingMesh.relaxation, 0.0, 1.0);
+    for (int j = 1; j < N; ++j) newZ[j] = state_.faceZ[j] + relax * (targetZ[j] - state_.faceZ[j]);
+
+    const double minGap = 1.0e-6 * state_.L;
+    for (int j = 1; j < N; ++j) newZ[j] = std::max(newZ[j], newZ[j - 1] + minGap);
+    for (int j = N - 1; j >= 1; --j) newZ[j] = std::min(newZ[j], newZ[j + 1] - minGap);
+    for (int j = 1; j <= N; ++j)
+        if (newZ[j] <= newZ[j - 1]) return false; // degenerate; leave the mesh untouched this step
+
+    const std::vector<double> oldFaceZ = state_.faceZ;
+    state_.el = conservativeRemapCellField(state_.el, oldFaceZ, newZ);
+    state_.ed = conservativeRemapCellField(state_.ed, oldFaceZ, newZ);
+    state_.eg = conservativeRemapCellField(state_.eg, oldFaceZ, newZ);
+    state_.eb = conservativeRemapCellField(state_.eb, oldFaceZ, newZ);
+    state_.P = conservativeRemapCellField(state_.P, oldFaceZ, newZ);
+    state_.theta = conservativeRemapCellField(state_.theta, oldFaceZ, newZ);
+
+    state_.u1 = linearRemapFaceField(state_.u1, oldFaceZ, newZ);
+    state_.u2 = linearRemapFaceField(state_.u2, oldFaceZ, newZ);
+    state_.ud = linearRemapFaceField(state_.ud, oldFaceZ, newZ);
+    state_.ub = linearRemapFaceField(state_.ub, oldFaceZ, newZ);
+    state_.ul = linearRemapFaceField(state_.ul, oldFaceZ, newZ);
+    state_.ug = linearRemapFaceField(state_.ug, oldFaceZ, newZ);
+
+    state_.faceZ = newZ;
+    // N is unchanged by relocation, so the cache array sizes need no
+    // adjustment; their contents are recomputed fresh every step regardless.
     return true;
 }
 

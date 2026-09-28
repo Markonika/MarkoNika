@@ -114,6 +114,47 @@ struct SolverOptions {
         double maxCellWidthFraction = 4.0;  // as a fraction of the INITIAL uniform spacing
         double maxCellCountFactor = 4.0;    // cap on N, as a multiple of the initial N
     } amr;
+
+    // Moving-mesh (r-adaptive) node tracking: the literature's other AMR
+    // strategy for this class of model (see e.g. Nydal & Banerjee 1996; De
+    // Leebeeck 2010, "A roll wave and slug tracking scheme for gas-liquid
+    // pipe flow"), and architecturally distinct from `amr` above. Where
+    // h-refinement keeps a fixed background resolution and adds/removes
+    // cells within a budget, this keeps the cell COUNT fixed and instead
+    // continuously relocates all N node positions toward wherever a
+    // monitor function is largest, via the classical equidistribution
+    // principle (de Boor, 1974): the new mesh is chosen so that the
+    // integral of the monitor function is equal over every cell. Because
+    // resolution is limited only by the total point budget N, not by any
+    // minimum-cell-width floor, this can concentrate resolution on a sharp
+    // front far more tightly than h-refinement (whose default
+    // `minCellWidthFraction` explicitly forbids refining past the initial
+    // spacing) -- at the cost of remapping the entire field onto the new
+    // mesh every relocation, and of losing the "coarsen everywhere else"
+    // computational saving h-refinement gets from actually reducing cell
+    // count. See FourFieldSolver.cpp, computeMonitorFunction() and
+    // relocateMesh(), and mutually exclusive with `amr` by convention
+    // (both change the mesh; combining them is untested).
+    struct MovingMeshOptions {
+        bool enabled = false;
+        int relocateEveryNSteps = 1; // true tracking needs to keep pace with front motion
+        double relaxation = 0.5;     // under-relaxation of node motion per relocation, in [0,1]
+
+        // Monitor function M(z) = 1 + holdupGradientWeight*|d(eL)/dz|*L
+        //                            + khIndicatorWeight*min(F/F0, khIndicatorCap)
+        // The first term is the classical "arc-length" monitor (Huang &
+        // Russell) that concentrates points where the liquid holdup itself
+        // is changing sharply -- i.e. directly on a wave/slug front once
+        // one exists. The second, smaller term adds anticipatory pull
+        // toward cells the interfacial closure already flags as unstable
+        // (the same F used by `amr`), attracting points to where a front
+        // is ABOUT to form, before its holdup gradient is yet sharp.
+        double holdupGradientWeight = 8.0;
+        double khIndicatorWeight = 0.5;
+        double khIndicatorCap = 5.0;      // caps the F/F0 contribution, as a multiple of F0
+        double monitorCap = 50.0;         // hard cap on M itself, bounding max achievable clustering
+        int monitorSmoothingPasses = 2;   // 3-point smoothing of M before equidistributing (standard practice, avoids noisy/oscillatory mesh motion)
+    } movingMesh;
 };
 
 // Core solver implementing the simplified four-field model of Bonizzi,
@@ -247,6 +288,14 @@ private:
     // flagged for coarsening. Returns true if the mesh changed.
     std::vector<double> computeIndicator() const;
     bool adaptMesh();
+
+    // Moving mesh: computeMonitorFunction() gives the per-cell M used to
+    // equidistribute node positions; relocateMesh() computes the new
+    // (relaxed) node positions and conservatively remaps every state
+    // vector onto them, keeping N fixed. See FourFieldSolver.cpp for the
+    // equidistribution/remap mechanics.
+    std::vector<double> computeMonitorFunction() const;
+    bool relocateMesh();
 };
 
 } // namespace mfs
