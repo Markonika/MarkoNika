@@ -105,7 +105,10 @@ both documented in code comments at the point of use:
 ## Numerical method
 
 Staggered grid (Harlow & Welch, 1965): volume fractions and pressure at
-cell centres, all four field velocities at cell faces. Per time step:
+cell centres, all four field velocities at cell faces. The mesh is a plain
+1D non-uniform grid (face positions stored explicitly, no hanging nodes --
+see `FlowState.hpp`), starting uniform and optionally locally refined and
+coarsened at runtime; see "Adaptive mesh refinement" below. Per time step:
 
 1. Geometry and gas density update from the current pressure/holdup field.
 2. Closures (friction factors, shear stresses, entrainment/disengagement
@@ -163,6 +166,56 @@ discretisation is locally stiff, and are conservative enough that the
 horizontal demo case's slug-formation transient is essentially unaffected
 by them (verified by running with tighter/looser settings and comparing).
 
+### Adaptive mesh refinement
+
+Off by default (`SolverOptions::amr.enabled = false`); when turned on, the
+solver periodically (`adaptEveryNSteps`, default every 20 steps) refines
+and coarsens the mesh using the **same Kelvin-Helmholtz stability
+parameter F already computed for the Andreussi & Persen (1987) interfacial
+friction closure** (`Closures.hpp`, `kelvinHelmholtzParameterF()`) as its
+indicator: cells where the interface is going unstable (F approaching or
+past the closure's own F0 = 0.36 threshold) are split; cells deep in a
+stable, quiescent state (F well below threshold) are merged with a like
+neighbour. This is the same indicator used by Gourma, Jia & Thompson
+(2013), *"Two-Fluid Model for 1D Gas-Liquid Slug Flows: Realizable Mean
+Slug Characteristics,"* Multiphase Science and Technology 25(1), 57-79,
+for AMR on this class of 1D two-fluid model.
+
+Being a 1D problem, this is a plain non-uniform grid (each cell has
+exactly one left and one right neighbour, no hanging nodes or tree
+bookkeeping) rather than the block-structured/tree AMR that a multi-D
+solver needs -- refining is "insert a face and duplicate the cell's state
+into the two halves" and coarsening is "remove a shared face and
+width-weight-average the pair"; both are exactly mass-conservative for the
+volume fractions. See `FourFieldSolver.cpp`, `adaptMesh()` and
+`computeIndicator()`.
+
+By default the mesh is never refined finer than the run's initial spacing
+(`minCellWidthFraction = 1.0`) -- AMR's job out of the box is purely to
+coarsen quiescent regions relative to a baseline resolution the user
+already chose to be adequate (e.g. ~1 diameter per cell, per the paper's
+own convergence finding), so it can only reduce cost relative to a fixed
+run at that resolution, never increase it by over-refining. Lower
+`minCellWidthFraction` explicitly to resolve hot zones finer than the
+baseline. On the horizontal slug-formation demo case (`mfs_demo
+horizontal_amr`), this gives roughly a **7x speedup** (~300 cells /
+~8,200 steps fixed vs. ~65-105 cells / ~3,500 steps adaptive) while
+tracking the same interfacial instability (peak F within the run-to-run
+noise of the fixed-grid case) -- reproduce with:
+
+```sh
+./build/mfs_demo horizontal_amr
+```
+
+This h-refinement approach is one of two AMR strategies in the two-phase
+pipe-flow literature for this class of model; the other is a *moving-grid
+tracking* scheme (grid points move with wave/slug fronts instead of a
+fixed grid being locally refined -- see Nydal & Banerjee 1996, De Leebeeck
+2010), which eliminates numerical diffusion of fronts entirely rather than
+just resolving it more finely, at the cost of a substantially larger
+architectural change (front detection, merging colliding fronts, fronts
+crossing inclination changes). That alternative is not implemented here.
+
 This is a research/reference-grade implementation: faithful to the
 described physics and defensible in every numerical choice it had to make
 beyond the paper's text, but it has not been tuned or validated against the
@@ -198,10 +251,11 @@ Requires a C++17 compiler and CMake >= 3.15. No external dependencies.
 ## Running
 
 ```sh
-./build/mfs_demo horizontal   # stratified -> slug transient, cf. Section 4/5.2
-./build/mfs_demo vertical     # vertical bubbly riser (extrapolated closures)
-./build/mfs_demo terrain      # terrain-following V-section pipeline
-./build/mfs_demo all          # runs all three
+./build/mfs_demo horizontal      # stratified -> slug transient, cf. Section 4/5.2
+./build/mfs_demo vertical        # vertical bubbly riser (extrapolated closures)
+./build/mfs_demo terrain         # terrain-following V-section pipeline
+./build/mfs_demo horizontal_amr  # fixed-grid vs. adaptive-mesh timing comparison
+./build/mfs_demo all             # runs all four
 ```
 
 Each case writes a CSV time series (`<case>_output.csv`) of cell-centred

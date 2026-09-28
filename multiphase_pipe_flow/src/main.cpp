@@ -13,6 +13,17 @@
 //   mfs_demo terrain      A terrain-following pipe (inclination varies
 //                         along z), the scenario the paper's introduction
 //                         cites as its core motivation.
+//   mfs_demo horizontal_amr
+//                         The same horizontal case, once at a fixed
+//                         resolution and once with adaptive mesh
+//                         refinement (SolverOptions::amr) enabled, timed
+//                         side by side. AMR refines using the same
+//                         Kelvin-Helmholtz F parameter already computed for
+//                         the interfacial friction closure (Closures.hpp)
+//                         as its indicator, coarsening cells where the
+//                         interface is quiescent and never refining finer
+//                         than the baseline resolution by default -- see
+//                         FourFieldSolver.hpp, SolverOptions::amr.
 //
 // Each case writes a CSV time-series of cell-centred fields to
 // "<case>_output.csv" (one block of rows per snapshot) and prints a
@@ -22,6 +33,7 @@
 #include "mfs/FlowRegimeClassifier.hpp"
 #include "mfs/FourFieldSolver.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -86,12 +98,23 @@ mfs::FluidProperties airWater() {
     return f;
 }
 
-void runHorizontalCase() {
-    std::cout << "=== Horizontal stratified -> slug transient (cf. Section 4/5.2) ===\n";
+// useAmr: enables SolverOptions::amr at the (default) conservative setting
+// -- coarsen quiescent regions, never refine finer than the baseline N.
+// quiet: suppress the per-snapshot stdout diagnostics (used when this is
+// called twice back-to-back for the horizontal_amr timing comparison).
+// Returns the final cell count and total step count for that comparison.
+struct HorizontalRunStats { int finalN; int steps; };
+
+HorizontalRunStats runHorizontalCase(bool useAmr, const std::string& outputPath, bool quiet = false) {
+    if (!quiet) {
+        std::cout << "=== Horizontal stratified -> slug transient (cf. Section 4/5.2)"
+                   << (useAmr ? ", with AMR ===\n" : " ===\n");
+    }
     const double D = 0.08, L = 30.0;
     const int N = 300; // ~1 diameter per cell, matching the paper's grid-independence finding (Fig. 2)
 
     mfs::SolverOptions opt;
+    opt.amr.enabled = useAmr;
     mfs::FourFieldSolver solver(D, L, N, airWater(), opt);
     solver.setInclinationConstant(0.0);
 
@@ -106,13 +129,14 @@ void runHorizontalCase() {
     solver.setBoundaryConditions(bc);
     solver.initializeStratified(0.15);
 
-    std::ofstream out("horizontal_output.csv");
+    std::ofstream out(outputPath);
     writeSnapshotHeader(out);
 
     const double tRampStart = 3.0;
     const double tEnd = 12.0;
     const double snapshotInterval = 1.0;
     double nextSnapshot = 0.0;
+    int steps = 0;
 
     while (solver.time() < tEnd) {
         // Liquid-rate ramp, mirroring the paper's Section 4 transient
@@ -126,16 +150,42 @@ void runHorizontalCase() {
 
         const double dt = solver.stableTimeStep();
         solver.step(dt);
+        ++steps;
 
         if (solver.time() >= nextSnapshot) {
             writeSnapshot(out, solver);
-            std::cout << "t=" << solver.time() << " s\n";
-            printRegimeSummary(solver);
-            printMassBalance(solver);
+            if (!quiet) {
+                std::cout << "t=" << solver.time() << " s, N=" << solver.state().N << " cells\n";
+                printRegimeSummary(solver);
+                printMassBalance(solver);
+            }
             nextSnapshot += snapshotInterval;
         }
     }
-    std::cout << "Wrote horizontal_output.csv\n\n";
+    if (!quiet) std::cout << "Wrote " << outputPath << "\n\n";
+    return {solver.state().N, steps};
+}
+
+void runHorizontalAmrComparison() {
+    std::cout << "=== AMR vs. fixed-grid comparison on the horizontal slug-formation case ===\n";
+    std::cout << "Running fixed grid (N=300)...\n";
+    auto t0 = std::chrono::steady_clock::now();
+    const auto fixedStats = runHorizontalCase(false, "horizontal_fixed_output.csv", /*quiet=*/true);
+    auto t1 = std::chrono::steady_clock::now();
+
+    std::cout << "Running with AMR enabled...\n";
+    const auto amrStats = runHorizontalCase(true, "horizontal_amr_output.csv", /*quiet=*/true);
+    auto t2 = std::chrono::steady_clock::now();
+
+    const double fixedSec = std::chrono::duration<double>(t1 - t0).count();
+    const double amrSec = std::chrono::duration<double>(t2 - t1).count();
+    std::cout << "\nFixed grid : " << fixedStats.steps << " steps, N=" << fixedStats.finalN
+              << " cells throughout, " << fixedSec << " s\n";
+    std::cout << "AMR        : " << amrStats.steps << " steps, N=" << amrStats.finalN
+              << " cells at end, " << amrSec << " s (" << (fixedSec / amrSec) << "x)\n";
+    std::cout << "Wrote horizontal_fixed_output.csv and horizontal_amr_output.csv\n"
+                 "(the AMR file's per-cell rows are at whatever local resolution that\n"
+                 "snapshot's mesh had -- z spacing varies row to row within a snapshot).\n\n";
 }
 
 void runVerticalCase() {
@@ -228,17 +278,21 @@ int main(int argc, char** argv) {
     const std::string caseName = (argc > 1) ? argv[1] : "horizontal";
 
     if (caseName == "horizontal") {
-        runHorizontalCase();
+        runHorizontalCase(/*useAmr=*/false, "horizontal_output.csv");
     } else if (caseName == "vertical") {
         runVerticalCase();
     } else if (caseName == "terrain") {
         runTerrainCase();
+    } else if (caseName == "horizontal_amr") {
+        runHorizontalAmrComparison();
     } else if (caseName == "all") {
-        runHorizontalCase();
+        runHorizontalCase(/*useAmr=*/false, "horizontal_output.csv");
         runVerticalCase();
         runTerrainCase();
+        runHorizontalAmrComparison();
     } else {
-        std::cerr << "Unknown case '" << caseName << "'. Use one of: horizontal, vertical, terrain, all\n";
+        std::cerr << "Unknown case '" << caseName
+                   << "'. Use one of: horizontal, vertical, terrain, horizontal_amr, all\n";
         return 1;
     }
     return 0;

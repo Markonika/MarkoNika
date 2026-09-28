@@ -83,6 +83,37 @@ struct SolverOptions {
     // keeps that amplification bounded (to 1/momentumFractionFloor)
     // without perturbing the volume-fraction fields themselves.
     double momentumFractionFloor = 0.05;
+
+    // Adaptive (non-uniform) mesh refinement, off by default so existing
+    // behaviour at a fixed uniform resolution is unchanged unless opted
+    // into. When enabled, every `adaptEveryNSteps` steps each cell's
+    // Kelvin-Helmholtz stability parameter F (the same quantity computed
+    // for the Andreussi & Persen interfacial friction closure, see
+    // Closures.hpp) is used as the refinement indicator: cells where the
+    // interface is going unstable (F approaching or past the closure's own
+    // F0 threshold) are split; cells deep in a stable, quiescent state are
+    // merged with a like neighbour. This follows the same indicator used
+    // by Gourma, Jia & Thompson (2013), "Two-Fluid Model for 1D Gas-Liquid
+    // Slug Flows: Realizable Mean Slug Characteristics", Multiphase
+    // Science and Technology 25(1), for AMR on this class of 1D two-fluid
+    // model. See FourFieldSolver.cpp, adaptMesh(), for the refine/coarsen
+    // mechanics (a plain non-uniform 1D grid, no hanging nodes).
+    struct AdaptiveMeshOptions {
+        bool enabled = false;
+        int adaptEveryNSteps = 20;
+        double refineThreshold = 0.36;    // F0 (Andreussi & Persen 1987)
+        double coarsenThreshold = 0.15;   // hysteresis gap below F0, avoids refine/coarsen chatter
+        // Default to 1.0: don't refine FINER than the initial mesh (which
+        // the user presumably already chose to be adequate, e.g. ~1
+        // diameter per the paper's own convergence finding) -- AMR's job
+        // by default is purely to coarsen quiescent regions, so it can
+        // only reduce cost relative to a fixed run at the initial
+        // resolution, never increase it by over-refining. Lower this
+        // explicitly to refine beyond the initial resolution in hot zones.
+        double minCellWidthFraction = 1.0; // as a fraction of the INITIAL uniform spacing
+        double maxCellWidthFraction = 4.0;  // as a fraction of the INITIAL uniform spacing
+        double maxCellCountFactor = 4.0;    // cap on N, as a multiple of the initial N
+    } amr;
 };
 
 // Core solver implementing the simplified four-field model of Bonizzi,
@@ -160,6 +191,13 @@ public:
     struct MassFluxes { double liquidIn, liquidOut, gasIn, gasOut; };
     MassFluxes boundaryMassFluxes() const;
 
+    // Per-cell Kelvin-Helmholtz stability parameter F, using the CURRENT
+    // state -- the same quantity used as the AMR refinement indicator when
+    // SolverOptions::amr.enabled is set. Exposed regardless of whether AMR
+    // is on, since it's a useful diagnostic (e.g. to plot alongside the
+    // mesh) on its own. See Closures.hpp, kelvinHelmholtzParameterF().
+    std::vector<double> refinementIndicatorProfile() const;
+
 private:
     PipeGeometry geometry_;
     FluidProperties fluid_;
@@ -167,6 +205,9 @@ private:
     BoundaryConditions bc_;
     FlowState state_;
     double time_ = 0.0;
+    double initialDz_ = 0.0; // reference spacing (L / initial N), for AMR min/max width bounds
+    int initialN_ = 0;
+    long stepCount_ = 0;
 
     // Per-cell cached geometry from the last computeGeometry() call.
     std::vector<PipeGeometry::StratifiedGeometry> geom_;
@@ -198,6 +239,14 @@ private:
     void solvePressureCorrection(double dt);
     void updateContinuity(double dt);
     void clampVolumeFractions();
+
+    // Adaptive mesh: computeIndicator() gives the per-cell F used by both
+    // refinementIndicatorProfile() and adaptMesh() itself; adaptMesh()
+    // rebuilds every state vector in lock-step onto a new face array,
+    // splitting cells flagged for refinement and merging adjacent pairs
+    // flagged for coarsening. Returns true if the mesh changed.
+    std::vector<double> computeIndicator() const;
+    bool adaptMesh();
 };
 
 } // namespace mfs

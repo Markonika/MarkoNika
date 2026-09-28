@@ -18,9 +18,9 @@ using constants::tiny;
 FourFieldSolver::FourFieldSolver(double diameter, double length, int nCells,
                                   FluidProperties fluid, SolverOptions options)
     : geometry_(diameter), fluid_(fluid), options_(options) {
-    state_.resize(nCells);
-    state_.L = length;
-    state_.dz = length / nCells;
+    state_.resize(nCells, length);
+    initialDz_ = length / nCells;
+    initialN_ = nCells;
     geom_.resize(nCells);
     tauW1_.assign(nCells + 1, 0.0);
     tauW2_.assign(nCells + 1, 0.0);
@@ -89,7 +89,7 @@ double FourFieldSolver::stableTimeStep() const {
     for (double v : state_.u2) umax = std::max(umax, std::fabs(v));
     for (double v : state_.ud) umax = std::max(umax, std::fabs(v));
     for (double v : state_.ub) umax = std::max(umax, std::fabs(v));
-    double dt = options_.courantTarget * state_.dz / umax;
+    double dt = options_.courantTarget * state_.minCellWidth() / umax;
     return std::clamp(dt, options_.minTimeStep, options_.maxTimeStep);
 }
 
@@ -183,7 +183,6 @@ namespace {
 void FourFieldSolver::updateLayerMomentum(double dt) {
     const double A = geometry_.area();
     const double rhoL = fluid_.rhoLiquid;
-    const double dz = state_.dz;
     const int N = state_.N;
 
     std::vector<double> u1New = state_.u1;
@@ -203,9 +202,13 @@ void FourFieldSolver::updateLayerMomentum(double dt) {
         const double rho1f = 0.5 * (rho1Of(state_, rhoGasCell_, rhoL, cL) + rho1Of(state_, rhoGasCell_, rhoL, cR));
         const double rho2f = 0.5 * (rho2Of(state_, rhoGasCell_, rhoL, cL) + rho2Of(state_, rhoGasCell_, rhoL, cR));
 
-        const double dPdz = (state_.P[cR] - state_.P[cL]) / dz;
+        // Cell-centred gradients (P, h1) use the distance between the two
+        // neighbouring cell CENTRES, which equals a shared dz only on a
+        // uniform mesh.
+        const double centerDz = state_.centerDistance(cL, cR);
+        const double dPdz = (state_.P[cR] - state_.P[cL]) / centerDz;
         const double thetaF = 0.5 * (state_.theta[cL] + state_.theta[cR]);
-        const double dh1dz = (geom_[cR].h1 - geom_[cL].h1) / dz;
+        const double dh1dz = (geom_[cR].h1 - geom_[cL].h1) / centerDz;
         const double Swp1f = 0.5 * (geom_[cL].Swp1 + geom_[cR].Swp1);
         const double Swp2f = 0.5 * (geom_[cL].Swp2 + geom_[cR].Swp2);
         const double Sif = 0.5 * (geom_[cL].Si + geom_[cR].Si);
@@ -218,9 +221,13 @@ void FourFieldSolver::updateLayerMomentum(double dt) {
         const double ulF = state_.ul[f], ugF = state_.ug[f], udF = state_.ud[f], ubF = state_.ub[f];
 
         // --- Layer 1 momentum (Eq. 6, slip flux term dropped per Appendix A) ---
+        // Upwind advection differences two FACE values (f against its
+        // upwind neighbour f-1 or f+1); the correct spacing is the width of
+        // the CELL between those two faces (cL=f-1 when going backward,
+        // cR=f when going forward), not the center-to-center distance above.
         const double u1c = state_.u1[f];
-        const double du1dzAdv = (u1c >= 0.0) ? (state_.u1[f] - state_.u1[f - 1]) / dz
-                                              : (state_.u1[f + 1] - state_.u1[f]) / dz;
+        const double du1dzAdv = (u1c >= 0.0) ? (state_.u1[f] - state_.u1[f - 1]) / state_.cellWidth(cL)
+                                              : (state_.u1[f + 1] - state_.u1[f]) / state_.cellWidth(cR);
         const double massSrc1 = (-UeF * ulF + UdF * udF + phiEF * ugF - phiDeF * ubF) / (e1fSafe * rho1f);
         const double du1dt = -u1c * du1dzAdv
                               - dPdz / rho1f
@@ -233,8 +240,8 @@ void FourFieldSolver::updateLayerMomentum(double dt) {
 
         // --- Layer 2 momentum (Eq. 7, slip flux term dropped) ---
         const double u2c = state_.u2[f];
-        const double du2dzAdv = (u2c >= 0.0) ? (state_.u2[f] - state_.u2[f - 1]) / dz
-                                              : (state_.u2[f + 1] - state_.u2[f]) / dz;
+        const double du2dzAdv = (u2c >= 0.0) ? (state_.u2[f] - state_.u2[f - 1]) / state_.cellWidth(cL)
+                                              : (state_.u2[f + 1] - state_.u2[f]) / state_.cellWidth(cR);
         const double massSrc2 = (UeF * ulF - UdF * udF - phiEF * ugF + phiDeF * ubF) / (e2fSafe * rho2f);
         const double du2dt = -u2c * du2dzAdv
                               - dPdz / rho2f
@@ -297,7 +304,6 @@ void FourFieldSolver::updateDispersedMomentum(double /*dt*/) {
     // interface symmetry with the other update*() steps.
     const double D = geometry_.diameter();
     const double rhoL = fluid_.rhoLiquid;
-    const double dz = state_.dz;
     const int N = state_.N;
 
     std::vector<double> udNew = state_.ud;
@@ -309,7 +315,7 @@ void FourFieldSolver::updateDispersedMomentum(double /*dt*/) {
         const double elF = 0.5 * (state_.el[cL] + state_.el[cR]);
         const double ebF = 0.5 * (state_.eb[cL] + state_.eb[cR]);
         const double rhoGf = 0.5 * (rhoGasCell_[cL] + rhoGasCell_[cR]);
-        const double dPdz = (state_.P[cR] - state_.P[cL]) / dz;
+        const double dPdz = (state_.P[cR] - state_.P[cL]) / state_.centerDistance(cL, cR);
         const double thetaF = 0.5 * (state_.theta[cL] + state_.theta[cR]);
         const double XeDrop = 0.5 * (Ue_[cL] + Ue_[cR]);
         const double XeBub = 0.5 * (phiE_[cL] + phiE_[cR]);
@@ -373,7 +379,6 @@ void FourFieldSolver::updateDispersedMomentum(double /*dt*/) {
 
 void FourFieldSolver::solvePressureCorrection(double dt) {
     const int N = state_.N;
-    const double dz = state_.dz;
     const double rhoL = fluid_.rhoLiquid;
 
     std::vector<double> a(N, 0.0), b(N, 0.0), c(N, 0.0), R(N, 0.0);
@@ -396,24 +401,40 @@ void FourFieldSolver::solvePressureCorrection(double dt) {
         const double qGas = egF * state_.ug[f] + ebF * state_.ub[f];
         const double qTotal = qLiquid + qGas;
 
-        R[cL] += qTotal / dz;
-        R[cR] -= qTotal / dz;
+        // Each cell's row normalises the flux divergence by ITS OWN width
+        // (a proper finite-volume balance); the pressure-correction
+        // sensitivity Gf normalises by the distance between the two cell
+        // CENTRES instead (it comes from a gradient, see
+        // updateLayerMomentum's dPdz for the same distinction). The two
+        // coincide only on a uniform mesh.
+        const double widthL = state_.cellWidth(cL);
+        const double widthR = state_.cellWidth(cR);
+        const double centerDz = state_.centerDistance(cL, cR);
 
-        const double Gf = (dt * (elF + ebF) / rho1f + dt * (edF + egF) / rho2f) / dz;
-        b[cL] += Gf / dz;
-        c[cL] += -Gf / dz;
-        a[cR] += -Gf / dz;
-        b[cR] += Gf / dz;
+        R[cL] += qTotal / widthL;
+        R[cR] -= qTotal / widthR;
+
+        const double Gf = (dt * (elF + ebF) / rho1f + dt * (edF + egF) / rho2f) / centerDz;
+        b[cL] += Gf / widthL;
+        c[cL] += -Gf / widthL;
+        a[cR] += -Gf / widthR;
+        b[cR] += Gf / widthR;
     }
 
     // Inlet face (fixed flow, no pressure sensitivity): contributes to R[0] only.
     {
         const double qLiquidIn = inletEl() * state_.ul[0] + inletEd() * state_.ud[0];
         const double qGasIn = inletEg() * state_.ug[0] + inletEb() * state_.ub[0];
-        R[0] -= (qLiquidIn + qGasIn) / dz;
+        R[0] -= (qLiquidIn + qGasIn) / state_.cellWidth(0);
     }
 
     // Outlet face (fixed pressure, P'=0 there): contributes to R[N-1] and its own diagonal.
+    // The "ghost" point beyond the outlet is taken one full last-cell-width
+    // past the last cell centre (matching the velocity-correction loop
+    // below and preserving the original uniform-mesh convention exactly
+    // when the mesh happens to be uniform), not a half-width to the actual
+    // outlet face -- a standard, simple boundary treatment, not something
+    // this refactor changes.
     {
         const int c = N - 1;
         const double rho1f = rho1At(c);
@@ -421,10 +442,11 @@ void FourFieldSolver::solvePressureCorrection(double dt) {
         const double elF = state_.el[c], edF = state_.ed[c], egF = state_.eg[c], ebF = state_.eb[c];
         const double qLiquidOut = elF * state_.ul[N] + edF * state_.ud[N];
         const double qGasOut = egF * state_.ug[N] + ebF * state_.ub[N];
-        R[c] += (qLiquidOut + qGasOut) / dz;
+        const double widthC = state_.cellWidth(c);
+        R[c] += (qLiquidOut + qGasOut) / widthC;
 
-        const double Gf = (dt * (elF + ebF) / rho1f + dt * (edF + egF) / rho2f) / dz;
-        b[c] += Gf / dz;
+        const double Gf = (dt * (elF + ebF) / rho1f + dt * (edF + egF) / rho2f) / widthC;
+        b[c] += Gf / widthC;
     }
 
     // Local gas-compressibility accumulation term.
@@ -471,7 +493,7 @@ void FourFieldSolver::solvePressureCorrection(double dt) {
         const int cL = f - 1, cR = f;
         const double rho1f = 0.5 * (rho1At(cL) + rho1At(cR));
         const double rho2f = 0.5 * (rho2At(cL) + rho2At(cR));
-        const double dP = (Pprime[cR] - Pprime[cL]) / dz;
+        const double dP = (Pprime[cR] - Pprime[cL]) / state_.centerDistance(cL, cR);
         const double du1 = -dt / rho1f * dP;
         const double du2 = -dt / rho2f * dP;
         state_.u1[f] += du1;
@@ -483,7 +505,7 @@ void FourFieldSolver::solvePressureCorrection(double dt) {
         const int c = N - 1;
         const double rho1f = rho1At(c);
         const double rho2f = rho2At(c);
-        const double dP = (0.0 - Pprime[c]) / dz;
+        const double dP = (0.0 - Pprime[c]) / state_.cellWidth(c); // same ghost convention as above
         const double du1 = -dt / rho1f * dP;
         const double du2 = -dt / rho2f * dP;
         state_.u1[N] += du1;
@@ -497,7 +519,6 @@ void FourFieldSolver::solvePressureCorrection(double dt) {
 
 void FourFieldSolver::updateContinuity(double dt) {
     const int N = state_.N;
-    const double dz = state_.dz;
     const double rhoL = fluid_.rhoLiquid;
 
     auto upwind = [&](const std::vector<double>& cellVals, int f, double vel, double inletVal) -> double {
@@ -510,6 +531,7 @@ void FourFieldSolver::updateContinuity(double dt) {
 
     for (int i = 0; i < N; ++i) {
         const int fL = i, fR = i + 1;
+        const double dz = state_.cellWidth(i); // this cell's own width: a proper FV divergence
 
         const double edL = upwind(state_.ed, fL, state_.ud[fL], inletEd());
         const double edR = upwind(state_.ed, fR, state_.ud[fR], inletEd());
@@ -641,31 +663,35 @@ double FourFieldSolver::step(double dt) {
     debugCheck("continuity", state_);
 
     time_ += dt;
+    ++stepCount_;
+    if (options_.amr.enabled && stepCount_ % std::max(1, options_.amr.adaptEveryNSteps) == 0) {
+        adaptMesh();
+    }
     return dt;
 }
 
 double FourFieldSolver::totalLiquidMass() const {
     double m = 0.0;
     const double A = geometry_.area();
-    for (int i = 0; i < state_.N; ++i) m += state_.eL(i) * fluid_.rhoLiquid * A * state_.dz;
+    for (int i = 0; i < state_.N; ++i) m += state_.eL(i) * fluid_.rhoLiquid * A * state_.cellWidth(i);
     return m;
 }
 double FourFieldSolver::totalGasMass() const {
     double m = 0.0;
     const double A = geometry_.area();
-    for (int i = 0; i < state_.N; ++i) m += state_.eG(i) * rhoGasCell_[i] * A * state_.dz;
+    for (int i = 0; i < state_.N; ++i) m += state_.eG(i) * rhoGasCell_[i] * A * state_.cellWidth(i);
     return m;
 }
 double FourFieldSolver::totalDropletMass() const {
     double m = 0.0;
     const double A = geometry_.area();
-    for (int i = 0; i < state_.N; ++i) m += state_.ed[i] * fluid_.rhoLiquid * A * state_.dz;
+    for (int i = 0; i < state_.N; ++i) m += state_.ed[i] * fluid_.rhoLiquid * A * state_.cellWidth(i);
     return m;
 }
 double FourFieldSolver::totalBubbleMass() const {
     double m = 0.0;
     const double A = geometry_.area();
-    for (int i = 0; i < state_.N; ++i) m += state_.eb[i] * rhoGasCell_[i] * A * state_.dz;
+    for (int i = 0; i < state_.N; ++i) m += state_.eb[i] * rhoGasCell_[i] * A * state_.cellWidth(i);
     return m;
 }
 
@@ -678,6 +704,164 @@ FourFieldSolver::MassFluxes FourFieldSolver::boundaryMassFluxes() const {
     mf.gasIn = (inletEg() * state_.ug[0] + inletEb() * state_.ub[0]) * rhoGasCell_[0] * A;
     mf.gasOut = (state_.eg[N - 1] * state_.ug[N] + state_.eb[N - 1] * state_.ub[N]) * rhoGasCell_[N - 1] * A;
     return mf;
+}
+
+std::vector<double> FourFieldSolver::computeIndicator() const {
+    const int N = state_.N;
+    const double D = geometry_.diameter();
+    const double rhoL = fluid_.rhoLiquid;
+    std::vector<double> F(N, 0.0);
+    for (int i = 0; i < N; ++i) {
+        const auto g = geometry_.fromAreaFraction(state_.e1(i));
+        const double rhoG = fluid_.rhoGas(state_.P[i]);
+        const double ulC = 0.5 * (state_.ul[i] + state_.ul[i + 1]);
+        const double ugC = 0.5 * (state_.ug[i] + state_.ug[i + 1]);
+
+        InterfacialFrictionInputs ifi{};
+        ifi.densityGas = rhoG;
+        ifi.densityLiquid = rhoL;
+        ifi.velocityGas = ugC;
+        ifi.velocityLiquid = ulC;
+        ifi.hydraulicDiameter1 = g.D1;
+        ifi.hydraulicDiameter2 = g.D2;
+        ifi.liquidHeight = g.h1;
+        ifi.pipeDiameter = D;
+        ifi.area1 = g.A1;
+        ifi.area2 = g.A2;
+        ifi.areaFraction2 = g.A2 / geometry_.area();
+        ifi.dA1dh1 = g.Si;
+        ifi.inclination = state_.theta[i];
+        F[i] = kelvinHelmholtzParameterF(ifi);
+    }
+    return F;
+}
+
+std::vector<double> FourFieldSolver::refinementIndicatorProfile() const { return computeIndicator(); }
+
+bool FourFieldSolver::adaptMesh() {
+    const int N = state_.N;
+    if (N < 2) return false;
+
+    const std::vector<double> F = computeIndicator();
+
+    const double minWidth = initialDz_ * options_.amr.minCellWidthFraction;
+    const double maxWidth = initialDz_ * options_.amr.maxCellWidthFraction;
+    const int maxCells = std::max(initialN_, static_cast<int>(initialN_ * options_.amr.maxCellCountFactor));
+
+    std::vector<char> refine(N, 0), coarsen(N, 0);
+    int cellBudget = maxCells - N; // extra cells still allowed; each split adds exactly one
+    for (int i = 0; i < N; ++i) {
+        const double w = state_.cellWidth(i);
+        if (F[i] > options_.amr.refineThreshold && w > 2.0 * minWidth && cellBudget > 0) {
+            refine[i] = 1;
+            --cellBudget;
+        } else if (F[i] < options_.amr.coarsenThreshold && w < maxWidth) {
+            coarsen[i] = 1;
+        }
+    }
+
+    // Rebuild the mesh in a single left-to-right pass. No hanging nodes: a
+    // "group" is either one refined cell (split into two half-width
+    // cells), a pair of adjacent coarsen-flagged cells (merged into one,
+    // width-weighted average of their state -- exactly mass-conservative
+    // for the volume fractions since mass = e*rho*A*width sums correctly),
+    // or a single unchanged cell. Splitting duplicates the parent's
+    // cell-centred state into both children, which is likewise exactly
+    // conservative (two half-width cells at the parent's own value
+    // integrate to the same total as the parent). Face velocities at a new
+    // interior split face are linearly interpolated between the cell's own
+    // two original bounding faces.
+    std::vector<double> nFaceZ, nEl, nEd, nEg, nEb, nP, nTheta;
+    std::vector<double> nU1, nU2, nUd, nUb, nUl, nUg;
+    nFaceZ.reserve(N + 2);
+    nEl.reserve(N); nEd.reserve(N); nEg.reserve(N); nEb.reserve(N); nP.reserve(N); nTheta.reserve(N);
+    nU1.reserve(N + 2); nU2.reserve(N + 2); nUd.reserve(N + 2); nUb.reserve(N + 2);
+    nUl.reserve(N + 2); nUg.reserve(N + 2);
+
+    auto emitFace = [&](int origFaceIdx) {
+        nFaceZ.push_back(state_.faceZ[origFaceIdx]);
+        nU1.push_back(state_.u1[origFaceIdx]);
+        nU2.push_back(state_.u2[origFaceIdx]);
+        nUd.push_back(state_.ud[origFaceIdx]);
+        nUb.push_back(state_.ub[origFaceIdx]);
+        nUl.push_back(state_.ul[origFaceIdx]);
+        nUg.push_back(state_.ug[origFaceIdx]);
+    };
+    auto emitCellCopy = [&](int i) {
+        nEl.push_back(state_.el[i]); nEd.push_back(state_.ed[i]);
+        nEg.push_back(state_.eg[i]); nEb.push_back(state_.eb[i]);
+        nP.push_back(state_.P[i]); nTheta.push_back(state_.theta[i]);
+    };
+
+    emitFace(0);
+    bool changed = false;
+    int i = 0;
+    while (i < N) {
+        if (coarsen[i] && i + 1 < N && coarsen[i + 1]) {
+            const double w0 = state_.cellWidth(i), w1 = state_.cellWidth(i + 1);
+            const double wSum = w0 + w1;
+            auto blend = [&](const std::vector<double>& v) { return (v[i] * w0 + v[i + 1] * w1) / wSum; };
+            nEl.push_back(blend(state_.el));
+            nEd.push_back(blend(state_.ed));
+            nEg.push_back(blend(state_.eg));
+            nEb.push_back(blend(state_.eb));
+            nP.push_back(blend(state_.P));
+            nTheta.push_back(blend(state_.theta));
+            emitFace(i + 2); // drop the shared interior face i+1
+            changed = true;
+            i += 2;
+        } else if (refine[i]) {
+            emitCellCopy(i);
+            emitCellCopy(i);
+            const double zMid = 0.5 * (state_.faceZ[i] + state_.faceZ[i + 1]);
+            nFaceZ.push_back(zMid);
+            nU1.push_back(0.5 * (state_.u1[i] + state_.u1[i + 1]));
+            nU2.push_back(0.5 * (state_.u2[i] + state_.u2[i + 1]));
+            nUd.push_back(0.5 * (state_.ud[i] + state_.ud[i + 1]));
+            nUb.push_back(0.5 * (state_.ub[i] + state_.ub[i + 1]));
+            nUl.push_back(0.5 * (state_.ul[i] + state_.ul[i + 1]));
+            nUg.push_back(0.5 * (state_.ug[i] + state_.ug[i + 1]));
+            emitFace(i + 1);
+            changed = true;
+            i += 1;
+        } else {
+            emitCellCopy(i);
+            emitFace(i + 1);
+            i += 1;
+        }
+    }
+
+    if (!changed) return false;
+
+    const int newN = static_cast<int>(nEl.size());
+    state_.N = newN;
+    state_.faceZ = std::move(nFaceZ);
+    state_.el = std::move(nEl);
+    state_.ed = std::move(nEd);
+    state_.eg = std::move(nEg);
+    state_.eb = std::move(nEb);
+    state_.P = std::move(nP);
+    state_.theta = std::move(nTheta);
+    state_.u1 = std::move(nU1);
+    state_.u2 = std::move(nU2);
+    state_.ud = std::move(nUd);
+    state_.ub = std::move(nUb);
+    state_.ul = std::move(nUl);
+    state_.ug = std::move(nUg);
+
+    // Cache arrays are fully recomputed from state_ every step (see
+    // computeGeometry()/computeClosures()); only their SIZE matters here.
+    geom_.resize(newN);
+    tauW1_.assign(newN + 1, 0.0);
+    tauW2_.assign(newN + 1, 0.0);
+    tauI_.assign(newN + 1, 0.0);
+    Ue_.assign(newN, 0.0);
+    Ud_.assign(newN, 0.0);
+    phiE_.assign(newN, 0.0);
+    phiDe_.assign(newN, 0.0);
+    rhoGasCell_.assign(newN, fluid_.rhoGas(bc_.outletPressure));
+
+    return true;
 }
 
 } // namespace mfs
