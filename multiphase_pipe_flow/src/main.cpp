@@ -249,10 +249,11 @@ void runHorizontalMovingMeshComparison() {
 void runHorizontalLimiterComparison() {
     std::cout << "=== Flux-limiter (MUSCL/TVD) vs. first-order-upwind comparison on the\n"
                  "    horizontal slug-formation case: unlike the mesh-adaptivity demos above,\n"
-                 "    this changes the FACE-VALUE RECONSTRUCTION used by the field continuity\n"
-                 "    equations (updateContinuity()) on the SAME fixed N=300 grid -- the point\n"
-                 "    is less numerical diffusion of a forming front, at a modest per-step\n"
-                 "    cost (~one extra ratio + limiter evaluation per face). See README and\n"
+                 "    this changes the RECONSTRUCTION used by both the field continuity\n"
+                 "    equations (updateContinuity()) and the layer momentum equations' own\n"
+                 "    self-advection term (updateLayerMomentum()) on the SAME fixed N=300\n"
+                 "    grid -- the point is less numerical diffusion of a forming front, at a\n"
+                 "    modest per-step cost. See README and\n"
                  "    SolverOptions::advectionLimiter. ===\n";
 
     struct Case { const char* name; mfs::FluxLimiterType limiter; const char* path; };

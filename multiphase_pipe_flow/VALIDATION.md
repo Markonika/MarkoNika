@@ -220,19 +220,34 @@ most concrete lead for follow-up work (see "Recommended follow-up" below).
    growing wave behaviour. That rules out general numerical diffusion in
    the *mass-transport* equations as well, narrowing the cause specifically
    to the **layer momentum equations'** own advection treatment
-   (`updateLayerMomentum()`), which was deliberately left untouched this
+   (`updateLayerMomentum()`), which was deliberately left untouched that
    pass (non-conservative `u*du/dz` form needs a different TVD derivation
-   than the flux-form limiting used for continuity) -- this is now the
-   most specific next step.
+   than the flux-form limiting used for continuity).
+   **Update 3:** we then extended the same `advectionLimiter` option to
+   the layer momentum equations too, recasting `u*du/dz` into the
+   equivalent conservative flux form `d(u^2/2)/dz` (see
+   `buildAdvectiveFlux()` in `FourFieldSolver.cpp` and README.md) so the
+   same Sweby reconstruction applies. On the stuck case this pushes the
+   transient's peak gradient roughly another 5x higher again, but the
+   qualitative picture is unchanged: it still saturates (within ~2x)
+   rather than continuing to amplify once the transient passes -- no
+   sustained wave growth. With both the continuity and layer-momentum
+   advection schemes now ruled out as the cause, the two remaining
+   untried candidates are the semi-implicit pressure-velocity coupling's
+   own damping effect on disturbance growth, and directly measuring the
+   seeded disturbance's growth rate against the inviscid KH prediction (the
+   original ask in this item) -- which would also clarify whether the
+   seeded disturbance's amplitude/frequency is simply a poor match to this
+   condition's most-unstable wavelength, independent of the numerical
+   scheme entirely. That direct measurement is now the most specific next
+   step.
 2. Try a liquid-height-based (or relative) fluctuation criterion in the
    classifier for thin-film conditions, per the limitation noted above.
-3. **Partially tried (see item 1, Update 2):** a flux-limited, less-
-   diffusive advection scheme was added for the field continuity
-   equations and did not by itself produce genuine wave growth on the
-   stuck case, narrowing this specifically to the layer momentum
-   equations' own (still first-order upwind) advection term -- extending
-   the same TVD approach there needs its own derivation, since that term
-   is in non-conservative `u*du/dz` form rather than a flux divergence.
+3. **Tried (see item 1, Updates 2-3):** flux-limited, less-diffusive
+   advection was added for both the field continuity equations and the
+   layer momentum equations' own advection term. Neither, alone or
+   together, produced genuine wave growth on the stuck case -- both rule
+   out numerical diffusion in the advection schemes as the explanation.
    Revisiting the semi-implicit pressure-velocity coupling's effect on
    disturbance growth remains untried.
 4. For a quantitative (not just regime-label) inclined validation,

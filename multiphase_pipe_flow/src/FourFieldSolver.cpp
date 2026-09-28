@@ -200,6 +200,58 @@ namespace {
         const double e2 = s.e2(i);
         return (s.eg[i] * rhoGasCell[i] + s.ed[i] * rhoL) / std::max(e2, small_e);
     }
+
+    // Flux-form (Burgers-type) MUSCL/TVD reconstruction for a face-centred
+    // velocity field's OWN self-advection term u*du/dz, used by
+    // updateLayerMomentum() in place of plain non-conservative upwind
+    // differencing when a limiter is selected. u*du/dz = d(u^2/2)/dz for
+    // smooth (differentiable) u -- the same identity that makes Burgers'
+    // equation's non-conservative and conservative forms equivalent -- so
+    // this recasts the term as a genuine flux divergence, letting it reuse
+    // limitedFaceValue() exactly as continuity's fluxes do, rather than
+    // needing a separately-derived non-conservative-form limiter.
+    //
+    // uFace (size N+1) lives at the mesh's FACES; the natural "flux point"
+    // for a field staggered that way is the CELL CENTRE between two
+    // consecutive face samples (uFace[i], uFace[i+1] straddle cell i), so
+    // this builds one reconstructed value uHat(i) per CELL from the local
+    // 3-point upwind-biased stencil (donor/accept faces of cell i, plus
+    // one more face further upwind for the limiter ratio -- unavailable
+    // only at the one cell adjacent to whichever end is upwind, where it
+    // falls back to first order, same convention as updateContinuity's
+    // upwind()). F(i) = 0.5*uHat(i)^2 is then differenced over the
+    // CENTRE-to-centre distance in updateLayerMomentum(), matching the
+    // spacing already used there for dPdz/dh1dz.
+    //
+    // This is a genuinely different BASE discretization from the plain
+    // non-conservative first-order scheme (it uses the local flow
+    // direction and a flux difference rather than u1c times a one-sided
+    // difference of u1 itself), not purely "the same first-order scheme
+    // plus a limiter" -- which is why it is only substituted in when a
+    // limiter is actually selected, leaving the default (None) path
+    // untouched and bit-for-bit unchanged from before this was added.
+    std::vector<double> buildAdvectiveFlux(const std::vector<double>& uFace, int N, FluxLimiterType limiter) {
+        std::vector<double> F(N);
+        for (int i = 0; i < N; ++i) {
+            const double flowDir = uFace[i] + uFace[i + 1];
+            double donor, accept, farVal;
+            bool haveFar;
+            if (flowDir >= 0.0) {
+                donor = uFace[i];
+                accept = uFace[i + 1];
+                haveFar = (i - 1 >= 0);
+                farVal = haveFar ? uFace[i - 1] : 0.0;
+            } else {
+                donor = uFace[i + 1];
+                accept = uFace[i];
+                haveFar = (i + 2 <= N);
+                farVal = haveFar ? uFace[i + 2] : 0.0;
+            }
+            const double uHat = limitedFaceValue(donor, accept, farVal, haveFar, limiter);
+            F[i] = 0.5 * uHat * uHat;
+        }
+        return F;
+    }
 }
 
 void FourFieldSolver::updateLayerMomentum(double dt) {
@@ -209,6 +261,16 @@ void FourFieldSolver::updateLayerMomentum(double dt) {
 
     std::vector<double> u1New = state_.u1;
     std::vector<double> u2New = state_.u2;
+
+    // See buildAdvectiveFlux()'s comment: only switches to the flux-form
+    // TVD scheme when a limiter is actually selected, otherwise the loop
+    // below keeps using the original plain upwind differencing unchanged.
+    const bool useFluxForm = options_.advectionLimiter != FluxLimiterType::None;
+    std::vector<double> F1flux, F2flux;
+    if (useFluxForm) {
+        F1flux = buildAdvectiveFlux(state_.u1, N, options_.advectionLimiter);
+        F2flux = buildAdvectiveFlux(state_.u2, N, options_.advectionLimiter);
+    }
 
     for (int f = 1; f < N; ++f) {
         const int cL = f - 1, cR = f;
@@ -247,11 +309,20 @@ void FourFieldSolver::updateLayerMomentum(double dt) {
         // upwind neighbour f-1 or f+1); the correct spacing is the width of
         // the CELL between those two faces (cL=f-1 when going backward,
         // cR=f when going forward), not the center-to-center distance above.
-        const double u1c = state_.u1[f];
-        const double du1dzAdv = (u1c >= 0.0) ? (state_.u1[f] - state_.u1[f - 1]) / state_.cellWidth(cL)
-                                              : (state_.u1[f + 1] - state_.u1[f]) / state_.cellWidth(cR);
+        // With a limiter selected, this switches to the flux-form
+        // d(u1^2/2)/dz built by buildAdvectiveFlux() instead -- see that
+        // function's comment.
+        double advectiveTerm1;
+        if (useFluxForm) {
+            advectiveTerm1 = (F1flux[cR] - F1flux[cL]) / centerDz;
+        } else {
+            const double u1c = state_.u1[f];
+            const double du1dzAdv = (u1c >= 0.0) ? (state_.u1[f] - state_.u1[f - 1]) / state_.cellWidth(cL)
+                                                  : (state_.u1[f + 1] - state_.u1[f]) / state_.cellWidth(cR);
+            advectiveTerm1 = u1c * du1dzAdv;
+        }
         const double massSrc1 = (-UeF * ulF + UdF * udF + phiEF * ugF - phiDeF * ubF) / (e1fSafe * rho1f);
-        const double du1dt = -u1c * du1dzAdv
+        const double du1dt = -advectiveTerm1
                               - dPdz / rho1f
                               - gravity * std::cos(thetaF) * dh1dz
                               - gravity * std::sin(thetaF)
@@ -261,11 +332,17 @@ void FourFieldSolver::updateLayerMomentum(double dt) {
         u1New[f] = state_.u1[f] + dt * du1dt;
 
         // --- Layer 2 momentum (Eq. 7, slip flux term dropped) ---
-        const double u2c = state_.u2[f];
-        const double du2dzAdv = (u2c >= 0.0) ? (state_.u2[f] - state_.u2[f - 1]) / state_.cellWidth(cL)
-                                              : (state_.u2[f + 1] - state_.u2[f]) / state_.cellWidth(cR);
+        double advectiveTerm2;
+        if (useFluxForm) {
+            advectiveTerm2 = (F2flux[cR] - F2flux[cL]) / centerDz;
+        } else {
+            const double u2c = state_.u2[f];
+            const double du2dzAdv = (u2c >= 0.0) ? (state_.u2[f] - state_.u2[f - 1]) / state_.cellWidth(cL)
+                                                  : (state_.u2[f + 1] - state_.u2[f]) / state_.cellWidth(cR);
+            advectiveTerm2 = u2c * du2dzAdv;
+        }
         const double massSrc2 = (UeF * ulF - UdF * udF - phiEF * ugF + phiDeF * ubF) / (e2fSafe * rho2f);
-        const double du2dt = -u2c * du2dzAdv
+        const double du2dt = -advectiveTerm2
                               - dPdz / rho2f
                               - gravity * std::cos(thetaF) * dh1dz
                               - gravity * std::sin(thetaF)

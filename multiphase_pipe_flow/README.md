@@ -288,23 +288,37 @@ calibration, not a certified reproduction of the paper's results.
 
 Off by default (`SolverOptions::advectionLimiter = FluxLimiterType::None`,
 i.e. plain first-order upwind, so existing behaviour is unchanged unless
-opted into). When set to `Minmod`, `VanLeer`, `Superbee`, or `MC`, the
-field continuity equations' (`updateContinuity()`) advective face fluxes
-use a MUSCL/TVD-limited reconstruction instead of plain donor-cell
-upwinding: `faceVal = donor + 0.5*psi(r)*(acceptor - donor)`, the standard
-Sweby (1984) "high resolution" flux form, where `r` is the ratio of the
-upwind-side to the local (across-face) gradient and `psi` is the chosen
-limiter function. This is formally second-order accurate in smooth regions
-while remaining Total-Variation-Diminishing (no new overshoot/oscillation
-introduced at a front) -- the limiter itself falls back to `psi=0` (plain
-first order) at a local extremum or discontinuity, which is exactly what
-keeps it bounded. See `FluxLimiter.hpp` and the `limitedFaceValue()` helper
-in `FourFieldSolver.cpp`. The pressure-correction system
-(`solvePressureCorrection()`) deliberately keeps plain upwind regardless of
-this setting -- a standard "deferred correction" split: that step only
-needs a stable linearization to drive the pressure iteration, not final
-transport accuracy, and its coefficients were tuned against the robustness
-work above.
+opted into). When set to `Minmod`, `VanLeer`, `Superbee`, or `MC`, two
+places switch to a MUSCL/TVD-limited reconstruction instead of plain
+upwinding, both built on the same Sweby (1984) "high resolution" form
+`recon = donor + 0.5*psi(r)*(acceptor - donor)` (`r` = ratio of the
+upwind-side to the local gradient, `psi` the chosen limiter function;
+`FluxLimiter.hpp` and the `limitedFaceValue()` helper in
+`FourFieldSolver.cpp`):
+
+- The field continuity equations' (`updateContinuity()`) advective face
+  fluxes reconstruct `el/ed/eg/eb` at each face directly with this form.
+- The layer momentum equations' (`updateLayerMomentum()`) own
+  self-advection term `u*du/dz` is *not* already a flux divergence (it is
+  non-conservative, "advection form"), so it can't be limited the same
+  way directly. Instead it is first recast into the equivalent
+  conservative flux form `d(u^2/2)/dz` -- the same identity that relates
+  Burgers' equation's conservative and non-conservative forms for smooth
+  `u` -- letting `limitedFaceValue()` reconstruct `u` itself at each CELL
+  CENTRE (the natural "flux point" for a field stored one index staggered
+  at cell faces, exactly like `u1`/`u2` are here), and differencing
+  `0.5*uHat^2` between neighbouring cell centres. See
+  `buildAdvectiveFlux()` in `FourFieldSolver.cpp` for the full derivation
+  in comments. Both are formally second-order accurate in smooth regions
+  while remaining Total-Variation-Diminishing (no new overshoot/
+  oscillation at a front) -- the limiter falls back to `psi=0` (first
+  order) at a local extremum, which is exactly what keeps it bounded.
+
+The pressure-correction system (`solvePressureCorrection()`) deliberately
+keeps plain upwind regardless of this setting -- a standard "deferred
+correction" split: that step only needs a stable linearization to drive
+the pressure iteration, not final transport accuracy, and its coefficients
+were tuned against the robustness work above.
 
 First-order upwind is highly numerically diffusive, which is exactly the
 mechanism [VALIDATION.md](VALIDATION.md) flags as a candidate explanation
@@ -312,37 +326,40 @@ for why some Kelvin-Helmholtz-unstable (F > F0) conditions fail to grow
 into the slug/roll-wave regime in this explicit scheme. On the horizontal
 slug-formation demo (`mfs_demo horizontal_limiter`), on the *same* fixed
 N=300 grid throughout (no mesh change), the steepest captured
-liquid-holdup gradient is **~2.3x sharper with Van Leer** and **~2.6x
-sharper with Superbee** than plain upwind, at a modest 1.4-1.9x step-count
-cost (a steeper resolved velocity field tightens the Courant-limited time
-step somewhat):
+liquid-holdup gradient is **~1.8-2.2x sharper** than plain upwind across
+the three limiters, at a 1.7-2.4x step-count cost (a steeper resolved
+velocity field tightens the Courant-limited time step somewhat):
 
 ```sh
 ./build/mfs_demo horizontal_limiter
 ```
 
 We also re-ran the specific "stuck" case from VALIDATION.md (D=51mm,
-Vsl=0.0025 m/s, Vsg=25 m/s, 1 deg incline) with this enabled. The result is
-informative but not a fix: with Van Leer, the back-half liquid-holdup
-profile develops substantially more structure than plain upwind shows
-(variation across the back half goes from ~1-2% to several-hundred percent
-of the local mean, and the peak captured gradient rises roughly 50x).
-Tracked over time, though, that structure is the solver draining down from
-its initial condition (eL0 = 0.05) toward the much-thinner film the actual
-inlet rates imply, resolved more sharply than upwind's heavy diffusion
-allowed -- **not** an unboundedly amplifying wave: the peak gradient rises
-sharply during that transient, then saturates within a factor of ~2 rather
-than continuing to grow once the transient has passed. Both AMR and
-moving-mesh (above) already ruled out mesh resolution as the explanation
-for this case; this rules out general numerical diffusion in the mass-
-transport equations too, narrowing the likely cause specifically to the
-**layer momentum equations'** own advection treatment (`updateLayerMomentum()`,
-the `du1dzAdv`/`du2dzAdv` terms), which this pass deliberately left
-unchanged: that term is in non-conservative advection form (`u * du/dz`,
-not a flux divergence), so a MUSCL/TVD reconstruction for it needs a
-different, more careful derivation than the flux-form limiting used here
-for the continuity equations, and is the natural next step (see
-VALIDATION.md's "Recommended follow-up").
+Vsl=0.0025 m/s, Vsg=25 m/s, 1 deg incline) with this enabled -- first with
+just the continuity-equation limiting, then with the momentum-equation
+extension above added too. Both are informative but neither is a fix. With
+either, the back-half liquid-holdup profile develops substantially more
+structure than plain upwind ever shows (variation across the back half
+goes from ~1-2% to several-hundred percent of the local mean; adding the
+momentum-equation term pushes the peak captured gradient roughly another
+5x higher again). Tracked over time, though, that structure is the solver
+draining down from its initial condition (eL0 = 0.05) toward the
+much-thinner film the actual inlet rates imply, resolved more sharply than
+upwind's heavy diffusion allowed -- **not** an unboundedly amplifying
+wave: the peak gradient rises sharply during that transient, then
+saturates (within roughly a factor of 2, in both variants) rather than
+continuing to grow once the transient has passed. Both AMR and moving-mesh
+(above) already ruled out mesh resolution as the explanation for this
+case; this now rules out numerical diffusion in *both* the mass-transport
+and the layer-momentum advection schemes too. That leaves the remaining
+untried candidates from VALIDATION.md's "Recommended follow-up": the
+semi-implicit pressure-velocity coupling's own damping effect on
+disturbance growth, and directly measuring the seeded disturbance's actual
+growth rate against the inviscid Kelvin-Helmholtz prediction the closure
+itself is based on (VALIDATION.md item 1) -- which would also clarify
+whether the seeded disturbance's amplitude/frequency is simply a poor
+match to this condition's most-unstable wavelength, independent of the
+numerical scheme entirely.
 
 ## Validation against experimental data
 
