@@ -361,6 +361,51 @@ whether the seeded disturbance's amplitude/frequency is simply a poor
 match to this condition's most-unstable wavelength, independent of the
 numerical scheme entirely.
 
+### Pressure-velocity coupling investigation
+
+Follow-up on the last remaining numerical-scheme candidate above: could
+the segregated, once-per-step pressure correction (`solvePressureCorrection()`,
+under-relaxed by `pressureRelaxation`) or the lagged (start-of-step)
+interfacial-shear coefficient it and `updateLayerMomentum()` both use
+(computed once per step by `computeClosures()`, frozen for that whole
+step) be numerically damping the stuck case's disturbance growth? Two
+direct experiments, no code changes -- both purely diagnostic, run against
+the unmodified solver at its default (first-order) advection scheme:
+
+1. **Time-step refinement.** Any step-size-dependent numerical lag from
+   either mechanism should shrink as dt -> 0, recovering more of the true
+   growth rate. Instead, the stuck case's peak downstream gradient
+   **converges cleanly as dt shrinks**: `courantTarget` 0.5 -> 0.1 -> 0.02
+   (a 25x finer step) gives peak gradient 0.01440 -> 0.01427 -> 0.01426
+   /m, agreeing to under 0.1%. The time-marching scheme is a *consistent*
+   approximation of whatever the discretized system actually does, not a
+   source of growth-suppressing lag that fades with resolution.
+2. **Direct relaxation sweep.** Varying `pressureRelaxation` at a fixed,
+   baseline time step: removing it entirely (0.2 -> 1.0, a full unrelaxed
+   correction every step) raises the peak gradient only ~19% (0.0153 ->
+   0.0183 /m) -- small, bounded, and nothing like the order-of-magnitude,
+   *sustained* amplification that suppressed KH growth would look like.
+   `maxPressureChangeFraction` (the per-step correction cap) had no
+   measurable effect at any value tested (0.05, 0.2, 1.0 all identical),
+   meaning it was never actually binding at this condition.
+
+**This rules out the pressure-velocity coupling as the cause too.** With
+mesh resolution, both advection schemes, and now this all ruled out by
+direct experiment -- and the solution converging cleanly under both
+spatial and temporal refinement -- the likely explanation has shifted away
+from "a fixable numerical artifact is suppressing real growth" and toward
+this being what these closures' *converged* solution actually does at
+this specific condition. The Andreussi & Persen `F` correlation is an
+empirical friction-factor enhancement fit to steady wavy-stratified data,
+not a first-principles linear-stability growth rate, so `F > F0` flagging
+"enhanced interfacial friction" does not necessarily imply that this exact
+closure combination's converged solution amplifies a small perturbation
+exponentially -- or the seeded disturbance's amplitude/frequency may
+simply be a poor match to whatever this system's actual most-unstable mode
+is. Directly measuring the disturbance's growth rate against the inviscid
+KH prediction (VALIDATION.md item 1) is the most direct way left to tell
+those two apart, and is the concrete next step.
+
 ## Validation against experimental data
 
 **[VALIDATION.md](VALIDATION.md)** compares the solver's predicted flow

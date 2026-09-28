@@ -171,6 +171,15 @@ most concrete lead for follow-up work (see "Recommended follow-up" below).
   currently under-predicts the growth of disturbances into the other
   regimes.* That's a meaningfully different (and more actionable)
   conclusion than either "it works" or "it doesn't".
+- **Update:** follow-up work (see "Recommended follow-up" item 1) has
+  since ruled out mesh resolution, both advection schemes, and the
+  semi-implicit pressure-velocity coupling as the cause of the
+  under-predicted growth, each via a direct numerical experiment rather
+  than by inspection. The solution converges cleanly under spatial *and*
+  temporal refinement, which points away from "the numerical scheme is
+  suppressing real growth" and toward this being what these closures'
+  converged solution actually does at this condition -- i.e. a modelling/
+  closure question now, more than a numerical one.
 
 ## Limitations of this validation pass itself
 
@@ -239,17 +248,59 @@ most concrete lead for follow-up work (see "Recommended follow-up" below).
    original ask in this item) -- which would also clarify whether the
    seeded disturbance's amplitude/frequency is simply a poor match to this
    condition's most-unstable wavelength, independent of the numerical
-   scheme entirely. That direct measurement is now the most specific next
-   step.
+   scheme entirely.
+   **Update 4:** we then investigated the pressure-velocity coupling
+   directly, two ways, at the (numerically stable) baseline advection
+   scheme. First, a **time-step refinement test**: if the segregated,
+   once-per-step (not sub-iterated) pressure correction, or the lagged
+   (start-of-step) interfacial-shear coefficient `computeClosures()`
+   feeds into that same step's momentum update, were numerically damping
+   growth via a step-size-dependent lag, shrinking dt well below the
+   CFL-limited default should recover more of the true growth rate.
+   Instead, the peak downstream gradient over the run **converges
+   cleanly as dt shrinks** (courantTarget 0.5 -> 0.1 -> 0.02, a 25x finer
+   step: peak gradient 0.01440 -> 0.01427 -> 0.01426 /m, agreeing to
+   <0.1%) -- the time-marching scheme is behaving as a *consistent*
+   approximation to whatever the underlying (spatially discretized)
+   system actually does, not introducing a growth-suppressing artifact
+   that fades as dt -> 0. Second, a **direct `pressureRelaxation` /
+   `maxPressureChangeFraction` sweep** at fixed baseline dt: removing the
+   under-relaxation entirely (`pressureRelaxation`: 0.2 -> 1.0, i.e. a
+   full, unrelaxed correction every step) raised the peak gradient only
+   ~19% (0.0153 -> 0.0183 /m) -- a small, bounded, monotonic effect, not
+   the difference between "stuck" and genuinely growing; the per-step
+   `maxPressureChangeFraction` cap had *no* measurable effect at any
+   tested value (0.05, 0.2, 1.0 all gave identical results), meaning it
+   was never actually binding at this condition. **This rules out the
+   semi-implicit pressure-velocity coupling as the cause too.**
+   With mesh resolution, both advection schemes, and the pressure-velocity
+   coupling all now ruled out by direct numerical experiment -- and the
+   solution behaving as a *converged*, scheme-independent result under
+   both spatial and temporal refinement -- the balance of evidence has
+   shifted: this increasingly looks like a property of the *converged*
+   solution these closures actually produce at this condition (the
+   Andreussi & Persen `F` correlation is an empirical friction-factor
+   enhancement, fit to steady wavy-stratified data, not a first-principles
+   linear-stability growth rate -- `F > F0` need not imply this closure
+   combination's converged solution amplifies a small perturbation
+   exponentially) or a poor match between the seeded disturbance's
+   amplitude/frequency and whatever this system's actual most-unstable
+   mode is, rather than a fixable numerical-scheme problem. Directly
+   measuring the disturbance's growth rate against the inviscid KH
+   prediction (the original ask in this item) is now the most direct way
+   to distinguish those two remaining explanations, and is the specific
+   next step.
 2. Try a liquid-height-based (or relative) fluctuation criterion in the
    classifier for thin-film conditions, per the limitation noted above.
-3. **Tried (see item 1, Updates 2-3):** flux-limited, less-diffusive
+3. **Tried (see item 1, Updates 2-4):** flux-limited, less-diffusive
    advection was added for both the field continuity equations and the
-   layer momentum equations' own advection term. Neither, alone or
-   together, produced genuine wave growth on the stuck case -- both rule
-   out numerical diffusion in the advection schemes as the explanation.
-   Revisiting the semi-implicit pressure-velocity coupling's effect on
-   disturbance growth remains untried.
+   layer momentum equations' own advection term, and the semi-implicit
+   pressure-velocity coupling was tested directly via time-step
+   refinement and a relaxation sweep. None of these produced genuine wave
+   growth on the stuck case, or even meaningfully changed its magnitude
+   -- ruling out numerical diffusion in the advection schemes *and* the
+   pressure-velocity coupling as the explanation. See item 1's Update 4
+   for what that leaves as the likely remaining explanation.
 4. For a quantitative (not just regime-label) inclined validation,
    transcribe a small set of published holdup/pressure-drop points from
    Barnea, Shoham, Taitel & Dukler's inclined-pipe papers (no open dataset
