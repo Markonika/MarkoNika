@@ -21,6 +21,11 @@ target_include_directories(mfs PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 add_executable(mfs_demo src/main.cpp)
 target_link_libraries(mfs_demo PRIVATE mfs)
 
+# Validation driver comparing predicted flow regimes against the Shoham
+# (1982) experimental dataset -- see VALIDATION.md.
+add_executable(validate_shoham validation/validate_shoham.cpp)
+target_link_libraries(validate_shoham PRIVATE mfs)
+
 enable_testing()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt)
     add_subdirectory(tests)

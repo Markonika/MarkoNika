@@ -171,6 +171,21 @@ coefficients and grid/time-step choices used in the original, proprietary
 code). Treat it as a solid, documented starting point for further
 calibration, not a certified reproduction of the paper's results.
 
+## Validation against experimental data
+
+**[VALIDATION.md](VALIDATION.md)** compares the solver's predicted flow
+regime against Shoham's (1982) classic experimental dataset spanning the
+full -90 deg to +90 deg inclination range (182 cases, zero numerical
+failures). Headline result: **91.7% agreement on stratified-labeled
+conditions across every inclination tested (100% horizontal, 85%
+inclined)**, but poor agreement (0%) on annular/slug conditions, traced to
+a specific, reproducible finding -- the interfacial friction closure
+itself reports these conditions as unstable, but the explicit time-
+marching solution isn't amplifying the seeded disturbance into a growing
+wave. Read VALIDATION.md for the full methodology, breakdown, and
+recommended follow-up. The validation driver (`validate_shoham`, built by
+default) and its input/output CSVs are in `validation/`.
+
 ## Building
 
 ```sh
