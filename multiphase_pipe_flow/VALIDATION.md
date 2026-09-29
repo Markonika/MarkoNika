@@ -408,6 +408,36 @@ should have grown.
      where genuine sustained growth -- and a real classifier-vs-solver gap
      -- might still be expected) is untested and the natural next step,
      rather than assuming this generalizes without checking.
+   - **Update 6 (a separate, related gap the Update 5 derivation
+     surfaced, not part of resolving the stuck case itself):** the
+     linearization in Update 5 also showed `sigma(k)` is *unbounded*,
+     increasing without limit as wavelength shrinks -- this model's layer
+     equations carry no interfacial-curvature/surface-tension term, so the
+     continuum problem is short-wave ill-posed (Stewart & Wendroff 1984;
+     Ramshaw & Trapp 1978), independent of the stuck case's own F<1
+     resolution above. `SolverOptions::enableSurfaceTension` adds an
+     opt-in (default off) regularization for this. The first, physically
+     literal attempt -- an interfacial pressure jump entering the gas
+     momentum equation as a third derivative of the liquid height -- was
+     implemented and then abandoned: direct von Neumann analysis (and a
+     confirming blow-up in testing that a 240x smaller dt only delayed)
+     showed every one-sided discretization tried is unconditionally
+     unstable under this solver's explicit time-stepping, a genuine
+     pitfall of dispersive terms that upwind bias does not fix the way it
+     does for advection. What's implemented instead is a biharmonic
+     ("hyperdiffusion") proxy added to the liquid-holdup continuity
+     equation, with real (non-positive) eigenvalues everywhere and a
+     standard, safe explicit stability bound. It is confirmed stable at
+     every resolution tested (including the ones that broke the rejected
+     third-derivative attempt) and confirmed not to change default
+     behaviour; its unit-tested operator and the linear theory behind it
+     are sound, but a controlled seeded-wavelength test at the most
+     grid-scale resolutions (3-5 cells/wavelength) did not yet show the
+     clean, monotonic short-wave suppression the theory predicts at
+     reasonable coefficient values. See README.md, "Optional short-wave
+     regularization", for the full account and current status -- treat it
+     today as a safe, theoretically-motivated, off-by-default option, not
+     yet a validated fix for anything.
 2. Try a liquid-height-based (or relative) fluctuation criterion in the
    classifier for thin-film conditions, per the limitation noted above.
 3. **Tried, then resolved (see item 1, Updates 2-5):** flux-limited,

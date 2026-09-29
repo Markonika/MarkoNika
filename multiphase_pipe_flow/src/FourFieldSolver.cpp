@@ -74,6 +74,13 @@ void FourFieldSolver::initializeStratified(double eL0) {
     std::fill(state_.ug.begin(), state_.ug.end(), ug0);
     std::fill(rhoGasCell_.begin(), rhoGasCell_.end(), fluid_.rhoGas(bc_.outletPressure));
     time_ = 0.0;
+    // geom_ is otherwise only refreshed inside step() (via computeGeometry()
+    // at the top of the pipeline); populate it here too so a stableTimeStep()
+    // call made before the first step() -- the conventional usage, e.g.
+    // `dt = solver.stableTimeStep(); solver.step(dt);` -- sees valid
+    // geometry if it needs it (the surface-tension stability cap does; see
+    // SolverOptions::enableSurfaceTension).
+    computeGeometry();
 }
 
 void FourFieldSolver::computeGeometry() {
@@ -90,6 +97,33 @@ double FourFieldSolver::stableTimeStep() const {
     for (double v : state_.ud) umax = std::max(umax, std::fabs(v));
     for (double v : state_.ub) umax = std::max(umax, std::fabs(v));
     double dt = options_.courantTarget * state_.minCellWidth() / umax;
+
+    if (options_.enableSurfaceTension) {
+        // Stability bound for the biharmonic hyperdiffusion term
+        // (SolverOptions::enableSurfaceTension / hyperdiffusionCoefficient,
+        // see FourFieldSolver.cpp's updateContinuity()). Unlike the
+        // dispersive third-derivative term this replaced, a fourth
+        // derivative's discrete symbol is real and non-negative everywhere
+        // (von Neumann analysis of the standard centred stencil:
+        // 16*sin^4(theta/2)/dz^4), so -nu4*D4 is genuinely diffusive and
+        // explicit forward-Euler stability is the standard, textbook
+        // bound dt <= dz^4/(8*nu4), evaluated per cell with its own local
+        // nu4 = hyperdiffusionCoefficient*|ul|*dz^3, taking the minimum
+        // (most restrictive) over the domain. safety keeps a margin below
+        // that exact bound for the coupling with the rest of this
+        // (nonlinear) system, which the bound itself doesn't account for.
+        const double safety = 0.5;
+        double dtCap = options_.maxTimeStep;
+        for (int i = 0; i < state_.N; ++i) {
+            const double dz = std::max(state_.cellWidth(i), tiny);
+            const double ulLocal = 0.5 * (state_.ul[i] + state_.ul[i + 1]);
+            const double nu4 = options_.hyperdiffusionCoefficient * std::fabs(ulLocal) * dz * dz * dz;
+            const double bound = dz * dz * dz * dz / (8.0 * std::max(nu4, tiny));
+            dtCap = std::min(dtCap, safety * bound);
+        }
+        dt = std::min(dt, dtCap);
+    }
+
     return std::clamp(dt, options_.minTimeStep, options_.maxTimeStep);
 }
 
@@ -251,6 +285,38 @@ namespace {
             F[i] = 0.5 * uHat * uHat;
         }
         return F;
+    }
+
+    // Non-uniform-mesh second derivative of a cell-centred field at cell i
+    // (3-point, standard formula: reduces to the familiar
+    // (v[i+1]-2v[i]+v[i-1])/dz^2 on a uniform mesh). Used twice in
+    // succession by fourthDerivativeEL() below to build a biharmonic
+    // ("hyperdiffusion") operator -- see SolverOptions::enableSurfaceTension
+    // for why a plain second derivative alone isn't what's wanted here (it
+    // would damp long, physically meaningful wavelengths too; the repeated
+    // application targets short wavelengths much more selectively, exactly
+    // the k^4-vs-k^2 scaling real surface tension provides -- see
+    // VALIDATION.md item 1, Update 5/6 for the derivation).
+    double secondDerivativeAt(const FlowState& s, const std::vector<double>& v, int i) {
+        const double dzL = s.centerDistance(i - 1, i);
+        const double dzR = s.centerDistance(i, i + 1);
+        return 2.0 * ((v[i + 1] - v[i]) / (dzR * (dzL + dzR)) - (v[i] - v[i - 1]) / (dzL * (dzL + dzR)));
+    }
+
+    // Biharmonic ("hyperdiffusion") operator on a cell-centred field,
+    // D4 = D2[D2[v]] (apply secondDerivativeAt() twice). Needs v at
+    // i-2..i+2, so valid only for i in [2, N-3]; returns 0 outside that
+    // range, consistent with this file's other boundary fallbacks (see
+    // e.g. updateContinuity()'s upwind() lambda).
+    double fourthDerivativeAt(const FlowState& s, const std::vector<double>& v, int i) {
+        const int N = s.N;
+        if (i < 2 || i > N - 3) return 0.0;
+        const double d2Lo = secondDerivativeAt(s, v, i - 1);
+        const double d2Mid = secondDerivativeAt(s, v, i);
+        const double d2Hi = secondDerivativeAt(s, v, i + 1);
+        const double dzL = s.centerDistance(i - 1, i);
+        const double dzR = s.centerDistance(i, i + 1);
+        return 2.0 * ((d2Hi - d2Mid) / (dzR * (dzL + dzR)) - (d2Mid - d2Lo) / (dzL * (dzL + dzR)));
     }
 }
 
@@ -644,6 +710,20 @@ void FourFieldSolver::updateContinuity(double dt) {
 
     std::vector<double> edNew(N), ebNew(N), eLNew(N), eGNew(N);
 
+    // Surface-tension-motivated regularization (SolverOptions::
+    // enableSurfaceTension): a biharmonic ("hyperdiffusion") term added to
+    // the liquid-holdup continuity equation, -nu4*d^4(eL)/dz^4, with a
+    // local coefficient nu4 = hyperdiffusionCoefficient*|ul|*dz^3. Built
+    // from the START-OF-STEP eL field (captured once, before this loop
+    // mutates anything), consistent with this scheme's other lagged
+    // coefficients. See fourthDerivativeAt()'s comment and
+    // SolverOptions::enableSurfaceTension for the full derivation/history.
+    std::vector<double> eLField;
+    if (options_.enableSurfaceTension) {
+        eLField.resize(N);
+        for (int i = 0; i < N; ++i) eLField[i] = state_.eL(i);
+    }
+
     for (int i = 0; i < N; ++i) {
         const int fL = i, fR = i + 1;
         const double dz = state_.cellWidth(i); // this cell's own width: a proper FV divergence
@@ -675,6 +755,19 @@ void FourFieldSolver::updateContinuity(double dt) {
         const double fluxGR = egR * state_.ug[fR] + ubAtR * state_.ub[fR];
         const double fluxGL = egL * state_.ug[fL] + ubAtL * state_.ub[fL];
         eGNew[i] = state_.eG(i) + dt * (-(fluxGR - fluxGL) / dz);
+
+        if (options_.enableSurfaceTension) {
+            const double ulLocal = 0.5 * (state_.ul[fL] + state_.ul[fR]);
+            const double nu4 = options_.hyperdiffusionCoefficient * std::fabs(ulLocal) * dz * dz * dz;
+            const double biharmonic = -nu4 * fourthDerivativeAt(state_, eLField, i);
+            // Equal and opposite on eG: this is a redistribution of the
+            // interface position, not a mass source, and keeps
+            // eLNew+eGNew invariant before the renormalisation below even
+            // has to act (the renormalisation would otherwise absorb any
+            // imbalance asymmetrically between the two fields).
+            eLNew[i] += dt * biharmonic;
+            eGNew[i] -= dt * biharmonic;
+        }
     }
 
     for (int i = 0; i < N; ++i) {

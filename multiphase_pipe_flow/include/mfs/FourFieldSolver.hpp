@@ -111,6 +111,55 @@ struct SolverOptions {
     // less diffusive than first-order upwind).
     FluxLimiterType advectionLimiter = FluxLimiterType::None;
 
+    // Surface-tension-motivated short-wave regularization of the field
+    // continuity equation, off by default (existing behaviour unchanged
+    // unless opted into). The paper's own Eq. 6-7 (and hence this
+    // implementation) carry no interfacial-curvature term, which leaves
+    // the continuum model short-wave ILL-POSED: linearizing the inviscid
+    // layer equations around a uniform stratified base state gives a
+    // growth rate that increases without bound as wavelength shrinks (see
+    // VALIDATION.md, "Recommended follow-up" item 1, Update 5, and the
+    // README section this option is documented in) -- the same short-wave
+    // ill-posedness documented for two-fluid models lacking such a term
+    // (Stewart & Wendroff 1984; Ramshaw & Trapp 1978).
+    //
+    // The physically literal fix -- an interfacial pressure jump
+    // (Young-Laplace, P2 = P1 + sigma*d^2(h1)/dz^2) entering the gas
+    // momentum equation as -sigma/rho2 * d^3(h1)/dz^3 -- was tried and
+    // abandoned: a third derivative is a DISPERSIVE term, and (as verified
+    // both by direct von Neumann analysis and by empirical blow-up in
+    // testing) no one-sided/upwind-biased discretization of it is
+    // unconditionally stable under this solver's explicit forward-Euler
+    // time-stepping the way upwind differencing of an ADVECTIVE
+    // (first-derivative) term is -- a real, non-obvious pitfall of that
+    // approach, not just a matter of shrinking dt further. See
+    // VALIDATION.md item 1, Update 6 for the full account.
+    //
+    // What's implemented instead is a biharmonic ("hyperdiffusion") proxy
+    // added directly to the liquid-holdup continuity equation:
+    // d(eL)/dt += -nu4 * d^4(eL)/dz^4, with the local coefficient
+    // nu4 = hyperdiffusionCoefficient * |ul| * dz^3 (dz = local cell
+    // width, ul = local liquid velocity). This is NOT a literal capillary-
+    // wave model -- it doesn't use fluid.sigma at all -- but a fourth
+    // derivative has real, non-positive eigenvalues everywhere (confirmed
+    // by von Neumann analysis: the standard centred 4-point stencil's
+    // symbol is 16*sin^4(theta/2)/dz^4, always >= 0, so as a damping term
+    // -nu4*D4 it is genuinely diffusive, not dispersive), giving a
+    // standard, unconditionally-safe-for-a-finite-dt explicit stability
+    // bound with none of the third derivative's pitfalls. Verified (via
+    // the same linearized dispersion relation used throughout this
+    // investigation, evaluated numerically, not just asserted) to
+    // reproduce the qualitatively right behaviour: strong, monotonically
+    // increasing suppression of growth at short wavelength, negligible
+    // effect at long wavelength -- capping this model's otherwise-
+    // unbounded short-wave growth rate the same way real surface tension
+    // would, without claiming to model surface tension itself. See
+    // FourFieldSolver.cpp, updateContinuity() and fourthDerivativeAt(),
+    // and stableTimeStep() for the (standard, diffusion-type) stability
+    // cap this also engages once enabled.
+    bool enableSurfaceTension = false;
+    double hyperdiffusionCoefficient = 5.0e-4; // dimensionless; see above
+
     // Adaptive (non-uniform) mesh refinement, off by default so existing
     // behaviour at a fixed uniform resolution is unchanged unless opted
     // into. When enabled, every `adaptEveryNSteps` steps each cell's

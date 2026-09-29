@@ -460,6 +460,76 @@ have equilibrium conditions where F stays above 1 throughout, where a real
 classifier-vs-solver gap might still exist) is untested and the natural
 next step -- see VALIDATION.md for the full writeup and that scope note.
 
+### Optional short-wave regularization (`SolverOptions::enableSurfaceTension`)
+
+Off by default (existing behaviour unchanged unless opted into). The
+"unbounded growth rate at short wavelength" finding above (this model's
+layer equations have no interfacial-curvature/surface-tension term, so the
+continuum problem is short-wave ill-posed, per Stewart & Wendroff 1984 and
+Ramshaw & Trapp 1978) is a genuine gap in the *equations*, independent of
+the specific stuck case it was diagnosed from. This option adds an opt-in
+regularization for it.
+
+**What was tried first, and abandoned.** The physically literal fix is an
+interfacial pressure jump (Young-Laplace, `P2 = P1 + sigma*d^2(h1)/dz^2`)
+entering the gas momentum equation as `-sigma/rho2 * d^3(h1)/dz^3`. This
+was implemented, and rejected: a third derivative is a *dispersive* term,
+and direct von Neumann analysis of every one-sided/upwind-biased
+discretization tried showed it is **unconditionally unstable** under this
+solver's explicit forward-Euler time-stepping -- not merely in need of a
+smaller dt, but unstable at *any* dt for a band of wavelengths, confirmed
+by an actual blow-up in testing that a 240x smaller time step only
+delayed, not prevented. This is a real, non-obvious pitfall: upwind bias
+reliably stabilizes first-derivative advection, but does not automatically
+transfer to a third-derivative dispersive term the way it might seem to.
+
+**What's implemented instead** is a biharmonic ("hyperdiffusion") proxy
+added directly to the liquid-holdup continuity equation:
+`d(eL)/dt += -nu4 * d^4(eL)/dz^4`, with a local coefficient
+`nu4 = hyperdiffusionCoefficient * |ul| * dz^3` (`dz` = local cell width,
+`ul` = local liquid velocity; the equal-and-opposite correction is applied
+to `eG` too, so it redistributes the interface position rather than
+creating mass). This is **not a literal capillary-wave model** -- it
+doesn't use the fluid's surface tension value at all -- but a fourth
+derivative has real, non-positive eigenvalues everywhere (its standard
+centred-stencil symbol is `16*sin^4(theta/2)/dz^4`, confirmed by von
+Neumann analysis to be non-negative at every wavenumber, unlike the third
+derivative's oscillatory one), so as a damping term it is genuinely
+diffusive rather than dispersive, giving a standard, textbook explicit
+stability bound (`dt <= dz^4/(8*nu4)`, engaged in `stableTimeStep()`) with
+none of the third derivative's pitfalls.
+
+Because `nu4` scales with the *local* cell width cubed, this is a
+mesh-adaptive regularizer that specifically targets grid-scale content --
+the same way the numerical diffusion already inherent in first-order
+upwind advection automatically shrinks as a mesh is refined, rather than
+imposing a fixed physical cutoff wavelength the way real surface tension
+would. That was a deliberate trade-off in choosing this proxy over the
+(unstable) literal alternative, not an oversight.
+
+**Validation status, honestly.** The operator itself is unit-tested
+correct (its discrete symbol matches the analytic `+k^4*sin(kz)` fourth
+derivative of a sine wave to the expected discretization accuracy) and the
+governing linear dispersion relation (checked numerically, not just
+derived by hand -- an earlier hand-derivation attempt for this same
+feature had a sign error caught this way) confirms the *mechanism* is
+sound in the idealized, inviscid, linearized limit: strong, monotonically
+increasing suppression at short wavelength, negligible effect at long
+wavelength. What's confirmed empirically in the full nonlinear solver:
+enabling it does not change default behaviour, does not destabilize any
+of the demo cases or the resolutions that broke the earlier (rejected)
+third-derivative attempt, and its own stability bound behaves as designed
+(engaging only at large coefficients, exactly where the formula predicts).
+What is **not** yet cleanly confirmed: a controlled seeded-wavelength test
+at the most grid-scale resolutions tried (3-5 cells/wavelength) did not
+show the clean, monotonic suppression the linear theory predicts at
+reasonable coefficient values -- the effect was small and inconsistent
+in direction at that extreme, though never unstable. Calibrating
+`hyperdiffusionCoefficient` properly and re-running that controlled test
+is a good next step before relying on this for anything beyond "a safe,
+theoretically-motivated, off-by-default option," which is what it is
+today.
+
 ## Validation against experimental data
 
 **[VALIDATION.md](VALIDATION.md)** compares the solver's predicted flow
