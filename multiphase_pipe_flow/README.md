@@ -550,6 +550,17 @@ VALIDATION.md for the full methodology, breakdown, and recommended
 follow-up. The validation driver (`validate_shoham`, built by default) and
 its input/output CSVs are in `validation/`.
 
+A second, independent pass compares predicted **liquid holdup and
+frictional pressure gradient** (not just flow-pattern labels) against
+three real quantitative datasets -- Kokal (1987, 168-case subsample),
+Newton (1997, all 55 points), and a 21-study compiled slug-holdup
+database (126-case subsample) -- 349 cases total, zero numerical
+failures. Holdup MAE ranges 0.09-0.30 depending on dataset, and error
+grows monotonically with experimental holdup magnitude, corroborating the
+flow-pattern finding above from independent data. See VALIDATION.md's
+"Quantitative validation" section and the paper (Section 7) for full
+results. Driver: `validate_quantitative`, in `validation/`.
+
 ## Building
 
 ```sh

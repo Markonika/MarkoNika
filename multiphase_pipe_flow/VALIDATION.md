@@ -230,14 +230,48 @@ should have grown.
   height-based or relative fluctuation criterion would likely be a fairer
   comparison for those cases and is a good next step alongside the root
   cause above.
-- Only flow-*pattern labels* are validated here, not quantitative fields
-  (holdup, pressure drop, slug frequency/length). The source paper's own
-  Section 5 already validates several of those quantitatively (Nydal et
-  al. 1992 slug length/frequency and Bendiksen 1984 bubble velocity, both
-  horizontal); repeating that quantitative comparison for inclined cases
-  would need a quantitative inclined dataset, which -- per the search
-  above -- exists in the literature (Barnea/Shoham/Taitel/Dukler) but not
-  as an open, machine-readable dataset.
+- Only flow-*pattern labels* are validated here, not quantitative fields.
+  **Update:** see the new section below -- a separate quantitative
+  validation pass now compares predicted liquid holdup and frictional
+  pressure gradient directly against three independent experimental
+  datasets.
+
+## Quantitative validation: liquid holdup and pressure gradient
+
+A second, independent validation pass (`validation/validate_quantitative.cpp`)
+compares the solver's predicted liquid holdup and frictional pressure
+gradient directly against measured values, rather than flow-pattern
+labels, from three real datasets obtained after this document's original
+"identified but not accessible" note above (the Andritsos & Hanratty and
+Kowalski campaigns remain inaccessible in machine-readable form; see the
+paper's Section 7 for that search):
+
+1. **Kokal (1987)**, PhD thesis, University of Calgary -- 1809 runs,
+   3 pipe diameters x 7 inclinations, digitized from the thesis via OCR
+   (72 out-of-range rows excluded, never "corrected"). 168-case Vsg-spaced
+   subsample used.
+2. **Newton (1997)**, PhD thesis, UNSW, Appendix A -- 55 horizontal-only
+   runs in 50/80mm pipes, all used.
+3. **Abdul-Majeed (2022)**, Mendeley Data `10.17632/wyfdm5ysh6.1` -- a
+   compiled slug-holdup database from 21 independent studies (Kokal's own
+   contribution excluded to avoid double-counting). 126-case subsample.
+
+All 349 cases (`validation/quant_unified_cases.csv` ->
+`validation/quant_results.csv`) completed with **zero numerical
+failures**. Holdup MAE: Kokal 0.090 (R^2=0.81), Newton 0.113, Abdul-Majeed
+compilation 0.303. Error grows monotonically with experimental holdup
+magnitude (0.06 at low holdup to 0.29 at high holdup, pooling all three
+datasets) -- consistent with, and an independent quantitative confirmation
+of, this same document's root-cause finding above: the solver is accurate
+in the stratified-like, low-holdup regime and specifically degrades as
+the true state moves toward the high-holdup, slug-dominated regime the
+flow-pattern classifier was already shown never to identify correctly.
+Pressure-gradient agreement is weaker (as expected, since it depends on
+holdup through the friction closures): Newton's horizontal cases are
+within a factor of 3 in 96% of cases; Kokal's inclined cases, which mix
+stratified-like and slug-dominated points at every angle, in 63%. Full
+methodology, tables, and figures are in the paper (Section 7,
+"Quantitative Validation Against Independent Experimental Campaigns").
 
 ## Recommended follow-up
 
