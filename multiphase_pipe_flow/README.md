@@ -252,6 +252,16 @@ for cost, which is exactly the trade the moving-grid/tracking literature
 for this model class describes (see Nydal & Banerjee, 1996; De Leebeeck,
 2010, "A roll wave and slug tracking scheme for gas-liquid pipe flow").
 
+**Comparative performance study.** The fixed-grid, $h$-refinement, and
+$r$-adaptive numbers above (from `mfs_demo horizontal_amr` and `mfs_demo
+horizontal_movingmesh`) are consolidated into one side-by-side benchmark
+(5 repeated timed runs per method, `validation/mesh_study_benchmark.csv`)
+in the paper's "Comparative performance study" section: AMR is 6.86x
+faster but 0.76x as sharp as the fixed grid at this snapshot (a real,
+modest accuracy cost, not a free win); the moving mesh is 23.1x slower
+but 8.66x sharper. The two adaptive strategies sit at opposite ends of
+the same cost/accuracy axis rather than one dominating the other.
+
 This implementation is a **periodic-equidistribution r-adaptive** scheme
 (relocate the existing point budget every step via de Boor's algorithm),
 which is simpler to implement robustly than -- and should not be confused
