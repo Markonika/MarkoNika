@@ -26,6 +26,13 @@ target_link_libraries(mfs_demo PRIVATE mfs)
 add_executable(validate_shoham validation/validate_shoham.cpp)
 target_link_libraries(validate_shoham PRIVATE mfs)
 
+# Quantitative validation driver: predicted liquid holdup and frictional
+# pressure gradient vs. Kokal (1987), Newton (1997), and a multi-source
+# compiled holdup database -- see the paper's quantitative validation
+# section for methodology and results.
+add_executable(validate_quantitative validation/validate_quantitative.cpp)
+target_link_libraries(validate_quantitative PRIVATE mfs)
+
 enable_testing()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt)
     add_subdirectory(tests)
