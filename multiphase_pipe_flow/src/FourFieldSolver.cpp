@@ -124,6 +124,32 @@ double FourFieldSolver::stableTimeStep() const {
         dt = std::min(dt, dtCap);
     }
 
+    if (options_.enableTurbulentViscosity) {
+        // Stability bound for the turbulent-viscosity diffusion of the
+        // relative layer velocity (SolverOptions::enableTurbulentViscosity,
+        // updateLayerMomentum()). This is a genuine (not hyper-) diffusion
+        // term, so its discrete symbol (von Neumann analysis of the same
+        // centred 3-point stencil used by secondDerivativeAtFace(): a
+        // real, non-positive -4*sin^2(theta/2)/dz^2) gives the standard
+        // textbook explicit-diffusion bound dt <= dz^2/(2*nu_t), evaluated
+        // per face with its own local nu_t = mixingLength*|u2-u1|, taking
+        // the minimum (most restrictive) over the domain. The reduced-mass
+        // split in updateLayerMomentum() only ever reduces each layer's
+        // own effective diffusivity below nu_t, so using the unscaled nu_t
+        // here is a conservative (safe) bound.
+        const double safety = 0.5;
+        const double mixingLength = options_.turbulentMixingLengthFraction * geometry_.diameter();
+        double dtCap = options_.maxTimeStep;
+        for (int f = 1; f < state_.N; ++f) {
+            const double dz = std::max(std::min(state_.cellWidth(f - 1), state_.cellWidth(f)), tiny);
+            const double urLocal = state_.u2[f] - state_.u1[f];
+            const double nuT = mixingLength * std::fabs(urLocal);
+            const double bound = dz * dz / (2.0 * std::max(nuT, tiny));
+            dtCap = std::min(dtCap, safety * bound);
+        }
+        dt = std::min(dt, dtCap);
+    }
+
     return std::clamp(dt, options_.minTimeStep, options_.maxTimeStep);
 }
 
@@ -318,6 +344,23 @@ namespace {
         const double dzR = s.centerDistance(i, i + 1);
         return 2.0 * ((d2Hi - d2Mid) / (dzR * (dzL + dzR)) - (d2Mid - d2Lo) / (dzL * (dzL + dzR)));
     }
+
+    // Same 3-point non-uniform second-derivative formula as
+    // secondDerivativeAt() above, but for a FACE-indexed field (u1, u2 and
+    // combinations thereof are stored one value per face, index 0..N, not
+    // one per cell). The spacing between consecutive faces f-1,f and f,f+1
+    // is exactly the width of the cell between them (cellWidth(f-1) and
+    // cellWidth(f) respectively) rather than a center-to-center distance.
+    // Used by SolverOptions::enableTurbulentViscosity's diffusive term on
+    // the relative layer velocity (u2-u1); see updateLayerMomentum().
+    // Valid for f in [1, N-1]; returns 0 outside that range.
+    double secondDerivativeAtFace(const FlowState& s, const std::vector<double>& v, int f) {
+        const int N = s.N;
+        if (f < 1 || f > N - 1) return 0.0;
+        const double dzL = s.cellWidth(f - 1);
+        const double dzR = s.cellWidth(f);
+        return 2.0 * ((v[f + 1] - v[f]) / (dzR * (dzL + dzR)) - (v[f] - v[f - 1]) / (dzL * (dzL + dzR)));
+    }
 }
 
 void FourFieldSolver::updateLayerMomentum(double dt) {
@@ -336,6 +379,17 @@ void FourFieldSolver::updateLayerMomentum(double dt) {
     if (useFluxForm) {
         F1flux = buildAdvectiveFlux(state_.u1, N, options_.advectionLimiter);
         F2flux = buildAdvectiveFlux(state_.u2, N, options_.advectionLimiter);
+    }
+
+    // See SolverOptions::enableTurbulentViscosity: relative-velocity field
+    // (u2-u1) at the OLD time level, built once before the face loop so
+    // secondDerivativeAtFace() can read neighbouring faces regardless of
+    // loop order.
+    std::vector<double> urOld;
+    const double mixingLength = options_.turbulentMixingLengthFraction * geometry_.diameter();
+    if (options_.enableTurbulentViscosity) {
+        urOld.resize(N + 1);
+        for (int i = 0; i <= N; ++i) urOld[i] = state_.u2[i] - state_.u1[i];
     }
 
     for (int f = 1; f < N; ++f) {
@@ -370,6 +424,22 @@ void FourFieldSolver::updateLayerMomentum(double dt) {
 
         const double ulF = state_.ul[f], ugF = state_.ug[f], udF = state_.ud[f], ubF = state_.ub[f];
 
+        // See SolverOptions::enableTurbulentViscosity for the derivation:
+        // diffusive acceleration on the relative velocity a_diff =
+        // nu_t*d^2(u2-u1)/dz^2, split between the two layers by
+        // reduced-mass weighting so total momentum is conserved exactly
+        // while d(u2-u1)/dt still receives the full a_diff.
+        double turb1 = 0.0, turb2 = 0.0;
+        if (options_.enableTurbulentViscosity) {
+            const double nuT = mixingLength * std::fabs(urOld[f]);
+            const double aDiff = nuT * secondDerivativeAtFace(state_, urOld, f);
+            const double m1 = rho1f * e1fSafe;
+            const double m2 = rho2f * e2fSafe;
+            const double mSum = m1 + m2;
+            turb1 = -aDiff * m2 / mSum;
+            turb2 = +aDiff * m1 / mSum;
+        }
+
         // --- Layer 1 momentum (Eq. 6, slip flux term dropped per Appendix A) ---
         // Upwind advection differences two FACE values (f against its
         // upwind neighbour f-1 or f+1); the correct spacing is the width of
@@ -394,7 +464,8 @@ void FourFieldSolver::updateLayerMomentum(double dt) {
                               - gravity * std::sin(thetaF)
                               - tauW1_[f] * Swp1f / (A * e1fSafe * rho1f)
                               + tauI_[f] * Sif / (A * e1fSafe * rho1f)
-                              + massSrc1;
+                              + massSrc1
+                              + turb1;
         u1New[f] = state_.u1[f] + dt * du1dt;
 
         // --- Layer 2 momentum (Eq. 7, slip flux term dropped) ---
@@ -414,7 +485,8 @@ void FourFieldSolver::updateLayerMomentum(double dt) {
                               - gravity * std::sin(thetaF)
                               - tauW2_[f] * Swp2f / (A * e2fSafe * rho2f)
                               - tauI_[f] * Sif / (A * e2fSafe * rho2f)
-                              + massSrc2;
+                              + massSrc2
+                              + turb2;
         u2New[f] = state_.u2[f] + dt * du2dt;
     }
 

@@ -507,3 +507,18 @@ methodology, tables, and figures are in the paper (Section 7,
    scheme's growth-rate treatment (item 1) as the more likely cause. See
    README.md, "Adaptive mesh refinement" and "Moving-mesh (r-adaptive)
    tracking", for the full writeup and how to reproduce both tests.
+6. **Done:** implemented `SolverOptions::enableTurbulentViscosity`, a
+   physics-based nonlinear regularization adapted from Lopez-de-Bertodano
+   & Clausse (2026), "Nonlinear Stability in the Two-Fluid Model of
+   Two-Phase Flow" (arXiv:2509.04679) -- see README.md, "Turbulent-
+   viscosity nonlinear regularization" for the full derivation,
+   translation to this solver's equations, and honest test results.
+   Important scoping note carried over from item 1 above: this option
+   targets NONLINEAR wave-growth saturation (does a large-amplitude wave
+   stay bounded or blow up), not the LINEAR question this section's own
+   stuck case already resolved (that case's F<1 base state is genuinely
+   stable, so no regularization of this kind can or should "unstick" it).
+   Confirmed stable (zero NaN/Inf) across mixing lengths 0-20% of pipe
+   diameter on the horizontal slug-formation demo, with a physically
+   sensible damping trend; not yet tested on a sustained-F>1 case run long
+   enough to check for slug saturation, which remains open follow-up work.

@@ -160,6 +160,67 @@ struct SolverOptions {
     bool enableSurfaceTension = false;
     double hyperdiffusionCoefficient = 5.0e-4; // dimensionless; see above
 
+    // Physics-based turbulent-viscosity regularization of the RELATIVE
+    // velocity between the two layers (u2 - u1), off by default. This is a
+    // separate mechanism from enableSurfaceTension above and independently
+    // toggleable: the two are complementary, not alternatives.
+    // enableSurfaceTension's biharmonic term targets this model's LINEAR
+    // short-wave ill-posedness; this option targets its NONLINEAR
+    // behaviour once a wave has already grown into a sharp front -- the
+    // "stuck case" investigated in the KH case study (VALIDATION.md item
+    // 1) never gets there, so the two options address different stages of
+    // the same underlying problem.
+    //
+    // Physical basis: Lopez-de-Bertodano & Clausse, "Nonlinear Stability
+    // in the Two-Fluid Model of Two-Phase Flow" (Physics of Fluids, 2026;
+    // arXiv:2509.04679), derive a turbulent eddy viscosity
+    //   nu_t = l_m * |u_r|                                    (their Eq. 14)
+    // (l_m a constant "mixing length", u_r the relative velocity between
+    // phases) and add it, alongside the kinematic viscosity, as a
+    // diffusive force on the relative-momentum equation:
+    //   F_visc,W = d/dx(nu * dW/dx),  nu = nu_k + nu_t         (their Eq. 11-13)
+    // In their simplest (no-inertial-coupling) reduction, the relative
+    // momentum variable W reduces exactly to u_r, so this is literally a
+    // diffusion of the slip velocity between phases. They show
+    // analytically (their Eq. 90-96) that this term's viscous force scales
+    // as (mesh spacing)^-2 as a forming wave narrows, which beats the
+    // (mesh spacing)^-1 scaling of the advective growth term -- unlike
+    // surface tension, whose contribution is independent of the narrowing
+    // width and therefore fails to arrest the nonlinear "shock-spike"
+    // blowup their surface-tension-only model still exhibits (their
+    // Section V.A/V.C). With both surface tension (linear) and this
+    // turbulent viscosity (nonlinear) together, their model produces
+    // KH-instability-triggered SLUG FLOW emerging with no imposed slug
+    // structure (their Section V.D, Fig. 19) -- precisely the qualitative
+    // behaviour ("stuck" stratified flow that never develops into
+    // slug/annular) this codebase's own validation has repeatedly found
+    // missing.
+    //
+    // Translation to this solver's four-field, dimensional, distinct-
+    // density formulation (their model is a simplified, implicitly
+    // non-dimensionalized two-fluid square-channel formulation, not
+    // literally this codebase's own equations, so this is an honest
+    // adaptation of their closure, not a line-by-line reproduction): the
+    // diffusive acceleration on the relative layer velocity is
+    //   a_diff = nu_t * d^2(u2-u1)/dz^2,   nu_t = l_m * |u2-u1|
+    // with l_m = turbulentMixingLengthFraction * D (a diameter-based
+    // length scale, consistent with how every other closure in this
+    // codebase non-dimensionalizes length -- their own toy test used a
+    // fixed l_m=1mm in an idealized unit-density square channel, which
+    // does not transfer to this solver's dimensional air-water pipe
+    // scales). This acceleration is then split between the two layers by
+    // reduced-mass weighting so the shared coupling conserves total
+    // momentum exactly while reducing to a_diff on the relative velocity:
+    //   du1/dt += -a_diff * m2/(m1+m2),  du2/dt += +a_diff * m1/(m1+m2)
+    // with m1 = rho1*e1, m2 = rho2*e2 (per-unit-volume layer "masses" at
+    // the face). See FourFieldSolver.cpp, updateLayerMomentum() and
+    // secondDerivativeAtFace(), and stableTimeStep() for the standard
+    // explicit-diffusion stability cap (dt <= dz^2/(2*nu_t), verified by
+    // von Neumann analysis of the same 3-point stencil used here) this
+    // also engages once enabled.
+    bool enableTurbulentViscosity = false;
+    double turbulentMixingLengthFraction = 0.1; // l_m = this * D; dimensionless
+
     // Adaptive (non-uniform) mesh refinement, off by default so existing
     // behaviour at a fixed uniform resolution is unchanged unless opted
     // into. When enabled, every `adaptEveryNSteps` steps each cell's

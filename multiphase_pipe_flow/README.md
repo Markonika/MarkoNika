@@ -540,6 +540,87 @@ is a good next step before relying on this for anything beyond "a safe,
 theoretically-motivated, off-by-default option," which is what it is
 today.
 
+### Turbulent-viscosity nonlinear regularization (`SolverOptions::enableTurbulentViscosity`)
+
+Off by default, and a *separate* mechanism from `enableSurfaceTension`
+above -- the two are complementary, not alternatives, and can be enabled
+together (as they are in the primary source below) or independently.
+Where the biharmonic term targets this model's LINEAR short-wave
+ill-posedness, this option targets its NONLINEAR behaviour once a wave
+has already grown large: whether growth stays bounded (e.g. saturating
+into a slug) or blows up numerically as a front narrows.
+
+**Physical basis.** Lopez-de-Bertodano & Clausse, "Nonlinear Stability in
+the Two-Fluid Model of Two-Phase Flow" (*Physics of Fluids*, 2026;
+arXiv:2509.04679), derive a turbulent eddy viscosity `nu_t = l_m * |u_r|`
+(`l_m` a constant mixing length, `u_r` the relative velocity between
+phases) and add it, alongside the kinematic viscosity, as a diffusive
+force on the relative-momentum equation. They show analytically that this
+term's viscous force scales as (mesh spacing)^-2 as a forming wave
+narrows, beating the (mesh spacing)^-1 scaling of the advective growth
+term -- unlike surface tension, whose contribution is independent of the
+narrowing width and so fails to arrest the nonlinear "shock-spike"
+blowup their surface-tension-only model still exhibits. With both surface
+tension (linear) and this turbulent viscosity (nonlinear) together, their
+model produces KH-instability-triggered **slug flow emerging with no
+imposed slug structure** -- precisely the qualitative behaviour ("stuck"
+stratified flow that never develops into slug/annular) this codebase's
+own validation has repeatedly found missing (VALIDATION.md item 1).
+
+**One important scoping note**, worth stating plainly: this does *not*
+mean turbulent viscosity would "unstick" VALIDATION.md's own stuck case
+(D=51mm, Vsl=0.0025, Vsg=25, 1 deg). That case's own linear-stability
+derivation (item 1, Update 5) already showed its base state genuinely
+drains to F<1 -- a truly stable condition with no KH growth mechanism
+present at all, correctly and physically reproduced by the solver, not a
+numerical deficiency. Turbulent viscosity is a damping/bounding
+mechanism; it cannot inject growth into an already-stable state. It is
+relevant to a different scenario: a genuinely KH-unstable (F>1) case
+where a wave *is* growing and the question is whether that growth
+saturates or blows up as it narrows.
+
+**Translation to this solver.** The reference model is a simplified,
+implicitly non-dimensionalized two-fluid square-channel formulation, not
+literally this codebase's own dimensional, distinct-density, four-field
+equations, so this is an honest adaptation of their closure, not a
+line-by-line reproduction. The diffusive acceleration on the relative
+layer velocity is `a_diff = nu_t * d^2(u2-u1)/dz^2` with
+`nu_t = l_m * |u2-u1|` and `l_m = turbulentMixingLengthFraction * D` (a
+diameter-based length scale, consistent with how every other closure in
+this codebase non-dimensionalizes length -- the reference's own toy test
+used a fixed `l_m = 1mm` in an idealized unit-density square channel,
+which does not transfer to this solver's dimensional air-water pipe
+scales). This acceleration is split between the two layers by
+reduced-mass weighting (`m1 = rho1*e1`, `m2 = rho2*e2` at the face) so
+the coupling conserves total momentum exactly (`m1*turb1 + m2*turb2 = 0`
+by construction) while `d(u2-u1)/dt` still receives the full `a_diff`.
+See `FourFieldSolver.cpp`, `updateLayerMomentum()` and
+`secondDerivativeAtFace()`.
+
+**Stability.** Unlike the abandoned third-derivative surface-tension
+attempt, this is a genuine (non-hyper) diffusion term: von Neumann
+analysis of the centred 3-point stencil gives a real, non-positive symbol
+(`-4*sin^2(theta/2)/dz^2`), so explicit forward-Euler stability is the
+standard textbook bound `dt <= dz^2/(2*nu_t)`, evaluated per face and
+engaged automatically by `stableTimeStep()` once enabled.
+
+**What's confirmed:** the reduced-mass momentum-conserving split is an
+exact algebraic identity (verified by hand, not just asserted); enabling
+the option does not change default (off) behaviour (bit-identical step
+counts/gradients on the full demo suite with it off); across the
+horizontal slug-formation demo at mixing-length fractions from 0 to 0.2
+(0 to 20% of the pipe diameter) it remains fully stable with zero
+NaN/Inf, and the front's peak holdup and steepest captured gradient
+decrease as mixing length increases (0.78 down to 0.73 peak eL across
+that sweep) -- a physically sensible trend for a genuine damping term,
+not a destabilizing or spurious one. **What's not yet tested:** a case
+with sustained F>1 (genuine, non-draining KH instability) run long enough
+to check whether this term lets growth saturate into a bounded slug
+rather than the solver's existing hard velocity/fraction clamps doing
+that job instead; and stress-testing across the full Shoham-style
+multi-case sweep. Both are reasonable next steps before relying on this
+for anything beyond what's confirmed above.
+
 ## Validation against experimental data
 
 **[VALIDATION.md](VALIDATION.md)** compares the solver's predicted flow
