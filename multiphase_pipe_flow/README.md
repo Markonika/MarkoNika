@@ -709,6 +709,63 @@ explicit result -- so its practical value is specifically the
 stiff/high-drag regime the dt-sweep test isolates, not a general-purpose
 speed optimization the way AMR is.
 
+### Parallelization (OpenMP)
+
+Off by default in the sense that it requires nothing from the user beyond
+having OpenMP available at build time (`find_package(OpenMP)` in
+`CMakeLists.txt`; every parallel region is guarded by `#ifdef _OPENMP`, so
+the solver and its drivers build and behave identically, just serially, if
+OpenMP isn't found).
+
+**Where it does and doesn't help.** A single `FourFieldSolver` run at this
+project's typical resolution (N=40-300 cells) is not where the time goes:
+each timestep's per-cell/per-face work is small and the run is inherently
+sequential in time (`step()` at time n+1 needs the full state at time n),
+so there is no embarrassingly-parallel loop *inside* one simulation worth
+exploiting at that scale -- thread-launch overhead would compete with, or
+exceed, the actual work per parallel region. What this codebase actually
+spends wall-clock time on is its two validation drivers
+(`validate_shoham`, `validate_quantitative`), which each run *hundreds* of
+fully independent `FourFieldSolver` instances back-to-back (182 and 349
+cases respectively as currently used, one case = one set of Vsl/Vsg/D/angle/
+fluid properties run to quasi-steady state) -- a textbook embarrassingly
+parallel batch workload, since no case's `FourFieldSolver` instance shares
+any mutable state with another's. Both drivers' outer per-case loops are
+now `#pragma omp parallel for` (dynamic scheduling, since individual cases'
+runtimes vary considerably -- a stiff high-Vsg case can take many more
+steps to reach its `tEnd` than a mild stratified one).
+
+**Determinism.** Parallelizing the *outer* loop only (not anything inside
+`FourFieldSolver` itself) means each case's result is bit-for-bit whatever
+the serial version would have produced -- there is no shared accumulator,
+reduction, or race to introduce the kind of floating-point reordering that
+bit `enableImplicitFriction`'s development above. Each thread's `RunResult`
+is written into its own preallocated slot of a `std::vector<RunResult>`
+indexed by case number, and the CSV/confusion-matrix/accuracy-tally output
+is built in a second, purely sequential pass over that vector afterward --
+so both the order and the content of the output file are identical to the
+unparallelized version regardless of which thread happens to finish which
+case first. **Confirmed by direct test:** ran both full sweeps
+(`validate_quantitative` on all 349 cases, `validate_shoham` on all 182)
+with `OMP_NUM_THREADS=1` and `OMP_NUM_THREADS=4` and diffed the output CSVs
+byte-for-byte -- identical in both cases, including the printed confusion
+matrix and accuracy tally.
+
+**Measured speedup**, same two sweeps, wall-clock (`time`, single run each,
+4 physical cores available in this environment):
+
+| Driver | Cases | Serial (1 thread) | Parallel (4 threads) | Speedup |
+|---|---|---|---|---|
+| `validate_quantitative` | 349 | 294.8 s | 73.8 s | 4.0x |
+| `validate_shoham` | 182 | 55.7 s | 14.2 s | 3.9x |
+
+Both are close to the ideal 4x for 4 cores, as expected for a workload
+this embarrassingly parallel with reasonably balanced per-case cost and
+dynamic scheduling absorbing the imbalance that remains. This is a build
+speed-up for running the validation suite, not a change to the physics or
+to any single simulation's own runtime -- unlike AMR or the moving mesh,
+which speed up (or trade accuracy for speed in) one simulation.
+
 ## Validation against experimental data
 
 **[VALIDATION.md](VALIDATION.md)** compares the solver's predicted flow

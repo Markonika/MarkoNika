@@ -23,6 +23,10 @@
 #include <string>
 #include <vector>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 namespace {
 
 struct Case {
@@ -195,13 +199,37 @@ int main(int argc, char** argv) {
         return 1;
     }
     const auto cases = readCases(argv[1]);
+
+    // Each case is an independent FourFieldSolver instance (no shared
+    // mutable state), so the outer loop is embarrassingly parallel. Results
+    // are collected into a preallocated vector indexed by case so that the
+    // CSV is still written out in the original, deterministic case order
+    // regardless of which thread finished which case first or when.
+    std::vector<RunResult> results(cases.size());
+#ifdef _OPENMP
+    std::cout << "[OpenMP] running " << cases.size() << " cases across "
+              << omp_get_max_threads() << " threads\n";
+#pragma omp parallel for schedule(dynamic)
+#endif
+    for (std::size_t i = 0; i < cases.size(); ++i) {
+        results[i] = runOneCase(cases[i]);
+#ifdef _OPENMP
+#pragma omp critical
+#endif
+        {
+            std::cout << "[" << (i + 1) << "/" << cases.size() << "] " << cases[i].case_id
+                      << "  predHoldup=" << results[i].predHoldup
+                      << "  expHoldup=" << cases[i].exp_holdup
+                      << (results[i].blewUp ? "  BLEW UP" : "") << std::endl;
+        }
+    }
+
     std::ofstream out(argv[2]);
     out << "case_id,source,D_m,angle_deg,Vsl,Vsg,exp_holdup,exp_dPdz_Pa_m,exp_pattern,"
            "pred_holdup,pred_dPdz_Pa_m,blew_up\n";
-
     for (std::size_t i = 0; i < cases.size(); ++i) {
         const auto& c = cases[i];
-        const auto r = runOneCase(c);
+        const auto& r = results[i];
         out << c.case_id << ',' << c.source << ',' << c.D << ',' << c.angle_deg << ','
             << c.Vsl << ',' << c.Vsg << ','
             << (std::isnan(c.exp_holdup) ? "" : std::to_string(c.exp_holdup)) << ','
@@ -210,10 +238,6 @@ int main(int argc, char** argv) {
             << (std::isnan(r.predHoldup) ? "" : std::to_string(r.predHoldup)) << ','
             << (std::isnan(r.predDPdz) ? "" : std::to_string(r.predDPdz)) << ','
             << (r.blewUp ? 1 : 0) << '\n';
-        out.flush();
-        std::cout << "[" << (i + 1) << "/" << cases.size() << "] " << c.case_id
-                  << "  predHoldup=" << r.predHoldup << "  expHoldup=" << c.exp_holdup
-                  << (r.blewUp ? "  BLEW UP" : "") << std::endl;
     }
     return 0;
 }

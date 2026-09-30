@@ -577,3 +577,20 @@ methodology, tables, and figures are in the paper (Section 7,
    velocities -- found by reading `wallShearStress()`'s and
    `interfacialShearStress()`'s actual implementations rather than
    assuming their sign convention.
+8. **Done:** parallelized the outer per-case loop of both validation
+   drivers (`validate_shoham`, `validate_quantitative`) with OpenMP
+   (`#pragma omp parallel for`, dynamic scheduling) -- see README.md,
+   "Parallelization (OpenMP)" for the full rationale, including why the
+   *inside* of a single `FourFieldSolver` run was judged not worth
+   parallelizing at this project's typical resolution (N=40-300 cells),
+   in contrast to the hundreds of fully-independent solver instances each
+   validation sweep runs. Confirmed by direct test: full 349-case and
+   182-case sweeps produce byte-identical output CSVs (including the
+   confusion matrix and accuracy tally) whether run with
+   `OMP_NUM_THREADS=1` or `4`, since the outer loop has no shared mutable
+   state between cases and results are written to a preallocated
+   per-case slot then serialized to disk in a second, purely sequential
+   pass. Measured wall-clock speedup on 4 physical cores: 4.0x on
+   `validate_quantitative` (294.8s -> 73.8s) and 3.9x on `validate_shoham`
+   (55.7s -> 14.2s) -- both close to the ideal 4x, as expected for this
+   embarrassingly-parallel a workload.

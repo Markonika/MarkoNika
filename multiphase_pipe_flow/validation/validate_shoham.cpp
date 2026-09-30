@@ -33,6 +33,10 @@
 #include <string>
 #include <vector>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 namespace {
 
 struct Case {
@@ -189,6 +193,34 @@ int main(int argc, char** argv) {
     if (argc > 6) g_maxSimTime = std::stod(argv[6]);
 
     const auto cases = readCases(argv[1]);
+
+    // Each case runs an independent FourFieldSolver instance, so the outer
+    // loop is embarrassingly parallel. Predictions are collected into a
+    // preallocated vector indexed by case, then the CSV, confusion matrix,
+    // and accuracy tally are all built in a second, purely sequential pass
+    // -- so the output is identical to the serial version regardless of
+    // which thread finishes which case first or when.
+    std::vector<std::string> predicted(cases.size());
+#ifdef _OPENMP
+    std::cout << "[OpenMP] running " << cases.size() << " cases across "
+              << omp_get_max_threads() << " threads\n";
+#pragma omp parallel for schedule(dynamic)
+#endif
+    for (std::size_t i = 0; i < cases.size(); ++i) {
+        predicted[i] = runOneCase(cases[i]);
+        const std::string labeled = canonicalLabel(cases[i].FlowPattern);
+        const bool ok = (predicted[i] == labeled);
+#ifdef _OPENMP
+#pragma omp critical
+#endif
+        {
+            std::cout << "[" << (i + 1) << "/" << cases.size() << "] Ang=" << cases[i].Ang
+                      << " Vsl=" << cases[i].Vsl << " Vsg=" << cases[i].Vsg << " D=" << cases[i].ID
+                      << " labeled=" << labeled << " predicted=" << predicted[i]
+                      << (ok ? "  MATCH" : "  ---") << std::endl;
+        }
+    }
+
     std::ofstream out(argv[2]);
     out << "Ang,Vsl,Vsg,ID,DenL,DenG,Labeled,LabeledCanonical,Predicted,Agree\n";
 
@@ -197,21 +229,14 @@ int main(int argc, char** argv) {
 
     for (std::size_t i = 0; i < cases.size(); ++i) {
         const auto& c = cases[i];
-        const std::string predicted = runOneCase(c);
         const std::string labeled = canonicalLabel(c.FlowPattern);
-        const bool ok = (predicted == labeled);
-        confusion[{labeled, predicted}]++;
+        const bool ok = (predicted[i] == labeled);
+        confusion[{labeled, predicted[i]}]++;
         total++;
         if (ok) agree++;
 
         out << c.Ang << ',' << c.Vsl << ',' << c.Vsg << ',' << c.ID << ',' << c.DenL << ',' << c.DenG
-            << ',' << c.FlowPattern << ',' << labeled << ',' << predicted << ',' << (ok ? 1 : 0) << '\n';
-        out.flush();
-
-        std::cout << "[" << (i + 1) << "/" << cases.size() << "] Ang=" << c.Ang
-                  << " Vsl=" << c.Vsl << " Vsg=" << c.Vsg << " D=" << c.ID
-                  << " labeled=" << labeled << " predicted=" << predicted
-                  << (ok ? "  MATCH" : "  ---") << std::endl;
+            << ',' << c.FlowPattern << ',' << labeled << ',' << predicted[i] << ',' << (ok ? 1 : 0) << '\n';
     }
 
     std::cout << "\n=== Overall accuracy: " << agree << "/" << total << " = "
