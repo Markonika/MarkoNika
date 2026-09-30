@@ -613,13 +613,30 @@ horizontal slug-formation demo at mixing-length fractions from 0 to 0.2
 NaN/Inf, and the front's peak holdup and steepest captured gradient
 decrease as mixing length increases (0.78 down to 0.73 peak eL across
 that sweep) -- a physically sensible trend for a genuine damping term,
-not a destabilizing or spurious one. **What's not yet tested:** a case
-with sustained F>1 (genuine, non-draining KH instability) run long enough
-to check whether this term lets growth saturate into a bounded slug
-rather than the solver's existing hard velocity/fraction clamps doing
-that job instead; and stress-testing across the full Shoham-style
-multi-case sweep. Both are reasonable next steps before relying on this
-for anything beyond what's confirmed above.
+not a destabilizing or spurious one.
+
+**Sustained-F>1 saturation test (done).** First confirmed via
+`kelvinHelmholtzParameterF()` that this case's F crosses 1 only once the
+local holdup reaches eL ~ 0.75-0.8 (self-accelerating growth toward
+blockage, the opposite profile from the "stuck case" in VALIDATION.md
+item 1). Ran baseline, surface-tension-only, and surface-tension +
+turbulent-viscosity out to 45s simulated time (~30,000-35,000 steps).
+**All four configurations, including the fully unregularized baseline,
+stayed numerically stable**, with peak holdup repeatedly cycling up to
+near-full blockage (~0.95-0.999) and back down to ~0.6-0.7 in a bounded,
+recurring pattern rather than a runaway. This means the case doesn't
+cleanly isolate the new term's contribution: this codebase's existing
+robustness safeguards (velocity clamping, momentum-fraction floors --
+see "Robustness safeguards" below) already prevent literal blow-up
+here regardless of the new physics, unlike the reference paper's bare
+toy model, which has no such independent safety net. The
+turbulent-viscosity runs' trajectories differ modestly, not dramatically,
+from the baseline at the mixing lengths tested -- a real but modest
+effect layered on an already-bounded system, not (on this case) the
+deciding factor between stability and blow-up. Isolating this term's own
+contribution cleanly would need a case where the unregularized baseline
+genuinely does blow up on its own; not yet attempted. Stress-testing
+across the full Shoham-style multi-case sweep also remains open.
 
 ## Validation against experimental data
 

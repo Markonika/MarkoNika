@@ -520,5 +520,37 @@ methodology, tables, and figures are in the paper (Section 7,
    stable, so no regularization of this kind can or should "unstick" it).
    Confirmed stable (zero NaN/Inf) across mixing lengths 0-20% of pipe
    diameter on the horizontal slug-formation demo, with a physically
-   sensible damping trend; not yet tested on a sustained-F>1 case run long
-   enough to check for slug saturation, which remains open follow-up work.
+   sensible damping trend.
+   **Update:** ran the sustained-F>1 saturation test. First confirmed,
+   using `kelvinHelmholtzParameterF()` directly (the same closure the
+   solver uses) swept over eL at this case's fixed Vsl/Vsg, that F here
+   crosses 1 only once the local holdup climbs to eL ~ 0.75-0.8 -- the
+   opposite profile from the stuck case above (which *drains* toward
+   stability): here, growth toward a near-blocking holdup is genuinely
+   self-accelerating once past that threshold, exactly the mechanism
+   nonlinear regularization is meant to address. Ran baseline (no
+   regularization), surface-tension-only, and surface-tension +
+   turbulent-viscosity (mixing length 10% and 20% of D) out to 45s
+   simulated time (order 30,000-35,000 steps each) on this case.
+   **Result: all four configurations, including the completely
+   unregularized baseline, remain numerically stable throughout**, with
+   peak holdup repeatedly climbing to near-full blockage (eL approx.
+   0.95-0.999, i.e. a slug-like spike) and then relaxing back to
+   0.6-0.7 in a bounded, recurring cycle -- never a monotonic runaway.
+   This means the case does *not* cleanly isolate turbulent viscosity's
+   contribution: this codebase's existing robustness safeguards
+   (velocity clamping, momentum-fraction floors -- see "Robustness
+   safeguards" in README.md) already prevent literal numerical blow-up
+   on this case regardless of the new physics term, unlike the reference
+   paper's bare toy model, which has no such independent safety net and
+   genuinely does blow up without it. The turbulent-viscosity
+   configurations' peak-holdup trajectories differ modestly from the
+   baseline's (generally similar magnitude, not dramatically suppressed)
+   at the mixing lengths tested, consistent with a real but modest
+   contribution layered on top of an already-bounded system, rather than
+   being the sole thing standing between stability and blow-up the way
+   it is in the reference paper. A cleaner isolation of this term's own
+   contribution would need a case (or a temporarily disabled safety
+   clamp) where the unregularized baseline *does* blow up on its own --
+   not attempted here, flagged as the honest next step rather than
+   claimed.
