@@ -221,6 +221,48 @@ struct SolverOptions {
     bool enableTurbulentViscosity = false;
     double turbulentMixingLengthFraction = 0.1; // l_m = this * D; dimensionless
 
+    // Implicit (IMEX) treatment of wall and interfacial friction in the
+    // layer momentum equations, off by default so existing behaviour is
+    // unchanged unless opted into. These are the classic stiff source
+    // terms in this model class: their coefficients (friction factors x
+    // density x |velocity|) can be large -- especially interfacial drag
+    // near a flow-regime transition -- and under pure explicit forward-
+    // Euler that stiffness forces dt down independent of, and often well
+    // below, the material (advective) Courant limit that
+    // SolverOptions::courantTarget alone accounts for. Standard practice
+    // in this class of two-fluid code (e.g. RELAP5/TRAC/CATHARE-family
+    // system codes) is to treat friction implicitly while leaving
+    // advection explicit or separately semi-implicit -- the IMEX split
+    // this option performs.
+    //
+    // Implementation: at each face, the wall-friction and interfacial-
+    // friction accelerations are linearised by freezing their nonlinear
+    // parts (friction factor, and the relative/absolute velocity
+    // magnitude that makes wall and interfacial shear stress quadratic in
+    // velocity) at the OLD time level, extracting an effective LINEAR
+    // drag rate k = (old acceleration)/(old velocity or relative
+    // velocity). This turns the two layer-momentum equations, restricted
+    // to just their friction terms, into an exactly-solvable local 2x2
+    // linear system in (u1_new, u2_new) at that face (no spatial coupling
+    // between faces, so no banded/tridiagonal solve is needed -- unlike
+    // enableTurbulentViscosity's genuinely spatial diffusion term, which
+    // remains explicit with its own stability cap regardless of this
+    // option). All other terms (advection, pressure gradient, gravity,
+    // mass-transfer sources, and the turbulent-viscosity term if enabled)
+    // stay explicit as before. See FourFieldSolver.cpp,
+    // updateLayerMomentum() for the derivation and the exact 2x2 solve.
+    //
+    // Because backward-Euler friction is unconditionally stable in the
+    // drag-coefficient magnitude, enabling this removes any dt
+    // restriction that magnitude alone would otherwise impose; the
+    // material Courant limit on advection (SolverOptions::courantTarget)
+    // is untouched by this option and remains the governing constraint.
+    // A full SETS-type treatment that also relaxes the material Courant
+    // limit itself (by additionally semi-implicating the mass/pressure
+    // propagation, not just the friction source terms) is a larger,
+    // separate undertaking not attempted here.
+    bool enableImplicitFriction = false;
+
     // Adaptive (non-uniform) mesh refinement, off by default so existing
     // behaviour at a fixed uniform resolution is unchanged unless opted
     // into. When enabled, every `adaptEveryNSteps` steps each cell's

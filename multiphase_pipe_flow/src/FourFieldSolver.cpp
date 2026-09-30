@@ -458,17 +458,9 @@ void FourFieldSolver::updateLayerMomentum(double dt) {
             advectiveTerm1 = u1c * du1dzAdv;
         }
         const double massSrc1 = (-UeF * ulF + UdF * udF + phiEF * ugF - phiDeF * ubF) / (e1fSafe * rho1f);
-        const double du1dt = -advectiveTerm1
-                              - dPdz / rho1f
-                              - gravity * std::cos(thetaF) * dh1dz
-                              - gravity * std::sin(thetaF)
-                              - tauW1_[f] * Swp1f / (A * e1fSafe * rho1f)
-                              + tauI_[f] * Sif / (A * e1fSafe * rho1f)
-                              + massSrc1
-                              + turb1;
-        u1New[f] = state_.u1[f] + dt * du1dt;
+        const double massSrc2 = (UeF * ulF - UdF * udF - phiEF * ugF + phiDeF * ubF) / (e2fSafe * rho2f);
 
-        // --- Layer 2 momentum (Eq. 7, slip flux term dropped) ---
+        // --- Layer 2 advection (layer 1's is computed just above) ---
         double advectiveTerm2;
         if (useFluxForm) {
             advectiveTerm2 = (F2flux[cR] - F2flux[cL]) / centerDz;
@@ -478,16 +470,88 @@ void FourFieldSolver::updateLayerMomentum(double dt) {
                                                   : (state_.u2[f + 1] - state_.u2[f]) / state_.cellWidth(cR);
             advectiveTerm2 = u2c * du2dzAdv;
         }
-        const double massSrc2 = (UeF * ulF - UdF * udF - phiEF * ugF + phiDeF * ubF) / (e2fSafe * rho2f);
-        const double du2dt = -advectiveTerm2
-                              - dPdz / rho2f
-                              - gravity * std::cos(thetaF) * dh1dz
-                              - gravity * std::sin(thetaF)
-                              - tauW2_[f] * Swp2f / (A * e2fSafe * rho2f)
-                              - tauI_[f] * Sif / (A * e2fSafe * rho2f)
-                              + massSrc2
-                              + turb2;
-        u2New[f] = state_.u2[f] + dt * du2dt;
+
+        if (!options_.enableImplicitFriction) {
+            // Exact same left-to-right term order as before this option
+            // existed (verified bit-for-bit reproducible against the
+            // pre-existing benchmark) -- floating-point addition is not
+            // strictly associative, so this is deliberately NOT rebuilt
+            // from the E1/E2 decomposition below, which reorders terms
+            // and was found to (harmlessly, but needlessly) perturb exact
+            // step counts on chaotic-sensitive long runs.
+            const double du1dt = -advectiveTerm1
+                                  - dPdz / rho1f
+                                  - gravity * std::cos(thetaF) * dh1dz
+                                  - gravity * std::sin(thetaF)
+                                  - tauW1_[f] * Swp1f / (A * e1fSafe * rho1f)
+                                  + tauI_[f] * Sif / (A * e1fSafe * rho1f)
+                                  + massSrc1
+                                  + turb1;
+            const double du2dt = -advectiveTerm2
+                                  - dPdz / rho2f
+                                  - gravity * std::cos(thetaF) * dh1dz
+                                  - gravity * std::sin(thetaF)
+                                  - tauW2_[f] * Swp2f / (A * e2fSafe * rho2f)
+                                  - tauI_[f] * Sif / (A * e2fSafe * rho2f)
+                                  + massSrc2
+                                  + turb2;
+            u1New[f] = state_.u1[f] + dt * du1dt;
+            u2New[f] = state_.u2[f] + dt * du2dt;
+        } else {
+            // E1, E2: everything EXCEPT wall and interfacial friction,
+            // used only by the implicit solve below (a separate code
+            // path with no prior bit-exact baseline, so term order here
+            // is free to differ from the explicit branch above).
+            const double E1 = -advectiveTerm1
+                               - dPdz / rho1f
+                               - gravity * std::cos(thetaF) * dh1dz
+                               - gravity * std::sin(thetaF)
+                               + massSrc1
+                               + turb1;
+            const double E2 = -advectiveTerm2
+                               - dPdz / rho2f
+                               - gravity * std::cos(thetaF) * dh1dz
+                               - gravity * std::sin(thetaF)
+                               + massSrc2
+                               + turb2;
+            // Local 2x2 implicit (backward-Euler) solve for wall and
+            // interfacial friction, all other terms (E1, E2) explicit.
+            // Linearise each nonlinear friction force by extracting an
+            // effective linear drag rate k = (old acceleration)/(old
+            // velocity or relative velocity) -- i.e. freeze the friction
+            // factor and the |velocity| that made the original closure
+            // quadratic, at the OLD state, and solve for the new
+            // velocities exactly given those frozen coefficients. See
+            // SolverOptions::enableImplicitFriction for the full
+            // derivation.
+            // wallShearStress()/interfacialShearStress() return a SIGNED
+            // force (proportional to |u|*u or |u_r|*u_r, not |u| alone),
+            // matching the sign of the velocity/relative-velocity it
+            // opposes. The linear coefficient k must therefore be built
+            // from |force|/|velocity| (always >= 0), NOT signed-force
+            // divided by |velocity| -- the latter would silently flip
+            // sign whenever the old velocity was negative, turning
+            // friction into anti-friction. Caught by inspecting
+            // wallShearStress()'s actual implementation before relying on
+            // this, not assumed.
+            const double epsVel = 1.0e-6;
+            const double u1Old = state_.u1[f], u2Old = state_.u2[f];
+            const double urMag = std::max(std::fabs(u2Old - u1Old), epsVel);
+            const double kw1 = std::fabs(tauW1_[f] * Swp1f / (A * e1fSafe * rho1f)) / std::max(std::fabs(u1Old), epsVel);
+            const double kw2 = std::fabs(tauW2_[f] * Swp2f / (A * e2fSafe * rho2f)) / std::max(std::fabs(u2Old), epsVel);
+            const double ki1 = std::fabs(tauI_[f] * Sif / (A * e1fSafe * rho1f)) / urMag;
+            const double ki2 = std::fabs(tauI_[f] * Sif / (A * e2fSafe * rho2f)) / urMag;
+
+            const double a11 = 1.0 + dt * kw1 + dt * ki1;
+            const double a12 = -dt * ki1;
+            const double a21 = -dt * ki2;
+            const double a22 = 1.0 + dt * kw2 + dt * ki2;
+            const double b1 = u1Old + dt * E1;
+            const double b2 = u2Old + dt * E2;
+            const double det = a11 * a22 - a12 * a21; // always >= 1 here: a11,a22>=1, a12*a21<=0
+            u1New[f] = (b1 * a22 - a12 * b2) / det;
+            u2New[f] = (a11 * b2 - a21 * b1) / det;
+        }
     }
 
     const double vmax = options_.maxVelocity;

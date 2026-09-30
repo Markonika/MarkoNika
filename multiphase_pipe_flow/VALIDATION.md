@@ -554,3 +554,26 @@ methodology, tables, and figures are in the paper (Section 7,
    clamp) where the unregularized baseline *does* blow up on its own --
    not attempted here, flagged as the honest next step rather than
    claimed.
+7. **Done:** implemented `SolverOptions::enableImplicitFriction`, an IMEX
+   (implicit-explicit) time-integration split treating wall and
+   interfacial friction implicitly (a local 2x2 linear solve per face,
+   linearising each nonlinear friction force by freezing its |velocity|
+   factor at the old time level) while advection stays explicit -- see
+   README.md, "Implicit friction / IMEX time integration" for the full
+   derivation and test results. Direct dt-sweep test on a high-drag case
+   confirms the intended effect cleanly: at dt just above the case's own
+   `stableTimeStep()` (which has no friction-stiffness cap today),
+   explicit friction blows up while implicit friction stays stable and
+   converges to the same answer smaller, unambiguously-stable dt values
+   reach. On typical already-stable cases (e.g. the horizontal
+   slug-formation demo) the effect is modest, not dramatic -- comparable
+   step count and wall-clock time, physics within 1-3% -- so this is a
+   robustness/stability-margin improvement for the stiff-friction regime
+   specifically, not a general speedup. A genuine, real bug was caught
+   and fixed before relying on any of this: an early draft's linear
+   coefficient divided the *signed* friction force by |velocity| instead
+   of the force's own magnitude by |velocity|, which would have silently
+   flipped the sign of friction (into anti-friction) for negative
+   velocities -- found by reading `wallShearStress()`'s and
+   `interfacialShearStress()`'s actual implementations rather than
+   assuming their sign convention.

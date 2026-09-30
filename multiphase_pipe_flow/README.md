@@ -638,6 +638,77 @@ contribution cleanly would need a case where the unregularized baseline
 genuinely does blow up on its own; not yet attempted. Stress-testing
 across the full Shoham-style multi-case sweep also remains open.
 
+### Implicit friction / IMEX time integration (`SolverOptions::enableImplicitFriction`)
+
+Off by default. Wall friction and interfacial friction are the classic
+stiff source terms in this class of two-fluid model: their coefficients
+(friction factor x density x |velocity|) can be large, especially
+interfacial drag near a flow-regime transition, and under this solver's
+otherwise fully-explicit forward-Euler stepping that stiffness can force
+dt down independent of the material (advective) Courant limit that
+`courantTarget` alone accounts for -- notably, `stableTimeStep()` has no
+cap at all for friction stiffness today, only for advection and the two
+optional diffusive regularizations above. Standard practice in this
+model class (RELAP5/TRAC/CATHARE-family system codes) is to treat
+friction implicitly while leaving advection explicit -- the IMEX
+("implicit-explicit") split this option performs: advection, pressure
+gradient, gravity, mass-transfer sources, and the turbulent-viscosity
+term (if enabled) all stay explicit; only wall and interfacial friction
+are solved implicitly.
+
+**Method.** At each face, the nonlinear friction forces (both
+proportional to `|velocity|*velocity` or `|relative velocity|*relative
+velocity`) are linearised by freezing their `|velocity|` factor at the
+OLD time level -- extracting an effective linear drag rate
+`k = |old friction force| / max(|old velocity|, eps)` (using the
+*magnitude* of the force is essential: `wallShearStress()` and
+`interfacialShearStress()` return a *signed* force matching the sign of
+the velocity it opposes, so dividing the signed force by `|velocity|`
+rather than by the velocity itself would silently flip sign whenever the
+old velocity was negative -- caught by checking the actual closure
+implementations before relying on this, not assumed). This turns the two
+layer-momentum equations, restricted to just their friction terms, into
+an exactly-solvable local 2x2 linear system in `(u1_new, u2_new)` at
+that face -- no spatial coupling between faces, so no banded/tridiagonal
+solve is needed (unlike `enableTurbulentViscosity`'s genuinely spatial
+diffusion term, which remains explicit with its own stability cap
+regardless of this option). Backward-Euler friction is unconditionally
+stable in the drag-coefficient magnitude, so this removes any dt
+restriction that magnitude alone would impose; the material Courant
+limit on advection is untouched and remains the governing constraint at
+normal operating conditions. A full SETS-type treatment that also
+relaxes the *material* Courant limit itself (by semi-implicating
+mass/pressure propagation, not just friction) is a larger, separate
+undertaking not attempted here.
+
+**Confirmed by direct test:** first, regression: the default-off code
+path was restructured to compute the exact same terms in the exact same
+left-to-right order as before this option existed, verified bit-for-bit
+reproducible (identical step counts) against the pre-existing benchmark
+-- an earlier draft that merely reordered the same arithmetic (harmless
+in exact value, but not in floating-point rounding) was caught by this
+check and fixed before relying on it. Second, a direct dt-sweep stress
+test on a high-relative-velocity case (Vsg=20 m/s, large interfacial
+drag): at dt a little above this case's own `stableTimeStep()`, explicit
+friction blows up (NaN) while implicit friction stays stable *and*
+converges to the same relative velocity (21.7 m/s) that smaller,
+unambiguously-stable dt values also reach with either scheme -- direct
+evidence the implicit result is accurate, not merely non-NaN. At much
+larger dt (5-20x `stableTimeStep()`), implicit friction alone no longer
+avoids garbage answers (velocities of hundreds-to-thousands of m/s,
+clearly the velocity clamp masking non-convergence rather than genuine
+stability) -- because at that scale the still-explicit advection terms
+become the limiting factor, which this option was never meant to
+address. On the horizontal slug-formation demo case specifically (where
+the default dt selection already keeps things comfortably inside the
+friction-stable region), implicit friction gives comparable physics with
+no dramatic speedup: 8045 vs. 8158 steps and near-identical wall-clock
+time (the small step reduction is offset by the extra per-face 2x2
+solve), with peak holdup and steepest gradient within 1-3% of the
+explicit result -- so its practical value is specifically the
+stiff/high-drag regime the dt-sweep test isolates, not a general-purpose
+speed optimization the way AMR is.
+
 ## Validation against experimental data
 
 **[VALIDATION.md](VALIDATION.md)** compares the solver's predicted flow
