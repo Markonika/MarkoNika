@@ -88,6 +88,24 @@ void FourFieldSolver::computeGeometry() {
         geom_[i] = geometry_.fromAreaFraction(state_.e1(i));
         rhoGasCell_[i] = fluid_.rhoGas(state_.P[i]);
     }
+    if (options_.enableWellBalancedGravity) computeH1Equilibrium();
+}
+
+// See SolverOptions::enableWellBalancedGravity for the full derivation.
+// Builds the per-cell-centre reference profile h1Eq satisfying
+// dh1Eq/dz = -tan(theta(z)) exactly, using EACH cell's own theta (not a
+// face-averaged value) -- a simple running sum from faceZ[0], anchored
+// arbitrarily at 0 (only differences of h1Eq ever enter the scheme, so the
+// anchor value itself is never read).
+void FourFieldSolver::computeH1Equilibrium() {
+    const int N = state_.N;
+    h1Eq_.resize(N);
+    double faceVal = 0.0;
+    for (int i = 0; i < N; ++i) {
+        const double tanTheta = std::tan(state_.theta[i]);
+        h1Eq_[i] = faceVal - tanTheta * (state_.cellCenter(i) - state_.faceZ[i]);
+        faceVal -= tanTheta * state_.cellWidth(i);
+    }
 }
 
 double FourFieldSolver::stableTimeStep() const {
@@ -413,6 +431,25 @@ void FourFieldSolver::updateLayerMomentum(double dt) {
         const double dPdz = (state_.P[cR] - state_.P[cL]) / centerDz;
         const double thetaF = 0.5 * (state_.theta[cL] + state_.theta[cR]);
         const double dh1dz = (geom_[cR].h1 - geom_[cL].h1) / centerDz;
+
+        // See SolverOptions::enableWellBalancedGravity. gravCosTerm and
+        // gravSinTerm are extracted as named sub-expressions ONLY -- when
+        // the option is off, each is computed via the exact same operation
+        // order as the original inline "gravity * std::cos(thetaF) *
+        // dh1dz" / "gravity * std::sin(thetaF)" expressions below, so
+        // "- gravCosTerm - gravSinTerm" in the sums further down is
+        // bit-for-bit identical to the pre-existing inline arithmetic (see
+        // the enableImplicitFriction comment above on why term order is
+        // preserved deliberately, not just "equivalent").
+        double gravCosTerm, gravSinTerm;
+        if (!options_.enableWellBalancedGravity) {
+            gravCosTerm = gravity * std::cos(thetaF) * dh1dz;
+            gravSinTerm = gravity * std::sin(thetaF);
+        } else {
+            const double detadz = ((geom_[cR].h1 - h1Eq_[cR]) - (geom_[cL].h1 - h1Eq_[cL])) / centerDz;
+            gravCosTerm = gravity * std::cos(thetaF) * detadz;
+            gravSinTerm = 0.0; // folded into detadz already -- see derivation above
+        }
         const double Swp1f = 0.5 * (geom_[cL].Swp1 + geom_[cR].Swp1);
         const double Swp2f = 0.5 * (geom_[cL].Swp2 + geom_[cR].Swp2);
         const double Sif = 0.5 * (geom_[cL].Si + geom_[cR].Si);
@@ -481,16 +518,16 @@ void FourFieldSolver::updateLayerMomentum(double dt) {
             // step counts on chaotic-sensitive long runs.
             const double du1dt = -advectiveTerm1
                                   - dPdz / rho1f
-                                  - gravity * std::cos(thetaF) * dh1dz
-                                  - gravity * std::sin(thetaF)
+                                  - gravCosTerm
+                                  - gravSinTerm
                                   - tauW1_[f] * Swp1f / (A * e1fSafe * rho1f)
                                   + tauI_[f] * Sif / (A * e1fSafe * rho1f)
                                   + massSrc1
                                   + turb1;
             const double du2dt = -advectiveTerm2
                                   - dPdz / rho2f
-                                  - gravity * std::cos(thetaF) * dh1dz
-                                  - gravity * std::sin(thetaF)
+                                  - gravCosTerm
+                                  - gravSinTerm
                                   - tauW2_[f] * Swp2f / (A * e2fSafe * rho2f)
                                   - tauI_[f] * Sif / (A * e2fSafe * rho2f)
                                   + massSrc2
@@ -504,14 +541,14 @@ void FourFieldSolver::updateLayerMomentum(double dt) {
             // is free to differ from the explicit branch above).
             const double E1 = -advectiveTerm1
                                - dPdz / rho1f
-                               - gravity * std::cos(thetaF) * dh1dz
-                               - gravity * std::sin(thetaF)
+                               - gravCosTerm
+                               - gravSinTerm
                                + massSrc1
                                + turb1;
             const double E2 = -advectiveTerm2
                                - dPdz / rho2f
-                               - gravity * std::cos(thetaF) * dh1dz
-                               - gravity * std::sin(thetaF)
+                               - gravCosTerm
+                               - gravSinTerm
                                + massSrc2
                                + turb2;
             // Local 2x2 implicit (backward-Euler) solve for wall and

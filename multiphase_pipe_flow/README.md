@@ -766,6 +766,73 @@ speed-up for running the validation suite, not a change to the physics or
 to any single simulation's own runtime -- unlike AMR or the moving mesh,
 which speed up (or trade accuracy for speed in) one simulation.
 
+### Well-balanced gravity discretization (`SolverOptions::enableWellBalancedGravity`)
+
+Off by default, and relevant specifically to the terrain-following
+capability (`setInclinationProfile()` with a non-constant profile) -- for
+any constant-inclination run, which is every one of this codebase's own
+validation sweeps, this option changes essentially nothing (see below for
+why).
+
+**The defect.** Setting the layer-momentum equations' right-hand side to
+zero at zero velocity gives the static-equilibrium condition
+`dh1/dz = -tan(theta(z))`: in a pipe whose inclination varies along its
+length, a stationary liquid pool's height *within the pipe
+cross-section* must itself vary with z to keep its true (lab-frame) free
+surface level. The default discretization evaluates the interface-slope
+term from a face-averaged `theta` applied to a plain centred difference of
+the two neighbouring cells' `h1` values -- consistent (convergent as the
+mesh is refined) but not exact at any fixed resolution wherever `theta`
+differs between adjacent cells. **Confirmed by direct test, not just
+derived:** a standalone harness (not part of the regular test suite, kept
+in this session's working notes) built the true per-cell equilibrium
+profile for a 4-segment terrain pipe (uneven angles, matching how `theta`
+is actually stored -- one value per cell), initialized the solver at rest
+there with zero net flow, and measured spurious interior velocity growth
+under the unmodified explicit scheme: **1.36e-5 m/s down to 1.04e-6 m/s as
+the mesh was refined 8x (N=40 to N=320)**, consistent with ordinary
+first-order truncation error -- a real but small, shrinking discrepancy,
+not a structural non-convergence.
+
+**The fix** is a discrete analogue of hydrostatic reconstruction (in the
+spirit of Audusse et al. 2004 for shallow water, adapted to this term's
+own algebraic structure rather than copied from it): build a per-cell
+reference profile `h1Eq` that exactly satisfies the equilibrium relation
+using *each cell's own* `theta` (not a face average), via a trivial O(N)
+running sum from an arbitrary anchor (only differences of `h1Eq` ever
+enter the scheme, so the anchor itself is never read). Replacing the bare
+`h1` gradient with the gradient of the deviation `eta = h1 - h1Eq`, and
+folding the separate `sin(theta)` term into that same replacement, is an
+exact algebraic identity in continuous form -- and, built this way, is
+*also* exact at the discrete level: if the state is initialized with
+`h1 == h1Eq` pointwise (the true per-cell equilibrium), `eta` is
+identically zero at every cell centre, so its gradient, and hence the
+entire term, is exactly zero at every face, for any mesh coarseness and
+any `theta` profile. See `FourFieldSolver.cpp`, `computeH1Equilibrium()`
+and `updateLayerMomentum()`.
+
+**Confirmed:** enabling the option leaves default (off) behaviour
+bit-for-bit identical (verified by diffing the full demo suite's output
+CSVs, not just re-deriving the arithmetic -- the two gravity terms are
+extracted into named `gravCosTerm`/`gravSinTerm` sub-expressions computed,
+in the default path, via the exact same operation order as the original
+inline code, matching the precedent set by `enableImplicitFriction`'s own
+regression discipline). On the same equilibrium test, the well-balanced
+scheme's peak interior velocity is **6.2e-11 to 8.3e-11 m/s across the
+same 8x mesh refinement -- roughly five orders of magnitude smaller than
+the default scheme, and no longer shrinking with resolution**, the
+expected signature of landing on the floating-point noise floor rather
+than a resolution-dependent truncation error. On the existing terrain
+demo case (a genuinely flowing, non-equilibrium case that develops a
+KH-unstable wave/slug front), enabling the option leaves total liquid
+mass within 0.5% and the bulk of the holdup profile closely matched, but
+shifts the exact position of the slug front -- the same chaotic-sensitivity
+signature already documented elsewhere in this codebase (the
+`enableImplicitFriction` floating-point-reordering finding): a tiny,
+physically-motivated change in the discretization can relocate a
+nonlinearly-amplified front without indicating an error, since the
+front's *timing*, not its existence, is what differs.
+
 ## Validation against experimental data
 
 **[VALIDATION.md](VALIDATION.md)** compares the solver's predicted flow

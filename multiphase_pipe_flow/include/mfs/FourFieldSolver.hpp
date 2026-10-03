@@ -263,6 +263,52 @@ struct SolverOptions {
     // separate undertaking not attempted here.
     bool enableImplicitFriction = false;
 
+    // Well-balanced discretization of the interface-slope gravity term
+    // (g*cos(theta)*dh1/dz + g*sin(theta) in Eq. 6-7), off by default so
+    // existing behaviour is unchanged unless opted into. Relevant ONLY to
+    // terrain-following runs where theta varies along the pipe
+    // (setInclinationProfile() with a non-constant profile) -- for any
+    // constant-theta run (the overwhelming majority of this codebase's own
+    // validation sweeps) this option changes essentially nothing, since the
+    // defect it fixes vanishes identically when theta doesn't vary.
+    //
+    // The defect: at a true static (zero-velocity) equilibrium in a
+    // terrain-following pipe, setting the layer-momentum equations' RHS to
+    // zero gives dh1/dz = -tan(theta(z)) -- the liquid height within the
+    // pipe cross-section must vary along z to keep the physical free
+    // surface level as the pipe tilts. The default discretization evaluates
+    // this term from a face-averaged theta (thetaF = 0.5*(theta[cL]+
+    // theta[cR])) applied to a plain centred difference of the two
+    // neighbouring cells' h1 values -- consistent (convergent as the mesh
+    // refines) but NOT exact at any fixed finite resolution wherever theta
+    // differs between adjacent cells: initializing the solver at the true
+    // equilibrium and stepping forward with zero inflow produces a small,
+    // spurious velocity drift confirmed (by direct test, not just derived)
+    // to shrink at close to first order as the mesh is refined -- i.e.
+    // ordinary truncation error, not a structural non-convergence, but
+    // still a real, avoidable discrepancy specifically in the
+    // terrain-following capability Section 5 of the paper demonstrates.
+    //
+    // The fix (a discrete analogue of hydrostatic reconstruction, e.g.
+    // Audusse et al. 2004 for shallow water, adapted to this term's
+    // algebraic structure rather than copied from it): build a per-cell
+    // REFERENCE profile h1Eq(i) that exactly satisfies the equilibrium
+    // relation using each cell's OWN theta (not a face average), by a
+    // simple O(N) running sum from an arbitrary anchor (only differences of
+    // h1Eq ever enter the scheme, so the anchor itself is irrelevant).
+    // Replacing the bare h1 gradient with the gradient of the DEVIATION
+    // eta = h1 - h1Eq, and folding the separate sin(theta) term into that
+    // same replacement, is an exact algebraic identity in continuous form
+    // (g*cos(theta)*d(eta)/dz == g*cos(theta)*dh1/dz + g*sin(theta) when
+    // dh1Eq/dz=-tan(theta) exactly) -- and, built this way, is ALSO exact at
+    // the discrete level: if the state is initialised with h1 == h1Eq
+    // pointwise (the true per-cell equilibrium), eta is identically zero at
+    // every cell center, so its gradient -- and hence the entire term -- is
+    // exactly zero at every face, for any mesh coarseness and any theta
+    // profile. See FourFieldSolver.cpp, computeH1Equilibrium() and
+    // updateLayerMomentum().
+    bool enableWellBalancedGravity = false;
+
     // Adaptive (non-uniform) mesh refinement, off by default so existing
     // behaviour at a fixed uniform resolution is unchanged unless opted
     // into. When enabled, every `adaptEveryNSteps` steps each cell's
@@ -432,6 +478,13 @@ private:
     // Per-cell cached geometry from the last computeGeometry() call.
     std::vector<PipeGeometry::StratifiedGeometry> geom_;
 
+    // Per-cell reference liquid-height equilibrium profile (see
+    // SolverOptions::enableWellBalancedGravity), rebuilt from the current
+    // theta field every step inside computeGeometry() -- cheap (O(N)) and
+    // consistent with this file's existing no-stale-caching style. Only
+    // read when enableWellBalancedGravity is set.
+    std::vector<double> h1Eq_;
+
     // Face-centred shear stresses (size N+1) and cell-centred entrainment /
     // disengagement / deposition rates (size N), refreshed each step by
     // computeClosures() from the previous step's velocity field (lagged
@@ -450,6 +503,7 @@ private:
     double inletEg() const;
 
     void computeGeometry();
+    void computeH1Equilibrium();
     void computeClosures();
     void applyInletBoundary();
     void applyOutletBoundary();

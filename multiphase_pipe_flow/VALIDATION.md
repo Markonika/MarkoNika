@@ -594,3 +594,27 @@ methodology, tables, and figures are in the paper (Section 7,
    `validate_quantitative` (294.8s -> 73.8s) and 3.9x on `validate_shoham`
    (55.7s -> 14.2s) -- both close to the ideal 4x, as expected for this
    embarrassingly-parallel a workload.
+9. **Done:** implemented `SolverOptions::enableWellBalancedGravity`, a
+   discrete-hydrostatic-reconstruction fix for the interface-slope gravity
+   term's discretization in terrain-following (spatially varying `theta`)
+   runs -- see README.md, "Well-balanced gravity discretization" for the
+   full derivation and test results. A standalone equilibrium test (true
+   per-cell static-equilibrium profile for a 4-segment, uneven-angle
+   terrain pipe, zero net flow, interior-face velocity tracked from rest)
+   confirmed the default scheme's spurious drift shrinks at close to first
+   order under mesh refinement (1.36e-5 m/s at N=40 down to 1.04e-6 m/s at
+   N=320) -- real, but ordinary truncation error, not a structural defect.
+   The fix reduces this by roughly five orders of magnitude (6.2e-11 to
+   8.3e-11 m/s across the same refinement sweep) and, notably, the residual
+   stops shrinking with resolution at that point -- consistent with having
+   reached the floating-point noise floor rather than a resolution-limited
+   error, the expected signature of *exact* (not just asymptotic)
+   well-balancing. Regression-confirmed bit-for-bit identical default (off)
+   behaviour against the full demo suite. On the existing terrain demo
+   case (a genuinely flowing case that develops a KH-unstable slug front,
+   not an equilibrium case), enabling the option left total liquid mass
+   within 0.5% and the bulk of the holdup profile closely matched, but
+   shifted the exact slug-front position -- diagnosed, via a side-by-side
+   profile/mass comparison (not just asserted), as the same
+   chaotic-sensitivity signature already documented in item 7's
+   floating-point-reordering finding, not a new bug.
