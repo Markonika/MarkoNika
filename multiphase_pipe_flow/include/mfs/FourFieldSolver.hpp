@@ -438,6 +438,93 @@ public:
     // Eq. (23): dt such that max(|u|)*dt/dz = courantTarget.
     double stableTimeStep() const;
 
+    // Jacobian-free Newton-Krylov (JFNK) fully implicit alternative to
+    // step()'s segregated explicit/semi-implicit pressure-velocity update,
+    // addressing the pressure-velocity coupling limitation flagged (but
+    // left unaddressed) by this codebase's own earlier investigation (see
+    // VALIDATION.md, "Recommended follow-up" item 4 and README.md,
+    // "Pressure-velocity coupling investigation"). Backward-Euler, solved
+    // simultaneously and nonlinearly for the layer velocities (u1, u2) and
+    // pressure (P) via Newton's method, each Newton step's linear solve
+    // performed by restarted GMRES using only matrix-free, finite-difference
+    // directional derivatives of the residual -- no Jacobian is ever formed
+    // or stored. See FourFieldSolverImplicit.cpp for the full derivation,
+    // residual definition, and scoping notes (volume fractions, dispersed-
+    // phase velocities, and mass-transfer/entrainment source terms remain
+    // explicit/lagged from the start-of-step state, exactly as in step();
+    // only the layer-velocity/pressure subsystem -- advection, the pressure
+    // gradient, gravity, and wall/interfacial friction, all evaluated
+    // nonlinearly at the trial state, no hand-linearization -- is implicit).
+    //
+    // Unlike step(), this does NOT silently fall back or clamp through a
+    // non-converged solve: ImplicitStepResult::converged reports whether
+    // Newton reached options_.jfnk.newtonTol within
+    // options_.jfnk.maxNewtonIters, and the solver's state is left
+    // UNCHANGED (as if this call never happened) if it did not -- the
+    // caller is expected to retry at a smaller dt, standard
+    // pseudo-transient-continuation practice for this class of method
+    // (Knoll & Keyes, 2004, "Jacobian-free Newton-Krylov methods: a survey
+    // of approaches and applications", J. Comput. Phys. 193).
+    struct JFNKOptions {
+        int maxNewtonIters = 30;
+        // ||R||_2, relative to the initial residual norm. 1e-6 (not a
+        // tighter value like 1e-8) is a deliberate choice, confirmed by
+        // direct test: a first-order forward-difference Jacobian-free
+        // directional derivative has its own truncation-error floor, and
+        // demanding many more orders of magnitude of reduction than that
+        // floor allows just burns Newton iterations without further
+        // progress -- see stepImplicitPressureVelocityAdaptive()'s
+        // documentation for the full account of how this was diagnosed.
+        double newtonTol = 1.0e-6;
+        int gmresRestart = 30;
+        int gmresMaxIters = 60;
+        double gmresTol = 1.0e-6;   // relative linear-residual tolerance per Newton step
+        double fdEpsilon = 1.0e-7;  // relative finite-difference step for J*v
+    } jfnk;
+
+    struct ImplicitStepResult {
+        bool converged = false;
+        int newtonIterations = 0;
+        int totalGmresIterations = 0;
+        double initialResidualNorm = 0.0;
+        double finalResidualNorm = 0.0;
+    };
+    ImplicitStepResult stepImplicitPressureVelocity(double dt);
+
+    // Pseudo-transient-continuation wrapper around
+    // stepImplicitPressureVelocity(): if a sub-step's Newton solve fails
+    // to converge, halve it and retry, accumulating converged sub-steps
+    // until the full requested dt is covered (or the sub-step width falls
+    // below options_.minTimeStep, at which point it gives up and leaves
+    // the solver exactly at the end of the last successfully converged
+    // sub-step -- never at a non-converged, potentially garbage state).
+    //
+    // This is not a cosmetic add-on: it is the standard, expected way to
+    // use a JFNK solver at all, and is necessary here specifically, not
+    // just generically "good practice" -- confirmed by direct test, not
+    // assumed. Newton's convergence basin shrinks as the step gets more
+    // nonlinear (larger dt): on a mild test case, a direct attempt at
+    // dt = 1e-4 * stableTimeStep() converges to machine precision in 2
+    // Newton iterations, while the SAME physical case at
+    // dt = 0.3 * stableTimeStep() stalls after a large initial reduction
+    // and never reaches even a modest tolerance in 30 iterations -- not
+    // because of a bug (the residual evaluator and the matrix-free GMRES
+    // linear solve were each independently verified correct), but because
+    // the finite-difference-Jacobian Newton step's basin of convergence is
+    // genuinely smaller than the full step at that stiffness. Repeated
+    // smaller sub-steps, each well inside that basin, is the textbook
+    // remedy (see e.g. Knoll & Keyes 2004's own discussion of continuation
+    // strategies for exactly this failure mode), not a workaround for a
+    // defect.
+    struct ImplicitAdaptiveResult {
+        bool converged = false;       // true iff the FULL requested dt was covered
+        double dtCovered = 0.0;       // actual simulated time advanced (== dt if converged)
+        int subSteps = 0;
+        int totalNewtonIterations = 0;
+        int totalGmresIterations = 0;
+    };
+    ImplicitAdaptiveResult stepImplicitPressureVelocityAdaptive(double dt);
+
     double time() const { return time_; }
     const FlowState& state() const { return state_; }
     FlowState& mutableState() { return state_; }
@@ -529,6 +616,16 @@ private:
     // equidistribution/remap mechanics.
     std::vector<double> computeMonitorFunction() const;
     bool relocateMesh();
+
+    // JFNK (see stepImplicitPressureVelocity() above and
+    // FourFieldSolverImplicit.cpp for the full derivation and the residual
+    // definition/unknown layout). Kept in a separate translation unit from
+    // the rest of this file so the existing, heavily regression-tested
+    // explicit/semi-implicit pipeline above is untouched by this addition --
+    // implemented entirely inside stepImplicitPressureVelocity() itself
+    // (private free functions/lambdas in that .cpp, not additional class
+    // methods), reading the same private state (geom_, rhoGasCell_, etc.)
+    // but never writing it except at the very end of a CONVERGED call.
 };
 
 } // namespace mfs

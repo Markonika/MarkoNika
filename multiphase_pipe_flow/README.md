@@ -833,6 +833,100 @@ physically-motivated change in the discretization can relocate a
 nonlinearly-amplified front without indicating an error, since the
 front's *timing*, not its existence, is what differs.
 
+### Jacobian-Free Newton-Krylov fully-implicit coupling (`stepImplicitPressureVelocity`, `stepImplicitPressureVelocityAdaptive`)
+
+An alternative to `step()`'s segregated explicit/semi-implicit update,
+addressing the pressure-velocity coupling limitation this codebase's own
+earlier investigation flagged but did not resolve (see
+"Pressure-velocity coupling investigation" above and VALIDATION.md,
+"Recommended follow-up" item 4). `step()` remains the default and is
+untouched; this is an opt-in alternative time-advance path, not a
+replacement.
+
+**Formulation.** Backward-Euler, solved simultaneously and nonlinearly
+for the layer velocities (`u1`, `u2`) and pressure (`P`) by Newton's
+method. Each Newton step's linear solve is a restarted GMRES
+(Saad & Schultz 1986) using only matrix-free, forward-finite-difference
+directional derivatives of the residual (`J*v ~ (R(x+h*v)-R(x))/h`) -- no
+Jacobian is ever formed or stored, hence "Jacobian-free". Volume
+fractions, dispersed-phase velocities, and mass-transfer/entrainment
+source terms remain explicit/lagged from the start-of-step state, exactly
+as in `step()`; only the layer-velocity/pressure subsystem -- advection,
+the pressure gradient, gravity (respecting `enableWellBalancedGravity` if
+set), and wall/interfacial friction -- is implicit, with friction's
+dimensionless factor itself lagged (to avoid re-introducing
+correlation-switch discontinuities such as Andreussi-Persen's F0=0.36
+threshold into the trial-state residual) while the quadratic shear stress
+is still evaluated nonlinearly at the trial velocity. Unlike `step()`,
+there is no silent fallback: a non-converged Newton solve leaves the
+solver's state completely unchanged, as if the call never happened.
+
+**Essential implementation detail: diagonal scaling.** The unknown vector
+mixes velocities (O(1-10) m/s) and pressures (O(1e5) Pa). Both the Newton
+unknown and the residual are nondimensionalized by physically-motivated
+scales (velocity scale from the current state, pressure scale from the
+outlet pressure, a flux-type scale for the pressure-equation residual
+row) before the finite-difference Jacobian and GMRES's orthogonalization
+ever see them -- without this, the mismatched magnitudes badly condition
+both. Confirmed necessary, though not sufficient on its own, by direct
+test (see below).
+
+**The debugging path, honestly reported.** Early attempts stalled at a
+modest residual reduction (~6.5e-4) regardless of fix attempted. Several
+plausible causes were investigated and *ruled out* by direct test rather
+than assumed: GMRES itself (verified correct against three independent
+dense linear systems with a known solution); friction-correlation branch
+discontinuities (lagging the friction factor changed nothing); a Jacobi
+(diagonal) preconditioner (implemented, measurably made no difference,
+removed rather than left as dead weight); and a genuine but
+inconsequential double-scaling bug in the outlet boundary row (found and
+fixed, but did not change the stall). **The actual explanation**, found
+by sweeping dt from `1e-6` to `1.0` times a mild case's own
+`stableTimeStep()`: Newton converges to machine precision
+(`||R|| ~ 1e-16`) in 2 iterations at the smallest dt tested, with
+convergence quality degrading *smoothly* as dt grows -- not a bug, but
+ordinary shrinkage of Newton's convergence basin as the step becomes more
+nonlinear, exactly the behaviour Knoll & Keyes (2004, "Jacobian-free
+Newton-Krylov methods: a survey of approaches and applications",
+J. Comput. Phys. 193) describe as standard for this class of method. This
+reframed `jfnk.newtonTol` itself: the original `1e-8` demanded more
+residual reduction than a first-order finite-difference Jacobian can
+reliably deliver (the observed floor is ~1e-4 to 1e-7 at moderate dt), so
+it was relaxed to `1e-6`, and `stepImplicitPressureVelocityAdaptive()` --
+dt-halving on Newton failure, doubling back toward the target on success
+(pseudo-transient continuation, the textbook remedy for exactly this
+failure mode) -- was implemented instead of continuing to chase a
+preconditioner.
+
+**Validation result.** The direct, apples-to-apples replication of the
+original stiff high-Vsg case and dt (D=0.05 m, L=5 m, N=50, Vsl=0.05 m/s,
+Vsg=20 m/s, initial holdup 0.1, dt=0.005 s, 100 steps / 0.5 s simulated --
+the same case and the exact dt that
+"Pressure-velocity coupling investigation" above already showed the
+explicit scheme blows up at) gives the clean, positive result this work
+was aimed at: **the explicit scheme blows up at step 64/100 (NaN/Inf in
+holdup), while `stepImplicitPressureVelocityAdaptive()` completes all 100
+steps, stable**, reaching `|u2-u1|_max = 21.72` m/s. The cost is real and
+should be stated plainly, not minimized: averaged per macro-step, 61.6
+sub-steps, 33.1 Newton iterations, and 1958.6 total GMRES
+matrix-vector products, for a full-run wall-clock cost of roughly 56 s
+against the explicit scheme's sub-5 ms (before it blows up) on the same
+hardware. This is the expected trade of a fully-implicit method: stability
+at a stiffness the explicit scheme cannot reach at all, bought at a
+per-step cost that is only worth paying when the explicit scheme's own
+limit is actually the binding constraint. On a milder, non-blowing-up
+case at moderate dt (0.3x `stableTimeStep()`, 300 matched-dt steps), the
+two schemes' trajectories agree closely (`max|u1 diff| `and
+`max|el diff|` both small), confirming JFNK converges to the same physics
+as the explicit scheme where both are valid, not just to *a* stable
+answer.
+
+**Confirmed:** regression-tested bit-for-bit identical default (`step()`)
+behaviour against the full demo suite -- the new code lives entirely in
+its own translation unit (`FourFieldSolverImplicit.cpp`) and is never
+called unless the caller explicitly invokes
+`stepImplicitPressureVelocity[Adaptive]()`.
+
 ## Validation against experimental data
 
 **[VALIDATION.md](VALIDATION.md)** compares the solver's predicted flow

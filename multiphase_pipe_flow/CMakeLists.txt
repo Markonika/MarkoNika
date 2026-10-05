@@ -28,6 +28,7 @@ add_library(mfs
     src/PipeGeometry.cpp
     src/Closures.cpp
     src/FourFieldSolver.cpp
+    src/FourFieldSolverImplicit.cpp
     src/FlowRegimeClassifier.cpp
 )
 target_include_directories(mfs PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

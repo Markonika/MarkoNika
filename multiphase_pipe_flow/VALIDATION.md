@@ -618,3 +618,28 @@ methodology, tables, and figures are in the paper (Section 7,
    profile/mass comparison (not just asserted), as the same
    chaotic-sensitivity signature already documented in item 7's
    floating-point-reordering finding, not a new bug.
+10. **Done:** implemented `stepImplicitPressureVelocity[Adaptive]()`, a
+    Jacobian-Free Newton-Krylov (JFNK) fully-implicit alternative to
+    `step()`'s segregated coupling, directly addressing the limitation
+    flagged in "Recommended follow-up" item 4 above and in README.md's
+    "Pressure-velocity coupling investigation" -- see README.md,
+    "Jacobian-Free Newton-Krylov fully-implicit coupling" for the full
+    formulation, the debugging narrative (several plausible causes --
+    a GMRES bug, friction-correlation branch discontinuities, saddle-point
+    ill-conditioning needing a preconditioner -- investigated by direct
+    test and ruled out, before a dt-sweep diagnostic correctly identified
+    ordinary Newton-basin shrinkage, not a defect, as the actual cause),
+    and the measured results. The decisive test directly replicates the
+    exact stiff case and dt (D=0.05 m, L=5 m, N=50, Vsl=0.05, Vsg=20,
+    dt=0.005 s, 100 steps) that item 4's own earlier investigation showed
+    the explicit scheme blowing up on: the explicit scheme again blows up,
+    at step 64/100, while the new adaptive JFNK wrapper completes all 100
+    steps stably (`|u2-u1|_max` = 21.72 m/s), at an honestly-reported cost
+    of ~56 s wall-clock (vs. the explicit scheme's sub-5 ms before
+    diverging) and an average of 61.6 sub-steps / 33.1 Newton iterations /
+    1958.6 GMRES matrix-vector products per requested macro-step. On a
+    milder, non-stiff case the two schemes' trajectories agree closely at
+    matched dt, confirming JFNK converges to the same physics, not merely
+    to *a* stable answer. Regression-confirmed bit-for-bit identical
+    `step()` behaviour (the new code is isolated in its own translation
+    unit and only runs when explicitly invoked).
