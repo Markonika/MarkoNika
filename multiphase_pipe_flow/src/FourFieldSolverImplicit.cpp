@@ -57,6 +57,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <deque>
 #include <numeric>
 #include <vector>
 
@@ -175,6 +176,65 @@ int gmresSolve(MatVec matVec, const std::vector<double>& b, std::vector<double>&
             for (int j = 0; j < n; ++j) x[j] += y[i] * V[i][j];
     }
     return totalMatVecs;
+}
+
+// Solves the small (mk x mk, mk typically <= 10) regularized normal-equations
+// system (A^T A + regFrac*avgDiag*I) gamma = A^T b for Anderson mixing's
+// least-squares step, via plain Gaussian elimination with partial
+// pivoting -- more than adequate at this size, and avoids pulling in a
+// dense linear-algebra dependency for a handful of unknowns. `cols` holds
+// the mk vectors Delta F_i (each length n); `b` is F_k (length n).
+// `regFrac` is a RELATIVE regularization strength (fraction of A^T A's
+// own average diagonal magnitude), not an absolute value -- an absolute
+// regularizer tied to the residual norm was tried first and found to
+// leave the system under- or over-regularized depending on the step size
+// beta (Delta F_i shrinks with beta, so a beta-independent absolute reg
+// is the wrong comparison scale), confirmed by direct test: Anderson
+// mixing performed consistently WORSE than plain damped Picard at every
+// depth tried with that absolute scheme. Scaling the regularizer to the
+// Gram matrix's own magnitude keeps it meaningful regardless of beta.
+std::vector<double> andersonLeastSquares(const std::vector<std::vector<double>>& cols,
+                                          const std::vector<double>& b, double regFrac) {
+    const int mk = static_cast<int>(cols.size());
+    std::vector<std::vector<double>> AtA(mk, std::vector<double>(mk, 0.0));
+    std::vector<double> Atb(mk, 0.0);
+    for (int i = 0; i < mk; ++i) {
+        for (int j = 0; j < mk; ++j) {
+            double s = 0.0;
+            for (size_t k = 0; k < b.size(); ++k) s += cols[i][k] * cols[j][k];
+            AtA[i][j] = s;
+        }
+        double s = 0.0;
+        for (size_t k = 0; k < b.size(); ++k) s += cols[i][k] * b[k];
+        Atb[i] = s;
+    }
+    double avgDiag = 0.0;
+    for (int i = 0; i < mk; ++i) avgDiag += AtA[i][i];
+    avgDiag = (mk > 0) ? avgDiag / mk : 0.0;
+    const double reg = regFrac * std::max(avgDiag, 1.0e-300);
+    for (int i = 0; i < mk; ++i) AtA[i][i] += reg;
+    // Gaussian elimination with partial pivoting.
+    for (int col = 0; col < mk; ++col) {
+        int piv = col;
+        double best = std::fabs(AtA[col][col]);
+        for (int r = col + 1; r < mk; ++r) {
+            if (std::fabs(AtA[r][col]) > best) { best = std::fabs(AtA[r][col]); piv = r; }
+        }
+        if (piv != col) { std::swap(AtA[piv], AtA[col]); std::swap(Atb[piv], Atb[col]); }
+        if (std::fabs(AtA[col][col]) < 1.0e-300) continue; // leave this unknown at 0
+        for (int r = col + 1; r < mk; ++r) {
+            const double factor = AtA[r][col] / AtA[col][col];
+            for (int c = col; c < mk; ++c) AtA[r][c] -= factor * AtA[col][c];
+            Atb[r] -= factor * Atb[col];
+        }
+    }
+    std::vector<double> gamma(mk, 0.0);
+    for (int r = mk - 1; r >= 0; --r) {
+        double sum = Atb[r];
+        for (int c = r + 1; c < mk; ++c) sum -= AtA[r][c] * gamma[c];
+        gamma[r] = (std::fabs(AtA[r][r]) > 1.0e-300) ? sum / AtA[r][r] : 0.0;
+    }
+    return gamma;
 }
 
 } // namespace
@@ -642,6 +702,368 @@ FourFieldSolver::ImplicitAdaptiveResult FourFieldSolver::stepImplicitPressureVel
     }
     agg.converged = true;
     return agg;
+}
+
+// Anderson-accelerated Picard solve of the EXACT SAME backward-Euler
+// (u1, u2, P) residual system stepImplicitPressureVelocity() solves --
+// same snapshot/lagging scope, same evalResidual/evalScaled construction
+// (duplicated verbatim below rather than factored out, for the same
+// reason rho1Of/rho2Of are duplicated at the top of this file: keeping
+// each entry point self-contained means neither can be perturbed by a
+// change made for the other's sake). The only thing that differs from
+// stepImplicitPressureVelocity() past this point is the solution method:
+// no Jacobian-vector product, no GMRES -- just the scaled residual
+// itself, optionally extrapolated by Anderson mixing. See
+// FourFieldSolver.hpp's SegregatedOptions/stepSegregatedAccelerated() for
+// the public-facing summary.
+FourFieldSolver::SegregatedStepResult FourFieldSolver::stepSegregatedAccelerated(double dt) {
+    SegregatedStepResult result;
+    const int N = state_.N;
+    const int nUnk = 3 * N - 2;
+    if (N < 2) return result;
+
+    computeGeometry();
+    computeClosures();
+
+    const double A = geometry_.area();
+    const double D = geometry_.diameter();
+    const double rhoL = fluid_.rhoLiquid;
+
+    const std::vector<double> u1Old = state_.u1, u2Old = state_.u2, POld = state_.P;
+    const std::vector<double> rhoGasOld = rhoGasCell_;
+    const std::vector<double> elOld = state_.el, edOld = state_.ed, egOld = state_.eg, ebOld = state_.eb;
+    const std::vector<double> ulOld = state_.ul, ugOld = state_.ug, udOld = state_.ud, ubOld = state_.ub;
+    const auto geomOld = geom_;
+    const double outletPressure = bc_.outletPressure;
+    const double maxV = options_.maxVelocity;
+
+    const double inletEl_ = inletEl(), inletEd_ = inletEd(), inletEg_ = inletEg(), inletEb_ = inletEb();
+    const double inletEL_ = inletEL(), inletEG_ = inletEG();
+    const double ul0 = bc_.inletSuperficialLiquid / std::max(inletEL_, small_e);
+    const double ug0 = bc_.inletSuperficialGas / std::max(inletEG_, small_e);
+
+    std::vector<double> turb1(N + 1, 0.0), turb2(N + 1, 0.0);
+    if (options_.enableTurbulentViscosity) {
+        const double mixingLength = options_.turbulentMixingLengthFraction * D;
+        std::vector<double> urOld(N + 1);
+        for (int i = 0; i <= N; ++i) urOld[i] = u2Old[i] - u1Old[i];
+        for (int f = 1; f < N; ++f) {
+            const double dzL = state_.cellWidth(f - 1), dzR = state_.cellWidth(f);
+            const double d2 = 2.0 * ((urOld[f + 1] - urOld[f]) / (dzR * (dzL + dzR)) -
+                                      (urOld[f] - urOld[f - 1]) / (dzL * (dzL + dzR)));
+            const double nuT = mixingLength * std::fabs(urOld[f]);
+            const double aDiff = nuT * d2;
+            const double e1fSafe = std::max(0.5 * (state_.e1(f - 1) + state_.e1(f)), options_.momentumFractionFloor);
+            const double e2fSafe = std::max(0.5 * (state_.e2(f - 1) + state_.e2(f)), options_.momentumFractionFloor);
+            const double rho1f = 0.5 * (rho1Of(state_, rhoGasCell_, rhoL, f - 1) + rho1Of(state_, rhoGasCell_, rhoL, f));
+            const double rho2f = 0.5 * (rho2Of(state_, rhoGasCell_, rhoL, f - 1) + rho2Of(state_, rhoGasCell_, rhoL, f));
+            const double m1 = rho1f * e1fSafe, m2 = rho2f * e2fSafe;
+            turb1[f] = -aDiff * m2 / (m1 + m2);
+            turb2[f] = +aDiff * m1 / (m1 + m2);
+        }
+    }
+
+    std::vector<double> flwLagged(N + 1, 0.0), fgwLagged(N + 1, 0.0), fiLagged(N + 1, 0.0);
+    {
+        const double epsVel = 1.0e-3;
+        for (int f = 1; f < N; ++f) {
+            const double rhoGf = 0.5 * (rhoGasOld[f - 1] + rhoGasOld[f]);
+            const double u1o = u1Old[f], u2o = u2Old[f], uro = u2Old[f] - u1Old[f];
+            flwLagged[f] = (std::fabs(u1o) > epsVel) ? tauW1_[f] / (0.5 * rhoL * std::fabs(u1o) * u1o) : 0.0;
+            fgwLagged[f] = (std::fabs(u2o) > epsVel) ? tauW2_[f] / (0.5 * rhoGf * std::fabs(u2o) * u2o) : 0.0;
+            fiLagged[f] = (std::fabs(uro) > epsVel) ? tauI_[f] / (0.5 * rhoGf * std::fabs(uro) * uro) : 0.0;
+        }
+    }
+
+    auto evalResidual = [&](const std::vector<double>& x, std::vector<double>& R) {
+        auto u1At = [&](int f) -> double {
+            if (f == 0) return ul0;
+            if (f == N) return x[N - 2];
+            return x[f - 1];
+        };
+        auto u2At = [&](int f) -> double {
+            if (f == 0) return ug0;
+            if (f == N) return x[(N - 1) + (N - 2)];
+            return x[(N - 1) + (f - 1)];
+        };
+        auto pAt = [&](int i) -> double { return x[2 * (N - 1) + i]; };
+
+        R.assign(nUnk, 0.0);
+
+        for (int f = 1; f < N; ++f) {
+            const int cL = f - 1, cR = f;
+            const double e1L = state_.e1(cL), e1R = state_.e1(cR);
+            const double e2L = state_.e2(cL), e2R = state_.e2(cR);
+            const double e1fSafe = std::max(0.5 * (e1L + e1R), options_.momentumFractionFloor);
+            const double e2fSafe = std::max(0.5 * (e2L + e2R), options_.momentumFractionFloor);
+            const double rho1f = 0.5 * (rho1Of(state_, rhoGasCell_, rhoL, cL) + rho1Of(state_, rhoGasCell_, rhoL, cR));
+            const double rho2f = 0.5 * (rho2Of(state_, rhoGasCell_, rhoL, cL) + rho2Of(state_, rhoGasCell_, rhoL, cR));
+            const double rhoGf = 0.5 * (rhoGasOld[cL] + rhoGasOld[cR]);
+
+            const double centerDz = state_.centerDistance(cL, cR);
+            const double thetaF = 0.5 * (state_.theta[cL] + state_.theta[cR]);
+            const double Swp1f = 0.5 * (geomOld[cL].Swp1 + geomOld[cR].Swp1);
+            const double Swp2f = 0.5 * (geomOld[cL].Swp2 + geomOld[cR].Swp2);
+            const double Sif = 0.5 * (geomOld[cL].Si + geomOld[cR].Si);
+
+            const double dPdz = (pAt(cR) - pAt(cL)) / centerDz;
+            double gravCosTerm, gravSinTerm;
+            if (!options_.enableWellBalancedGravity) {
+                const double dh1dz = (geomOld[cR].h1 - geomOld[cL].h1) / centerDz;
+                gravCosTerm = gravity * std::cos(thetaF) * dh1dz;
+                gravSinTerm = gravity * std::sin(thetaF);
+            } else {
+                const double detadz = ((geomOld[cR].h1 - h1Eq_[cR]) - (geomOld[cL].h1 - h1Eq_[cL])) / centerDz;
+                gravCosTerm = gravity * std::cos(thetaF) * detadz;
+                gravSinTerm = 0.0;
+            }
+
+            const double u1f = u1At(f);
+            const double du1dzAdv = (u1f >= 0.0) ? (u1At(f) - u1At(f - 1)) / state_.cellWidth(cL)
+                                                  : (u1At(f + 1) - u1At(f)) / state_.cellWidth(cR);
+            const double advectiveTerm1 = u1f * du1dzAdv;
+            const double u2f = u2At(f);
+            const double du2dzAdv = (u2f >= 0.0) ? (u2At(f) - u2At(f - 1)) / state_.cellWidth(cL)
+                                                  : (u2At(f + 1) - u2At(f)) / state_.cellWidth(cR);
+            const double advectiveTerm2 = u2f * du2dzAdv;
+
+            const double tauW1 = wallShearStress(flwLagged[f], rhoL, u1f);
+            const double tauW2 = wallShearStress(fgwLagged[f], rhoGf, u2f);
+            const double tauI = interfacialShearStress(fiLagged[f], rhoGf, u2f, u1f);
+
+            const double UeF = 0.5 * (Ue_[cL] + Ue_[cR]);
+            const double UdF = 0.5 * (Ud_[cL] + Ud_[cR]);
+            const double phiEF = 0.5 * (phiE_[cL] + phiE_[cR]);
+            const double phiDeF = 0.5 * (phiDe_[cL] + phiDe_[cR]);
+            const double massSrc1 = (-UeF * ulOld[f] + UdF * udOld[f] + phiEF * ugOld[f] - phiDeF * ubOld[f]) / (e1fSafe * rho1f);
+            const double massSrc2 = (UeF * ulOld[f] - UdF * udOld[f] - phiEF * ugOld[f] + phiDeF * ubOld[f]) / (e2fSafe * rho2f);
+
+            const double du1dt = -advectiveTerm1 - dPdz / rho1f - gravCosTerm - gravSinTerm
+                                  - tauW1 * Swp1f / (A * e1fSafe * rho1f)
+                                  + tauI * Sif / (A * e1fSafe * rho1f)
+                                  + massSrc1 + turb1[f];
+            const double du2dt = -advectiveTerm2 - dPdz / rho2f - gravCosTerm - gravSinTerm
+                                  - tauW2 * Swp2f / (A * e2fSafe * rho2f)
+                                  - tauI * Sif / (A * e2fSafe * rho2f)
+                                  + massSrc2 + turb2[f];
+
+            R[f - 1] = (u1f - u1Old[f]) - dt * du1dt;
+            R[(N - 1) + (f - 1)] = (u2f - u2Old[f]) - dt * du2dt;
+        }
+
+        std::vector<double> Rp(N, 0.0);
+        for (int f = 1; f < N; ++f) {
+            const int cL = f - 1, cR = f;
+            const double u1f = u1At(f), u2f = u2At(f);
+            const double el = 0.5 * (elOld[cL] + elOld[cR]);
+            const double eb = 0.5 * (ebOld[cL] + ebOld[cR]);
+            const double eg = 0.5 * (egOld[cL] + egOld[cR]);
+            const double ed = 0.5 * (edOld[cL] + edOld[cR]);
+            const double e1 = std::max(el + eb, small_e);
+            const double e2 = std::max(eg + ed, small_e);
+            const double rhoG = 0.5 * (rhoGasOld[cL] + rhoGasOld[cR]);
+            const double rho1 = (el * rhoL + eb * rhoG) / e1;
+            const double rho2 = (eg * rhoG + ed * rhoL) / e2;
+            const double cb = std::clamp(eb / e1, 0.0, 1.0);
+            const double cd = std::clamp(ed / e2, 0.0, 1.0);
+            const double floor = options_.momentumFractionFloor;
+            const double denomL = std::max((1.0 - cb) * rhoL, floor * rhoL);
+            const double ulf = (rho1 * u1f - cb * rhoG * ubOld[f]) / denomL;
+            const double denomG = std::max((1.0 - cd) * rhoG, floor * rhoG);
+            const double ugf = (rho2 * u2f - cd * rhoL * udOld[f]) / denomG;
+
+            const double elF = (ulf >= 0.0) ? elOld[cL] : elOld[cR];
+            const double edF = (udOld[f] >= 0.0) ? edOld[cL] : edOld[cR];
+            const double egF = (ugf >= 0.0) ? egOld[cL] : egOld[cR];
+            const double ebF = (ubOld[f] >= 0.0) ? ebOld[cL] : ebOld[cR];
+            const double qTotal = elF * ulf + edF * udOld[f] + egF * ugf + ebF * ubOld[f];
+
+            const double widthL = state_.cellWidth(cL), widthR = state_.cellWidth(cR);
+            Rp[cL] += qTotal / widthL;
+            Rp[cR] -= qTotal / widthR;
+        }
+        {
+            const double qLiquidIn = inletEl_ * ul0 + inletEd_ * udOld[0];
+            const double qGasIn = inletEg_ * ug0 + inletEb_ * ubOld[0];
+            Rp[0] -= (qLiquidIn + qGasIn) / state_.cellWidth(0);
+        }
+        {
+            const int c = N - 1;
+            const double u1N = u1At(N), u2N = u2At(N);
+            const double rhoG = rhoGasOld[c];
+            const double rho1 = (elOld[c] * rhoL + ebOld[c] * rhoG) / std::max(elOld[c] + ebOld[c], small_e);
+            const double rho2 = (egOld[c] * rhoG + edOld[c] * rhoL) / std::max(egOld[c] + edOld[c], small_e);
+            const double cb = std::clamp(ebOld[c] / std::max(elOld[c] + ebOld[c], small_e), 0.0, 1.0);
+            const double cd = std::clamp(edOld[c] / std::max(egOld[c] + edOld[c], small_e), 0.0, 1.0);
+            const double floor = options_.momentumFractionFloor;
+            const double ulN = (rho1 * u1N - cb * rhoG * ubOld[N]) / std::max((1.0 - cb) * rhoL, floor * rhoL);
+            const double ugN = (rho2 * u2N - cd * rhoL * udOld[N]) / std::max((1.0 - cd) * rhoG, floor * rhoG);
+            const double qLiquidOut = elOld[c] * ulN + edOld[c] * udOld[N];
+            const double qGasOut = egOld[c] * ugN + ebOld[c] * ubOld[N];
+            Rp[c] += (qLiquidOut + qGasOut) / state_.cellWidth(c);
+        }
+
+        for (int i = 0; i < N - 1; ++i) {
+            const double eG = egOld[i] + ebOld[i];
+            const double rhoGasNew = fluid_.rhoGas(pAt(i));
+            const double accumulation = eG * (rhoGasNew - rhoGasOld[i]) / (std::max(rhoGasOld[i], tiny) * dt);
+            R[2 * (N - 1) + i] = Rp[i] + accumulation;
+        }
+        R[2 * (N - 1) + (N - 1)] = pAt(N - 1) - outletPressure;
+    };
+
+    const double uScale = std::max(1.0e-3, [&] {
+        double m = 0.0;
+        for (double v : u1Old) m = std::max(m, std::fabs(v));
+        for (double v : u2Old) m = std::max(m, std::fabs(v));
+        return m;
+    }());
+    const double pScale = std::max(1.0, outletPressure);
+    const double Lscale = state_.L / N;
+    const double rScaleP = std::max(uScale / Lscale, 1.0 / std::max(dt, tiny));
+
+    std::vector<double> scale(nUnk), rscale(nUnk);
+    for (int i = 0; i < 2 * (N - 1); ++i) scale[i] = uScale;
+    for (int i = 2 * (N - 1); i < nUnk; ++i) scale[i] = pScale;
+    for (int i = 0; i < 2 * (N - 1); ++i) rscale[i] = uScale;
+    for (int i = 2 * (N - 1); i < nUnk - 1; ++i) rscale[i] = rScaleP;
+    rscale[nUnk - 1] = pScale;
+
+    auto evalScaled = [&](const std::vector<double>& xHat, std::vector<double>& Fhat) {
+        std::vector<double> xPhys(nUnk);
+        for (int i = 0; i < nUnk; ++i) xPhys[i] = xHat[i] * scale[i];
+        std::vector<double> Rphys;
+        evalResidual(xPhys, Rphys);
+        Fhat.resize(nUnk);
+        for (int i = 0; i < nUnk; ++i) Fhat[i] = Rphys[i] / rscale[i];
+    };
+
+    std::vector<double> xHat(nUnk);
+    for (int f = 1; f < N; ++f) {
+        xHat[f - 1] = u1Old[f] / uScale;
+        xHat[(N - 1) + (f - 1)] = u2Old[f] / uScale;
+    }
+    for (int i = 0; i < N; ++i) xHat[2 * (N - 1) + i] = POld[i] / pScale;
+
+    std::vector<double> Fcur;
+    evalScaled(xHat, Fcur);
+    double r0norm = 0.0;
+    for (double v : Fcur) r0norm += v * v;
+    r0norm = std::sqrt(r0norm);
+    result.initialResidualNorm = r0norm;
+    if (r0norm < 1.0e-300) {
+        result.converged = true;
+        result.finalResidualNorm = r0norm;
+        return result;
+    }
+    const double absTol = std::max(segregated.tol * r0norm, 1.0e-14);
+
+    // --- Richardson/Picard iteration xHat_{k+1} = xHat_k - beta*Fhat(xHat_k),
+    // optionally extrapolated by Anderson(m) mixing (Walker & Ni, 2011):
+    // maintain a short window of past iterates X_i = xHat_i and their
+    // Picard residuals F_i = Fhat(xHat_i); at each step, solve the small
+    // least-squares problem minimizing ||F_k - sum gamma_i*DeltaF_i|| over
+    // DeltaF_i = F_i - F_{i-1} across the window, then combine
+    // X_{k+1} = (X_k + beta*F_k) - sum gamma_i*(DeltaX_i + beta*DeltaF_i).
+    // With andersonDepth == 0 this degenerates exactly to plain Picard
+    // (gamma is never solved for), making the two methods directly,
+    // fairly comparable by toggling a single option.
+    std::deque<std::vector<double>> histX, histF; // oldest first, capped at andersonDepth+1
+    double rNorm = r0norm;
+    int iter = 0;
+    for (; iter < segregated.maxIters; ++iter) {
+        if (rNorm <= absTol) break;
+
+        if (std::getenv("MFS_JFNK_DEBUG")) {
+            std::fprintf(stderr, "[segregated] iter=%d rNorm=%.6e\n", iter, rNorm);
+        }
+
+        std::vector<double> xNext(nUnk);
+        const int depth = segregated.andersonDepth;
+        if (depth <= 0 || histX.empty()) {
+            for (int i = 0; i < nUnk; ++i) xNext[i] = xHat[i] - segregated.andersonBeta * Fcur[i];
+        } else {
+            // Standard Anderson(m) in "unconstrained delta" form (Walker &
+            // Ni, 2011; Fang & Saad, 2009), written directly in terms of the
+            // fixed-point map G(x) = x - beta*Fhat(x) used by the plain-
+            // Picard branch above (so toggling andersonDepth is the only
+            // thing that changes): with g_i := G(x_i)-x_i = -beta*F_i and
+            // Delta g_i = -beta*DeltaF_i, the textbook update
+            // x_{k+1} = x_k + g_k - sum gamma_i*(DeltaX_i + Delta g_i)
+            // becomes x_k - beta*F_k - sum gamma_i*(DeltaX_i - beta*DeltaF_i)
+            // -- note the MINUS on both beta terms below, not a plus; an
+            // earlier version of this code had both signs flipped (so the
+            // correction fought the Picard step instead of extrapolating
+            // it), which was caught by comparing against the depth=0
+            // baseline on the same case: Anderson was making the residual
+            // converge slower than plain damped Picard at every depth
+            // tested, the opposite of what the method is for. Build Delta
+            // vectors between consecutive retained iterates, including the
+            // current (xHat, Fcur) as the newest point.
+            std::vector<const std::vector<double>*> Xs, Fs;
+            for (size_t i = 0; i < histX.size(); ++i) { Xs.push_back(&histX[i]); Fs.push_back(&histF[i]); }
+            Xs.push_back(&xHat); Fs.push_back(&Fcur);
+            const int M = static_cast<int>(Xs.size()); // >= 2 here since histX was non-empty
+            std::vector<std::vector<double>> dF(M - 1, std::vector<double>(nUnk)), dX(M - 1, std::vector<double>(nUnk));
+            for (int i = 1; i < M; ++i) {
+                for (int j = 0; j < nUnk; ++j) {
+                    dF[i - 1][j] = (*Fs[i])[j] - (*Fs[i - 1])[j];
+                    dX[i - 1][j] = (*Xs[i])[j] - (*Xs[i - 1])[j];
+                }
+            }
+            const std::vector<double> gammaVec = andersonLeastSquares(dF, Fcur, segregated.andersonReg);
+            for (int j = 0; j < nUnk; ++j) {
+                double corr = 0.0;
+                for (int i = 0; i < M - 1; ++i) corr += gammaVec[i] * (dX[i][j] - segregated.andersonBeta * dF[i][j]);
+                xNext[j] = (xHat[j] - segregated.andersonBeta * Fcur[j]) - corr;
+            }
+        }
+
+        histX.push_back(xHat);
+        histF.push_back(Fcur);
+        while (static_cast<int>(histX.size()) > std::max(1, segregated.andersonDepth)) {
+            histX.pop_front();
+            histF.pop_front();
+        }
+
+        xHat = xNext;
+        evalScaled(xHat, Fcur);
+        rNorm = 0.0;
+        for (double v : Fcur) rNorm += v * v;
+        rNorm = std::sqrt(rNorm);
+    }
+
+    std::vector<double> x(nUnk);
+    for (int i = 0; i < nUnk; ++i) x[i] = xHat[i] * scale[i];
+
+    result.iterations = iter;
+    result.finalResidualNorm = rNorm;
+    result.converged = (rNorm <= absTol);
+    if (!result.converged) return result; // state_ left untouched, as documented
+
+    for (int f = 1; f < N; ++f) {
+        state_.u1[f] = std::clamp(x[f - 1], -maxV, maxV);
+        state_.u2[f] = std::clamp(x[(N - 1) + (f - 1)], -maxV, maxV);
+    }
+    state_.u1[0] = ul0; state_.u2[0] = ug0;
+    state_.u1[N] = state_.u1[N - 1]; state_.u2[N] = state_.u2[N - 1];
+    for (int i = 0; i < N; ++i) {
+        const double pMax = options_.maxPressureFactor * outletPressure;
+        state_.P[i] = std::clamp(x[2 * (N - 1) + i], options_.minPressure, pMax);
+    }
+    state_.P[N - 1] = outletPressure;
+    for (int i = 0; i < N; ++i) rhoGasCell_[i] = fluid_.rhoGas(state_.P[i]);
+
+    backSubstitutePhaseVelocities();
+    applyInletBoundary();
+    applyOutletBoundary();
+    updateDispersedMomentum(dt);
+    backSubstitutePhaseVelocities();
+    updateContinuity(dt);
+
+    time_ += dt;
+    ++stepCount_;
+    return result;
 }
 
 } // namespace mfs

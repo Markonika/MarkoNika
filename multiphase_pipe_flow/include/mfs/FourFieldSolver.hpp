@@ -525,6 +525,42 @@ public:
     };
     ImplicitAdaptiveResult stepImplicitPressureVelocityAdaptive(double dt);
 
+    // Anderson-accelerated Picard (fixed-point) solve of the EXACT SAME
+    // backward-Euler (u1, u2, P) residual system stepImplicitPressureVelocity()
+    // solves by Newton-GMRES -- same scoping, same snapshot/lagging
+    // conventions, same scaled unknown/residual (see
+    // FourFieldSolverImplicit.cpp for the shared formulation). The
+    // difference is purely the solution method: instead of a Newton step
+    // with a matrix-free GMRES linear solve, each iteration takes the
+    // trivial Richardson/Picard step xHat_{k+1} = xHat_k - Fhat(xHat_k)
+    // (one scaled residual evaluation, no linear solve at all), optionally
+    // extrapolated by Anderson mixing (Walker & Ni, 2011, "Anderson
+    // acceleration for fixed-point iterations") over a short window of
+    // past iterates -- the standard, much cheaper alternative to a fully
+    // coupled Newton-Krylov solve for accelerating a segregated fixed-point
+    // loop, surveyed alongside JFNK itself. This exists specifically to
+    // answer the question JFNK's own measured cost raises: how much of its
+    // stability benefit can a far cheaper fixed-point accelerator recover,
+    // without ever forming a Jacobian-vector product or running GMRES.
+    //
+    // Like stepImplicitPressureVelocity(), a non-converged call leaves
+    // state_ completely unchanged.
+    struct SegregatedOptions {
+        int maxIters = 200;
+        double tol = 1.0e-6;       // ||Fhat||, relative to the initial residual norm
+        int andersonDepth = 0;     // 0 = plain Picard/Richardson; >0 = Anderson(m)
+        double andersonBeta = 1.0; // mixing damping, (0,1]; 1.0 = undamped
+        double andersonReg = 1.0e-10; // Tikhonov reg., AS A FRACTION of the least-squares Gram matrix's own average diagonal magnitude (relative, not absolute -- see andersonLeastSquares())
+    } segregated;
+
+    struct SegregatedStepResult {
+        bool converged = false;
+        int iterations = 0;
+        double initialResidualNorm = 0.0;
+        double finalResidualNorm = 0.0;
+    };
+    SegregatedStepResult stepSegregatedAccelerated(double dt);
+
     double time() const { return time_; }
     const FlowState& state() const { return state_; }
     FlowState& mutableState() { return state_; }

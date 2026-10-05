@@ -643,3 +643,31 @@ methodology, tables, and figures are in the paper (Section 7,
     to *a* stable answer. Regression-confirmed bit-for-bit identical
     `step()` behaviour (the new code is isolated in its own translation
     unit and only runs when explicitly invoked).
+11. **Done:** implemented `stepSegregatedAccelerated()`, testing whether a
+    much cheaper fixed-point accelerator (Richardson/Picard iteration,
+    optionally with Anderson mixing) could recover JFNK's stability
+    benefit on the same decisive stiff case without a Jacobian-vector
+    product or GMRES -- see README.md, "Anderson-accelerated Picard
+    solve" for the full account, including two real bugs caught by direct
+    testing (a sign error in the Anderson update, found because it made
+    Anderson perform *worse* than plain Picard at every depth tried; a
+    mis-scaled regularizer in its small least-squares solve) before
+    trusting any result built on the code. With both fixed: undamped
+    Richardson diverges outright (confirming the diagonal scaling that
+    makes JFNK's Jacobian-vector products well-posed does NOT make the
+    identity a usable stand-in for the true Jacobian); heavy damping
+    (`beta ~ 0.003`) stabilizes it; and Anderson mixing's effect, once
+    correctly implemented, is genuine but inconsistent -- helps markedly
+    on a mild case at a shallow window, hurts at every depth tested on
+    the stiff case that matters, reported as a real negative result
+    rather than tuned away. The actual headline result came from the
+    PLAIN damped baseline (`andersonDepth = 0`), not from Anderson mixing
+    at all: on the identical stiff case/dt/step-count JFNK was validated
+    against, it converges all 100 steps to the SAME `|u2-u1|_max = 21.72`
+    m/s JFNK-adaptive found, in 1.07s wall-clock -- roughly 50x cheaper
+    than JFNK-adaptive's ~56s for an identical outcome. Explicitly caveated
+    in README.md as a single-case result (the damping factor and
+    tolerance were found by direct sweep on this one case, not derived
+    generally) rather than a claim that JFNK's more robust, automatically
+    adaptive machinery is unnecessary in general. Regression-confirmed
+    bit-for-bit identical `step()` behaviour throughout.

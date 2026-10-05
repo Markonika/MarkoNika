@@ -927,6 +927,115 @@ its own translation unit (`FourFieldSolverImplicit.cpp`) and is never
 called unless the caller explicitly invokes
 `stepImplicitPressureVelocity[Adaptive]()`.
 
+### Anderson-accelerated Picard solve (`stepSegregatedAccelerated`)
+
+A second alternative to `step()`, surveyed alongside JFNK itself as a much
+cheaper way to accelerate the segregated pressure-velocity coupling. It
+solves the *exact same* backward-Euler (u1, u2, P) residual system as
+`stepImplicitPressureVelocity()` -- same scope, same snapshot/lagging
+conventions, same diagonally-scaled unknown/residual -- but by Richardson/
+Picard iteration (`xHat_{k+1} = xHat_k - beta*Fhat(xHat_k)`, one residual
+evaluation per iteration, no linear solve at all) instead of Newton-GMRES,
+optionally extrapolated by Anderson mixing (Walker & Ni, 2011) over a
+short window of past iterates.
+
+**What this was for.** JFNK's own measured cost (~56s wall-clock for the
+100-step stiff case in the section above) raises an obvious question: is
+all that machinery -- a finite-difference Jacobian-vector product and a
+full GMRES solve at every Newton iteration -- actually necessary, or
+would a far cheaper fixed-point accelerator recover most of the same
+stability benefit? This exists to answer that question directly, by
+testing the cheapest possible alternative on the exact same decisive
+case.
+
+**What was found, in the order it was found -- including two real bugs
+caught along the way, not just the final result.**
+
+1. **Undamped Richardson diverges outright.** Taking the scaled residual
+   at face value (`beta = 1.0`) -- i.e. trusting that the SAME diagonal
+   scaling that made JFNK's finite-difference Jacobian usable also makes
+   the *identity matrix* a reasonable stand-in for that Jacobian -- blows
+   up to `NaN` within a handful of iterations, even on a mild, non-stiff
+   case. This is an important, clarifying negative result in its own
+   right: the scaling equalizes physical *units* across the velocity and
+   pressure blocks; it does not equalize the *coupling strength* those
+   blocks have on each other, which is what the actual (unformed)
+   Jacobian's spectral radius depends on. A real linear solve (even a
+   matrix-free, approximate one, as GMRES performs inside each Newton
+   step) is doing genuine work that a bare residual substitution cannot
+   skip.
+2. **Heavy damping (`beta` of order 1e-3) stabilizes it.** A sweep over
+   `beta` from `1.0` down to `0.001` found the iteration diverges for
+   every value `>= 0.01` tested and converges, slowly, at `beta = 0.003`.
+3. **Two real bugs, found and fixed before trusting any result built on
+   this code.** First, the Anderson-mixing update had a **sign error**
+   (`+beta*Fhat`/`+beta*DeltaF` where the standard Anderson(m) formula,
+   written out in terms of this file's own `G(x) = x - beta*Fhat(x)`
+   convention, requires `-beta*Fhat`/`-beta*DeltaF`) -- caught specifically
+   because it made Anderson mixing perform *worse* than plain Picard at
+   every depth tested, the opposite of what the method is supposed to do,
+   which is not something a correct implementation should ever do by
+   construction. Second, the small least-squares solve's Tikhonov
+   regularization was scaled to the residual norm rather than to the
+   least-squares system's own Gram-matrix magnitude, leaving it
+   mis-scaled whenever `beta` (and hence the magnitude of the `DeltaF`
+   columns actually being regularized) changed -- fixed by making the
+   regularizer a fraction of the Gram matrix's own average diagonal,
+   confirmed to measurably change the result (not just a theoretical
+   nicety) by re-running the same depth sweep before and after.
+4. **With both fixed, Anderson mixing's benefit is real but inconsistent
+   -- and, on the one case that matters most, net negative.** On a mild,
+   near-equilibrium case, a shallow window (`andersonDepth = 2`) gave a
+   genuine ~25x better residual reduction than plain Picard at the same
+   iteration budget; deeper windows (3 and above) gave *worse* results
+   than plain Picard, non-monotonically. On the exact stiff, high-Vsg case
+   this whole investigation was aimed at, **every Anderson depth tested
+   (1 through 12) converged to a substantially worse residual than plain
+   damped Picard (`andersonDepth = 0`)**, which on its own reached
+   essentially machine-precision-limited convergence. Anderson
+   acceleration, as implemented and tested here, is not a reliable
+   improvement on this problem; reported honestly rather than tuned until
+   it looked better, consistent with this project's standing practice of
+   reporting a negative or mixed result when direct testing produces one.
+5. **The real result was hiding in the plain (`andersonDepth = 0`)
+   baseline all along.** Running the *exact* decisive comparison from the
+   JFNK section above -- same stiff case, same `dt = 0.005`, same 100
+   steps -- with plain damped Picard (`andersonBeta = 0.003`, tolerance
+   relaxed to `1e-5` for the same reason `jfnk.newtonTol` was relaxed:
+   diminishing returns past the method's own practical convergence
+   floor) gives: **all 100 steps converge, reaching the identical
+   `|u2-u1|_max = 21.72` m/s JFNK-adaptive found**, in **1.07 seconds**
+   wall-clock -- roughly **50x cheaper** than JFNK-adaptive's ~56 seconds
+   for the same case, same answer, same stability result (explicit itself
+   still diverges at step 64/100, unchanged from the JFNK section). No
+   Jacobian-vector product, no GMRES, no pseudo-transient continuation
+   wrapper -- just a fixed, heavily-damped residual-correction step,
+   repeated about 3860 times per macro-step on average.
+
+**Reading on this, stated plainly.** For this specific stiff case, a
+trivial damped fixed-point iteration on the properly-scaled residual
+beats both the explicit scheme (which cannot solve it at all) and JFNK
+(which solves it correctly but at far higher cost) -- not because
+Anderson acceleration helped (it didn't, net), but because the underlying
+scaled residual, heavily damped, turns out to already be a convergent
+map for this problem, and converging it directly is far cheaper than
+approximating and inverting its Jacobian via GMRES at every step. This
+should **not** be read as "JFNK was unnecessary": the damping factor and
+tolerance used here were found by direct sweep on this one case, not
+derived from any general principle, and nothing here establishes that a
+single fixed `beta` stays stable across the range of cases JFNK's own
+adaptive sub-stepping is designed to handle automatically and robustly.
+What this result does establish is that, for a case where a suitable
+`beta` can be found, plain damped Picard is a legitimate, dramatically
+cheaper first thing to try before reaching for a full Newton-Krylov
+solve -- exactly the kind of "cheaper alternative, fairly measured"
+comparison the numerical-methods survey behind both of these extensions
+called for.
+
+**Confirmed:** regression-tested bit-for-bit identical `step()` behaviour
+against the full demo suite (this code, like JFNK's, lives in its own
+translation unit and only runs when explicitly invoked).
+
 ## Validation against experimental data
 
 **[VALIDATION.md](VALIDATION.md)** compares the solver's predicted flow
