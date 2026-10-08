@@ -91,7 +91,7 @@ double kelvinHelmholtzParameterF(const InterfacialFrictionInputs& in) {
 double interfacialFrictionFactor(const InterfacialFrictionInputs& in, FrictionCorrelation correlation) {
     switch (correlation) {
         case FrictionCorrelation::AndreussiPersen1987: {
-            const double F0 = 0.36;
+            const double F0 = 0.36 + in.f0Shift;
             const double F = kelvinHelmholtzParameterF(in);
             if (F <= F0) return in.gasWallFriction;
             const double hOverD1 = in.liquidHeight / std::max(in.hydraulicDiameter1, constants::tiny);

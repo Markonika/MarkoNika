@@ -216,6 +216,12 @@ void FourFieldSolver::computeClosures() {
         ifi.inclination = thetaF;
         ifi.localPressure = state_.P[cL];
         ifi.gasWallFriction = fgw;
+        // See SolverOptions::closureF0Shift: shifts the AndreussiPersen1987
+        // branch's own F0 onset threshold, zero (true no-op) by default.
+        // Set on `ifi` BEFORE the call (unlike closureCorrectionScale
+        // below, which rescales the already-computed `fi`) because this
+        // changes which regime `fi` itself falls into, not just its size.
+        ifi.f0Shift = options_.enableDataDrivenClosureCorrection ? options_.closureF0Shift : 0.0;
         const double fi = interfacialFrictionFactor(ifi, options_.interfacialCorrelation);
         // See SolverOptions::enableDataDrivenClosureCorrection: rescales
         // ONLY the correlation's enhancement above the baseline gas-wall

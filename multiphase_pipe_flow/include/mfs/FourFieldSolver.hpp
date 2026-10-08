@@ -67,16 +67,30 @@ struct SolverOptions {
     // behaviour behind an explicit enable flag rather than a
     // defaults-to-neutral parameter alone.
     //
-    // closureCorrectionScale's non-default value (see
-    // FourFieldSolver.cpp, computeClosures()) was fit by a line search
-    // over the held-out validation data itself: trained against Kokal
-    // 1987 + Newton 1997 (223 cases) only, evaluated on the fully
-    // independent 126-case Mendeley set never used for fitting -- see
-    // VALIDATION.md for the fitted value, the train/test methodology,
-    // and the honestly-reported result (including whether it actually
-    // generalized, not just whether it improved the training set).
+    // closureCorrectionScale was fit by a line search over the held-out
+    // validation data itself (train on Kokal 1987 + Newton 1997, 223
+    // cases; evaluate on the fully independent 126-case Mendeley set
+    // never used for fitting) and found NOT to generalize -- a clean
+    // negative result, reported as such rather than tuned to look like
+    // a win; see VALIDATION.md for the full train/test methodology and
+    // numbers. The default stays at 1.0 (the unmodified closure)
+    // because no tested value actually improved the held-out set.
     bool enableDataDrivenClosureCorrection = false;
     double closureCorrectionScale = 1.0;
+
+    // A second, independent knob on the SAME closure, tried after the
+    // magnitude rescale above came back negative: rather than rescaling
+    // the enhancement's SIZE, shift the Kelvin-Helmholtz onset threshold
+    // (F0=0.36) itself that decides WHETHER the enhancement applies at
+    // all -- F > F0 + closureF0Shift triggers it instead of F > F0 (see
+    // mfs::InterfacialFrictionInputs::f0Shift, and Closures.cpp's
+    // AndreussiPersen1987 branch). Also gated behind
+    // enableDataDrivenClosureCorrection (both knobs are corrections to
+    // the same AndreussiPersen1987 closure, so share the one on/off
+    // switch); zero by default, a true no-op. See VALIDATION.md for the
+    // same train/test methodology applied to this parameter, and
+    // whether, unlike the magnitude rescale, it actually generalized.
+    double closureF0Shift = 0.0;
 
     double courantTarget = 0.5;    // target Courant number, Eq. (23) requires < 1
     double minTimeStep = 1.0e-6;

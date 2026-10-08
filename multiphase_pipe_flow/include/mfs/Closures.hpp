@@ -70,6 +70,14 @@ struct InterfacialFrictionInputs {
     double atmPressure = 101325.0;
     double localPressure = 101325.0;
     double gasWallFriction;      // f_gw, needed as the smooth-interface base value
+
+    // Additive shift to the AndreussiPersen1987 branch's own F0=0.36
+    // Kelvin-Helmholtz onset threshold (F > F0 + f0Shift triggers the
+    // enhancement instead of F > F0). Zero by default, a true no-op
+    // (adding 0.0 is exact in IEEE754) -- see
+    // mfs::SolverOptions::closureF0Shift for why this exists and how its
+    // value, when non-zero, was fit.
+    double f0Shift = 0.0;
 };
 
 // Returns f_i. Andreussi & Persen (1987) is the correlation used for the
