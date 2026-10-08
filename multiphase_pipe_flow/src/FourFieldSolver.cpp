@@ -217,10 +217,20 @@ void FourFieldSolver::computeClosures() {
         ifi.localPressure = state_.P[cL];
         ifi.gasWallFriction = fgw;
         const double fi = interfacialFrictionFactor(ifi, options_.interfacialCorrelation);
+        // See SolverOptions::enableDataDrivenClosureCorrection: rescales
+        // ONLY the correlation's enhancement above the baseline gas-wall
+        // friction factor (fi-fgw), a no-op wherever that enhancement is
+        // already zero. Computed as a separate local rather than folded
+        // into `fi` itself so the option-off path below is a single
+        // untouched read of `fi`, not an arithmetic identity relying on
+        // closureCorrectionScale's default happening to be neutral.
+        const double fiUsed = options_.enableDataDrivenClosureCorrection
+                                   ? fgw + options_.closureCorrectionScale * (fi - fgw)
+                                   : fi;
 
         tauW1_[f] = wallShearStress(flw, rhoL, ulO);
         tauW2_[f] = wallShearStress(fgw, rhoGf, ugO);
-        tauI_[f] = interfacialShearStress(fi, rhoGf, ugO, ulO);
+        tauI_[f] = interfacialShearStress(fiUsed, rhoGf, ugO, ulO);
     }
 
     for (int i = 0; i < N; ++i) {

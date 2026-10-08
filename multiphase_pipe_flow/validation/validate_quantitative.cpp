@@ -11,7 +11,13 @@
 //
 // Output CSV adds: pred_holdup,pred_dPdz_Pa_m,blew_up
 //
-// Usage: validate_quantitative <input.csv> <output.csv>
+// Usage: validate_quantitative <input.csv> <output.csv> [closureCorrectionScale]
+// The optional third argument, if given, sets
+// SolverOptions::enableDataDrivenClosureCorrection=true and
+// closureCorrectionScale to the given value for every case (used to line-
+// search the fit in VALIDATION.md's data-driven closure correction
+// section; omitted entirely, behavior is the original, unmodified
+// closure).
 
 #include "mfs/Constants.hpp"
 #include "mfs/FourFieldSolver.hpp"
@@ -90,7 +96,7 @@ struct RunResult {
     bool blewUp = false;
 };
 
-RunResult runOneCase(const Case& c) {
+RunResult runOneCase(const Case& c, bool haveClosureScale, double closureScale) {
     const double D = c.D;
     const double L = std::clamp(60.0 * D, 0.6, 20.0);
     const int N = 60;
@@ -105,6 +111,10 @@ RunResult runOneCase(const Case& c) {
     fluid.gasConstant = outletPressure / (c.rhoG * fluid.temperature);
 
     mfs::SolverOptions opt;
+    if (haveClosureScale) {
+        opt.enableDataDrivenClosureCorrection = true;
+        opt.closureCorrectionScale = closureScale;
+    }
     mfs::FourFieldSolver solver(D, L, N, fluid, opt);
     solver.setInclinationConstant(c.angle_deg * mfs::constants::pi / 180.0);
 
@@ -195,9 +205,11 @@ RunResult runOneCase(const Case& c) {
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::cerr << "Usage: validate_quantitative <input.csv> <output.csv>\n";
+        std::cerr << "Usage: validate_quantitative <input.csv> <output.csv> [closureCorrectionScale]\n";
         return 1;
     }
+    const bool haveClosureScale = (argc >= 4);
+    const double closureScale = haveClosureScale ? std::stod(argv[3]) : 1.0;
     const auto cases = readCases(argv[1]);
 
     // Each case is an independent FourFieldSolver instance (no shared
@@ -212,7 +224,7 @@ int main(int argc, char** argv) {
 #pragma omp parallel for schedule(dynamic)
 #endif
     for (std::size_t i = 0; i < cases.size(); ++i) {
-        results[i] = runOneCase(cases[i]);
+        results[i] = runOneCase(cases[i], haveClosureScale, closureScale);
 #ifdef _OPENMP
 #pragma omp critical
 #endif
