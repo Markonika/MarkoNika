@@ -35,9 +35,7 @@ Vec6 vector6(const json& j, const std::string& key) {
 
 }  // namespace
 
-CoupledResult runCoupledCase(const json& cfg) {
-    const auto wall0 = std::chrono::steady_clock::now();
-    CoupledResult res;
+std::unique_ptr<CoupledSystem> buildCoupledSystem(const json& cfg, std::vector<std::string>* lineNames) {
     const json& jb = cfg.at("body");
     BodyParams bp;
     bp.mass = jb.at("mass_kg");
@@ -46,13 +44,12 @@ CoupledResult runCoupledCase(const json& cfg) {
     bp.A = matrix6(jb, "A"); bp.B = matrix6(jb, "B"); bp.C = matrix6(jb, "C");
     bp.Dq = vector6(jb, "Dq"); bp.F0 = vector6(jb, "F0");
     bp.cgRef = vec(jb.at("cg_ref_m"));
-    CoupledSystem sys(bp);
+    auto sysPtr = std::make_unique<CoupledSystem>(bp);
+    CoupledSystem& sys = *sysPtr;
 
     const json jn = cfg.value("numerics", json::object());
-    // Initial pose (before the optional equilibrium solve): needed to place the fairleads when the lines are built.
     const json jinit = cfg.value("initial", json::object());
-    Vec6 xi0 = vector6(jinit, "xi0");
-    sys.body().xi = xi0;
+    sys.body().xi = vector6(jinit, "xi0");
     sys.body().xiDot = vector6(jinit, "xi_dot0");
 
     for (const json& jl : cfg.at("lines")) {
@@ -69,9 +66,20 @@ CoupledResult runCoupledCase(const json& cfg) {
             o.scheme = jn.value("scheme", std::string("rk4")) == "verlet" ? Scheme::Verlet : Scheme::RK4;
             cab->setDynOptions(o);
         }
-        res.lineNames.push_back(jl.value("name", "line" + std::to_string(res.lineNames.size() + 1)));
-        sys.addLine(std::move(cab), a, res.lineNames.back());
+        const std::string nm = jl.value("name", "line" + std::to_string(sys.numLines() + 1));
+        if (lineNames) lineNames->push_back(nm);
+        sys.addLine(std::move(cab), a, nm);
     }
+    return sysPtr;
+}
+
+CoupledResult runCoupledCase(const json& cfg) {
+    const auto wall0 = std::chrono::steady_clock::now();
+    CoupledResult res;
+    std::unique_ptr<CoupledSystem> sysPtr = buildCoupledSystem(cfg, &res.lineNames);
+    CoupledSystem& sys = *sysPtr;
+    const json jn = cfg.value("numerics", json::object());
+    const json jinit = cfg.value("initial", json::object());
 
     res.equilibriumRequested = jinit.value("equilibrium", false);
     if (res.equilibriumRequested) {

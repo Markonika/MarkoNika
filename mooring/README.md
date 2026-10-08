@@ -9,7 +9,7 @@ the GPL `LICENSE` at the repository root belongs to the profile repository, not 
 Warnings: `-Wall -Wextra -Wpedantic`. Dependencies: see `THIRD_PARTY.md`.
 
 ## Status
-Milestones 1-7 done (static solver, dynamics, hydrodynamics + seabed, Chalmers validation, planar/3D regression, point elements, 6-DOF platform with multi-line coupling).
+Milestones 1-8 done (static solver, dynamics, hydrodynamics + seabed, Chalmers validation, planar/3D regression, point elements, 6-DOF platform with multi-line coupling, Paredes free-buoy and moored-buoy validation).
 
 | Test (milestone 1) | Result |
 |---|---|
@@ -43,12 +43,17 @@ Milestones 1-7 done (static solver, dynamics, hydrodynamics + seabed, Chalmers v
 | JSON platform runner, same pendulum | period error -1.1e-4, sub-step ratio 51 |
 | 3 legs at 120 deg, asymmetric: static equilibrium | Newton in 4 iterations, residual 9e-10 N / 3e-11 N m; independent force/moment balance to 1e-6 |
 | Coupling stability | stable at 0.4 x, unstable at 2 x the estimate 2/omega_s (two body masses) |
+| Paredes free buoy: heave / pitch damped period (potential-theory A, B) | 1.0997 s vs 1.112 +- 0.006 (-1.1 %); 1.0979 s vs 1.170 +- 0.005 (**-6.2 %, known disagreement**) |
+| Paredes moored statics, CON1 / CON2 / CAT (no tuning) | leg tension 2.75 / 10.9-11.0 / 2.93 N vs 2.8-3.1 / 10.6-11.0 / 3.0-3.1 N; draft change +0.6 / +12.9 / +3.4 mm vs +1 / +13 / +4 mm |
+| Paredes surge secant stiffness vs thesis Fig. 5.21 curves | CON2 within 3 %, CAT 7-10 % low (U-shape reproduced), **CON1 15-19 % low** (all below the 41 N/m design value, as measured) |
+| Paredes damped surge periods CON1 / CON2 / CAT | 9.286 / 9.207 / 9.349 s vs 8.561 / 9.22 / 9.14 s (+8.5 % / -0.1 % / +2.3 %) |
 | Support reactions, static line | vertical sum = weight (1e-6), horizontal sum = 0 |
 
 Details: `docs/chalmers_validation.md` (results, convergence, caveats), `docs/config.md` (configuration fields).
 Run the Chalmers case: `build/mooring_run examples/chalmers/chalmers_config.json`; full grid:
 `ctest --test-dir build -R chalmers_grid` or `scripts/chalmers_grid.py OUTDIR` (plots need matplotlib; analysis only).
 
+Paredes benchmark: `build/paredes_report examples/paredes` (details and caveats: `docs/paredes_validation.md`).
 Platform: `build/mooring_platform examples/platform/three_leg_example.json` (config fields in `docs/config.md`).
 
 ## Equation-to-code map
@@ -60,6 +65,7 @@ Platform: `build/mooring_platform examples/platform/three_leg_example.json` (con
 | 3.28-3.29 drag | `morisonDrag` |
 | 3.32-3.36 seabed | `seabedForce` |
 | 3.59 body equation (constant A, B, C) | `RigidBody6DOF`, `CoupledSystem::step` |
+| A.4-A.13 static equilibrium of CON1/CON2 | solved by the full line statics + `CoupledSystem::solveEquilibrium` |
 | 3.57 / 3.58 string wave | `tests/test_dynamics.cpp` (exact solution) |
 | 3.54-3.56 elastic catenary | `ElasticCatenary` (`src/catenary.cpp`) |
 

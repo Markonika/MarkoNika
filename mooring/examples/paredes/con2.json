@@ -1,0 +1,191 @@
+{
+ "_comment": "Paredes (2016) moored-buoy benchmark, configuration CON2. Sources: Tables 5.3-5.14, Figs 5.4-5.5; ASSUMPTIONs listed in docs/paredes_validation.md. SI units.",
+ "body": {
+  "mass_kg": 35.5,
+  "inertia_diag_kg_m2": [
+   0.87,
+   0.87,
+   1.18
+  ],
+  "cg_ref_m": [
+   0.0,
+   0.0,
+   0.7998
+  ],
+  "A_diag": [
+   20.14,
+   20.14,
+   27.11,
+   0.311,
+   0.311,
+   0.0
+  ],
+  "B_diag": [
+   0.0182,
+   0.0182,
+   35.91,
+   0.1019,
+   0.1019,
+   0.0
+  ],
+  "C_diag": [
+   0.0,
+   0.0,
+   2043.494,
+   37.76,
+   37.76,
+   0.0
+  ],
+  "Dq": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ],
+  "F0": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ]
+ },
+ "environment": {
+  "hydro": true,
+  "seabed": false,
+  "rho_w_kg_m3": 1000.0,
+  "water_surface_z_m": 0.9,
+  "seabed_z_m": 0.0
+ },
+ "soil": {
+  "stiffness_Pa_per_m": 3000000000.0,
+  "damping_factor": 1.0,
+  "friction": 0.3,
+  "v_lim_m_s": 0.01
+ },
+ "lines": [
+  {
+   "name": "leg1",
+   "anchor_m": [
+    -1.03625,
+    1.79484,
+    0.02
+   ],
+   "fairlead_body_m": [
+    -0.13624999999999995,
+    0.23599192253125956,
+    0.1042
+   ],
+   "point_elements": [
+    {
+     "type": "floater",
+     "arclength_m": 0.7,
+     "mass_kg": 0.252,
+     "buoyancy_N": 9.97,
+     "diameter_m": 0.135,
+     "Cd": 0.5
+    },
+    {
+     "type": "clump",
+     "arclength_m": 1.6,
+     "mass_kg": 1.115,
+     "submerged_weight_N": 9.968,
+     "diameter_m": 0.04,
+     "Cd": 1.0
+    }
+   ]
+  },
+  {
+   "name": "leg2",
+   "anchor_m": [
+    2.0725,
+    0.0,
+    0.02
+   ],
+   "fairlead_body_m": [
+    0.2725,
+    0.0,
+    0.1042
+   ],
+   "point_elements": [
+    {
+     "type": "floater",
+     "arclength_m": 0.7,
+     "mass_kg": 0.276,
+     "buoyancy_N": 10.05,
+     "diameter_m": 0.135,
+     "Cd": 0.5
+    },
+    {
+     "type": "clump",
+     "arclength_m": 1.6,
+     "mass_kg": 1.125,
+     "submerged_weight_N": 10.051,
+     "diameter_m": 0.04,
+     "Cd": 1.0
+    }
+   ]
+  },
+  {
+   "name": "leg3",
+   "anchor_m": [
+    -1.03625,
+    -1.79484,
+    0.02
+   ],
+   "fairlead_body_m": [
+    -0.13624999999999995,
+    -0.23599192253125956,
+    0.1042
+   ],
+   "point_elements": [
+    {
+     "type": "floater",
+     "arclength_m": 0.7,
+     "mass_kg": 0.232,
+     "buoyancy_N": 9.96,
+     "diameter_m": 0.135,
+     "Cd": 0.5
+    },
+    {
+     "type": "clump",
+     "arclength_m": 1.6,
+     "mass_kg": 1.113,
+     "submerged_weight_N": 9.959,
+     "diameter_m": 0.04,
+     "Cd": 1.0
+    }
+   ]
+  }
+ ],
+ "initial": {
+  "equilibrium": true
+ },
+ "numerics": {
+  "dt_body_s": 0.002,
+  "t_end_s": 40.0,
+  "scheme": "rk4",
+  "cfl": 0.5
+ },
+ "output": {
+  "directory": "out/paredes_con2",
+  "tag": "con2",
+  "dt_out_s": 0.02,
+  "write": false
+ },
+ "line_defaults": {
+  "length_m": 2.285,
+  "segments": 23,
+  "EA_N": 160000.0,
+  "mass_per_length_kg_m": 0.0032,
+  "weight_per_length_N_m": 0.008,
+  "hydro_diameter_m": 0.001742,
+  "soil_diameter_m": 0.001742,
+  "Cm": 3.8,
+  "Cdt": 0.5,
+  "Cdn": 2.5
+ }
+}

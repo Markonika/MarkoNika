@@ -87,7 +87,8 @@ public:
 
     // Static equilibrium: Newton on F0 - C xi + sum(line loads(xi)) = 0 with finite-difference Jacobian,
     // statics of each line solved exactly at every evaluation. Leaves body and lines at rest at the solution.
-    EquilibriumResult solveEquilibrium(double tol = 1e-6, int maxIter = 40);
+    // 'fixed[k]' holds DOF k at its current value (e.g. surge imposed) while the others are solved.
+    EquilibriumResult solveEquilibrium(double tol = 1e-6, int maxIter = 40, const std::array<bool, 6>& fixed = {});
     // Residual generalised load at the current pose (lines solved statically), N and N m.
     Vec6 staticResidual();
 

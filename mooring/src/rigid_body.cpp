@@ -89,10 +89,11 @@ Vec6 CoupledSystem::staticResidual() {
     return externalLoad(body_.xi, lf);
 }
 
-EquilibriumResult CoupledSystem::solveEquilibrium(double tol, int maxIter) {
+EquilibriumResult CoupledSystem::solveEquilibrium(double tol, int maxIter, const std::array<bool, 6>& fixed) {
     EquilibriumResult res;
     body_.xiDot = Vec6{};
-    auto norms = [](const Vec6& G, double& f, double& m) {
+    auto norms = [&fixed](Vec6 G, double& f, double& m) {
+        for (int k = 0; k < 6; ++k) if (fixed[k]) G[k] = 0.0;        // a held DOF carries a reaction, not a residual
         f = std::sqrt(G[0] * G[0] + G[1] * G[1] + G[2] * G[2]); m = std::sqrt(G[3] * G[3] + G[4] * G[4] + G[5] * G[5]);
     };
     Vec6 G = staticResidual();
@@ -103,13 +104,14 @@ EquilibriumResult CoupledSystem::solveEquilibrium(double tol, int maxIter) {
         Mat6 J;                                           // J = dG/dxi by forward differences
         const Vec6 x0 = body_.xi;
         for (int j = 0; j < 6; ++j) {
+            if (fixed[j]) { J(j, j) = 1.0; continue; }
             const double h = 1e-4;
             body_.xi = x0; body_.xi[j] += h;
             const Vec6 Gj = staticResidual();
-            for (int i = 0; i < 6; ++i) J(i, j) = (Gj[i] - G[i]) / h;
+            for (int i = 0; i < 6; ++i) J(i, j) = fixed[i] ? 0.0 : (Gj[i] - G[i]) / h;
         }
         body_.xi = x0;
-        Vec6 rhs; for (int i = 0; i < 6; ++i) rhs[i] = -G[i];
+        Vec6 rhs; for (int i = 0; i < 6; ++i) rhs[i] = fixed[i] ? 0.0 : -G[i];
         double jmax = 0; for (double v : J.a) jmax = std::max(jmax, std::fabs(v));
         for (int i = 0; i < 6; ++i) J(i, i) += 1e-10 * jmax + 1e-12;     // Tikhonov guard for a DOF without any restoring force (a slack line gives a zero Jacobian: start taut)
         const Vec6 d = solve6(J, rhs);

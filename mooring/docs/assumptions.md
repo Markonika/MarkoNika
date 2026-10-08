@@ -110,3 +110,10 @@
     max(w l0, m_l g l0, 1e-7 EA), i.e. a few 1e-10 N for the test lines; 1e-9 of the scale is below the round-off floor and never converges.
 32. **Static relaxation tolerance scale** changed (also for the single-line runner): it was w*l0 and is now max(w l0, m_l g l0, 1e-7 EA) so
     that weightless taut lines converge; results for weighted lines are unchanged.
+33. **Paredes benchmark inputs** (milestone 8): see docs/paredes_validation.md for the list of assumptions that are not in the thesis (line hydrodynamic
+    coefficients and diameters, floater/clump drag, yaw inertia, CAT soil, anchor height, horizontal anchor distance convention). The geometry is
+    read from Figs 5.4-5.5 and Annex A of the thesis; the labelled rope sections add up consistently (0.700 + 0.900 + 0.685 = 0.700 + 1.585 = 2.285 m).
+34. **Constrained equilibrium** (`solveEquilibrium(..., fixed)`): a held DOF carries a reaction and is excluded from the residual; used for the
+    surge restoring force (surge imposed, other 5 DOF free) and for the heave/pitch stiffness of the mooring (+-0.01 m, +-1 deg).
+35. **Secant stiffness definition**: K(x) = -(F_x(x) - F_x(0))/x with the net line force at the free equilibrium subtracted (it is zero when there is no mean load).
+    The thesis' Table 5.12 values carry no stated displacement; comparisons use the curves of its Fig. 5.21 (digitised by eye, about +-1.5 N/m).

@@ -1,0 +1,83 @@
+{
+ "_comment": "Paredes (2016) moored-buoy benchmark, configuration FREE. Sources: Tables 5.3-5.14, Figs 5.4-5.5; ASSUMPTIONs listed in docs/paredes_validation.md. SI units.",
+ "body": {
+  "mass_kg": 35.5,
+  "inertia_diag_kg_m2": [
+   0.87,
+   0.87,
+   1.18
+  ],
+  "cg_ref_m": [
+   0.0,
+   0.0,
+   0.7998
+  ],
+  "A_diag": [
+   18.28,
+   18.28,
+   26.92,
+   0.283,
+   0.283,
+   0.0
+  ],
+  "B_diag": [
+   0.0196,
+   0.0196,
+   37.92,
+   0.0493,
+   0.0493,
+   0.0
+  ],
+  "C_diag": [
+   0.0,
+   0.0,
+   2043.494,
+   37.76,
+   37.76,
+   0.0
+  ],
+  "Dq": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ],
+  "F0": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ]
+ },
+ "environment": {
+  "hydro": true,
+  "seabed": false,
+  "rho_w_kg_m3": 1000.0,
+  "water_surface_z_m": 0.9,
+  "seabed_z_m": 0.0
+ },
+ "soil": {
+  "stiffness_Pa_per_m": 3000000000.0,
+  "damping_factor": 1.0,
+  "friction": 0.3,
+  "v_lim_m_s": 0.01
+ },
+ "lines": [],
+ "initial": {
+  "equilibrium": false
+ },
+ "numerics": {
+  "dt_body_s": 0.001,
+  "t_end_s": 20.0
+ },
+ "output": {
+  "directory": "out/paredes_free",
+  "tag": "free",
+  "dt_out_s": 0.02,
+  "write": false
+ }
+}

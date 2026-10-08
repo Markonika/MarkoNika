@@ -1,0 +1,146 @@
+{
+ "_comment": "Paredes (2016) moored-buoy benchmark, configuration CAT. Sources: Tables 5.3-5.14, Figs 5.4-5.5; ASSUMPTIONs listed in docs/paredes_validation.md. SI units.",
+ "body": {
+  "mass_kg": 35.5,
+  "inertia_diag_kg_m2": [
+   0.87,
+   0.87,
+   1.18
+  ],
+  "cg_ref_m": [
+   0.0,
+   0.0,
+   0.7998
+  ],
+  "A_diag": [
+   18.73,
+   18.73,
+   27.06,
+   0.291,
+   0.291,
+   0.0
+  ],
+  "B_diag": [
+   0.0167,
+   0.0167,
+   36.04,
+   0.0655,
+   0.0655,
+   0.0
+  ],
+  "C_diag": [
+   0.0,
+   0.0,
+   2043.494,
+   37.76,
+   37.76,
+   0.0
+  ],
+  "Dq": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ],
+  "F0": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ]
+ },
+ "environment": {
+  "hydro": true,
+  "seabed": true,
+  "rho_w_kg_m3": 1000.0,
+  "water_surface_z_m": 0.9,
+  "seabed_z_m": 0.02
+ },
+ "soil": {
+  "stiffness_Pa_per_m": 3000000000.0,
+  "damping_factor": 1.0,
+  "friction": 0.3,
+  "v_lim_m_s": 0.01
+ },
+ "lines": [
+  {
+   "name": "leg1",
+   "anchor_m": [
+    -3.46625,
+    6.00372,
+    0.02
+   ],
+   "fairlead_body_m": [
+    -0.13624999999999995,
+    0.23599192253125956,
+    0.1042
+   ],
+   "initial": {
+    "shape": "touchdown"
+   }
+  },
+  {
+   "name": "leg2",
+   "anchor_m": [
+    6.9325,
+    0.0,
+    0.02
+   ],
+   "fairlead_body_m": [
+    0.2725,
+    0.0,
+    0.1042
+   ],
+   "initial": {
+    "shape": "touchdown"
+   }
+  },
+  {
+   "name": "leg3",
+   "anchor_m": [
+    -3.46625,
+    -6.00372,
+    0.02
+   ],
+   "fairlead_body_m": [
+    -0.13624999999999995,
+    -0.23599192253125956,
+    0.1042
+   ],
+   "initial": {
+    "shape": "touchdown"
+   }
+  }
+ ],
+ "initial": {
+  "equilibrium": true
+ },
+ "numerics": {
+  "dt_body_s": 0.002,
+  "t_end_s": 40.0,
+  "scheme": "rk4",
+  "cfl": 0.5
+ },
+ "output": {
+  "directory": "out/paredes_cat",
+  "tag": "cat",
+  "dt_out_s": 0.02,
+  "write": false
+ },
+ "line_defaults": {
+  "length_m": 6.95,
+  "segments": 40,
+  "EA_N": 1600000.0,
+  "mass_per_length_kg_m": 0.1447,
+  "weight_per_length_N_m": 1.243,
+  "hydro_diameter_m": 0.00486,
+  "soil_diameter_m": 0.00486,
+  "Cm": 3.8,
+  "Cdt": 0.5,
+  "Cdn": 2.5
+ }
+}
