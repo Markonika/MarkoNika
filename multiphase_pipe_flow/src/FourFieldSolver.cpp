@@ -258,7 +258,11 @@ void FourFieldSolver::computeClosures() {
         DropletEntrainmentInputs dei{D, rhoGasCell_[i], rhoL, ugC, fluid_.muLiquid, 7.7e-8};
         Ue_[i] = dropletEntrainmentRate(dei);
 
-        DropletDepositionInputs ddi{D, rhoL, state_.ed[i], state_.eg[i], 0.1};
+        // See SolverOptions::closureDepositionVelocityScale: true no-op
+        // (0.1*1.0 == 0.1 exactly) unless enabled.
+        const double depositionVelocity = 0.1 *
+            (options_.enableDataDrivenClosureCorrection ? options_.closureDepositionVelocityScale : 1.0);
+        DropletDepositionInputs ddi{D, rhoL, state_.ed[i], state_.eg[i], depositionVelocity};
         Ud_[i] = dropletDepositionRate(ddi);
     }
 }

@@ -92,6 +92,25 @@ struct SolverOptions {
     // whether, unlike the magnitude rescale, it actually generalized.
     double closureF0Shift = 0.0;
 
+    // A third, independent knob, tried after BOTH knobs above on the
+    // interfacial friction closure came back negative: rather than the
+    // interfacial correlation, this one scales the droplet DEPOSITION
+    // velocity (the rate liquid droplets suspended in the gas core
+    // return to the continuous liquid film -- see
+    // DropletDepositionInputs/dropletDepositionRate() in Closures.hpp,
+    // called with a hardcoded depositionVelocity=0.1 in
+    // FourFieldSolver.cpp's computeClosures()). Motivated by the
+    // validation driver's own holdup metric, which sums el+ed (the
+    // CONTINUOUS liquid fraction plus the DISPERSED droplet fraction):
+    // if deposition returns droplets to the film faster than real
+    // droplets actually settle, suspended droplet holdup (ed) would be
+    // systematically underestimated, a plausible contributor (among
+    // others) to the solver's documented under-prediction of holdup in
+    // the slug-dominated regime (see VALIDATION.md). Also gated behind
+    // enableDataDrivenClosureCorrection; 1.0 by default, a true no-op
+    // (depositionVelocity_used = 0.1 * closureDepositionVelocityScale).
+    double closureDepositionVelocityScale = 1.0;
+
     double courantTarget = 0.5;    // target Courant number, Eq. (23) requires < 1
     double minTimeStep = 1.0e-6;
     double maxTimeStep = 5.0e-2;
