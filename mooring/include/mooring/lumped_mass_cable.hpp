@@ -171,6 +171,10 @@ public:
     // CableModel: sub-steps to t with the fairlead moving linearly from its previous state, returns
     // the force the line exerts on the fairlead. Explicit/partitioned coupling.
     Vec3 forceOnBody(const Vec3& fairleadPos, const Vec3& fairleadVel, double t) override;
+    Vec3 staticForceOnBody(const Vec3& fairleadPos) override;
+    double internalTimeStep() const override { return stableDt(); }
+    // Move the top node (e.g. to a new body position) without touching the other nodes; velocities are reset.
+    void setFairlead(const Vec3& pos);
 
 private:
     void acceleration(std::vector<Vec3>& r, std::vector<Vec3>& v, double t, std::vector<Vec3>& a) const;

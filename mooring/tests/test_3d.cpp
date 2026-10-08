@@ -42,9 +42,10 @@ TEST_CASE("planar mode reproduces the 3D solution exactly for in-plane problems 
 TEST_CASE("3D rotation invariance: whole set-up rotated 37 deg about the vertical axis") {
     const double al = 37.0 * kPi / 180.0;
     std::printf("\n  rotated vs unrotated (mean max top tension, N)\n  %5s %5s %14s %14s %10s\n", "r", "T", "x-z plane", "rotated", "rel diff");
-    for (Case c : {Case{0.2, 3.5, 1e-4}, Case{0.1, 2.0, 1e-4}, Case{0.2, 1.25, 1e-2}}) {
-        // Snap case: round-off differences between the two runs are amplified by slack/snap events; the tolerance is
-        // the documented snap-case scatter of milestone 4 (about +/-1 %), observed 0.1-0.5 % depending on the window.
+    for (Case c : {Case{0.2, 3.5, 5e-4}, Case{0.1, 2.0, 5e-4}, Case{0.2, 1.25, 1e-2}}) {
+        // Noise floor: changing dt by 1 part in 1e12 (or the phase by 1e-9 deg) already moves these maxima by 3e-5..1.8e-4
+        // (smooth cases, 3 averaged cycles) and by up to ~1e-3..5e-3 for the snap case, because slack/contact events amplify
+        // round-off. The tolerances are about 3x that measured floor (smooth) and the snap-case scatter of milestone 4 (+/-1 %).
         json a = chalmers(c.r, c.T); json b = a;
         b["fairlead_rest_m"] = {32.554 * std::cos(al), 32.554 * std::sin(al), 3.3};
         b["motion"]["plane_angle_deg"] = 37.0;

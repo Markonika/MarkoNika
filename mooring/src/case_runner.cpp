@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <stdexcept>
 #include "mooring/lumped_mass_cable.hpp"
 
@@ -36,15 +37,11 @@ void applyOverride(json& cfg, const std::string& a) {
     }
 }
 
-CaseResult runCase(const json& cfg) {
-    const auto wall0 = std::chrono::steady_clock::now();
+std::unique_ptr<LumpedMassCable> buildLine(const json& cfg, const Vec3& anchor, const Vec3& rest) {
     const json& jl = cfg.at("line");
     const json jenv = cfg.value("environment", json::object());
     const json jsoil = cfg.value("soil", json::object());
-    const json jm = cfg.value("motion", json::object());
     const json jn = cfg.value("numerics", json::object());
-    const json jo = cfg.value("output", json::object());
-
     CableParams p;
     p.L = jl.at("length_m"); p.N = jl.at("segments"); p.EA = jl.at("EA_N");
     p.m_l = jl.at("mass_per_length_kg_m"); p.g = get(jl, "gravity_m_s2", 9.81);
@@ -62,12 +59,12 @@ CaseResult runCase(const json& cfg) {
     p.soil.Ks = get(jsoil, "stiffness_Pa_per_m", 0.0); p.soil.zeta = get(jsoil, "damping_factor", 1.0);
     p.soil.mu = get(jsoil, "friction", 0.0); p.soil.vlim = get(jsoil, "v_lim_m_s", 0.01);
 
-    const Vec3 anchor = vec(cfg.at("anchor_m")), rest = vec(cfg.at("fairlead_rest_m"));
     if (jenv.contains("current_m_s")) {              // uniform steady current (no water acceleration)
         const Vec3 U = vec(jenv["current_m_s"]);
         env.water = [U](const Vec3&, double, Vec3& vw, Vec3& aw) { vw = U; aw = Vec3(); };
     }
-    LumpedMassCable cable(p, anchor, rest);
+    auto cablePtr = std::make_unique<LumpedMassCable>(p, anchor, rest);
+    LumpedMassCable& cable = *cablePtr;
     cable.setEnvironment(env);
 
     for (const json& jp : cfg.value("point_elements", json::array())) {
@@ -84,10 +81,27 @@ CaseResult runCase(const json& cfg) {
         cable.addPointElement(pe);
     }
 
-    CaseResult res;
-    res.l0 = p.l0(); res.cWave = p.waveSpeed();
     const bool touchdown = get<std::string>(cfg.value("initial", json::object()), "shape", "touchdown") == "touchdown";
     if (touchdown && env.seabed) cable.initTouchdownCatenary();
+    return cablePtr;
+}
+
+CaseResult runCase(const json& cfg) {
+    const auto wall0 = std::chrono::steady_clock::now();
+    const json jenv = cfg.value("environment", json::object());
+    const json jsoil = cfg.value("soil", json::object());
+    const json jm = cfg.value("motion", json::object());
+    const json jn = cfg.value("numerics", json::object());
+    const json jo = cfg.value("output", json::object());
+
+    const Vec3 anchor = vec(cfg.at("anchor_m")), rest = vec(cfg.at("fairlead_rest_m"));
+    std::unique_ptr<LumpedMassCable> cablePtr = buildLine(cfg, anchor, rest);
+    LumpedMassCable& cable = *cablePtr;
+    const CableParams p = cable.params();
+    const Environment env = cable.environment();
+
+    CaseResult res;
+    res.l0 = p.l0(); res.cWave = p.waveSpeed();
     RelaxOptions ro;
     ro.forceTol = get(jn, "relax_force_tol", 1e-6); ro.maxSteps = get<long>(jn, "relax_max_steps", 20000000L);
     const RelaxResult rr = cable.relaxStatic(ro);

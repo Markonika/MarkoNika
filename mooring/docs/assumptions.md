@@ -64,9 +64,12 @@
 22. **Planar mode** (`CableParams::planar`, `numerics.planar`): y-forces are set to zero and y is flattened to the anchor's y in the
     constructor and `setInitialState`; a top-motion function must stay in the plane. It is a consistency/cost option: 3D runs
     with in-plane data give identical results (bit-for-bit in the tests), so there is no separate 2D code path.
-23. **Rotation invariance** holds to ~3e-5 (smooth cases) limited by the static-relaxation tolerance (1e-6 N), amplified by the
-    dynamics; the snap case (T = 1.25 s) differs by 0.1-0.5 % between rotated and unrotated runs (same scatter as its N/dt
-    scatter in milestone 4). `maxOutOfPlane` is sampled every 64 steps, so it can miss short excursions.
+23. **Rotation invariance** holds to 1e-4 .. 2.4e-4 (smooth cases) and 0.1-0.5 % (snap case) in the maximum tension. **This is the noise floor of the
+    metric, not a rotation error:** changing the time step by 1 part in 1e12 or the circle phase by 1e-9 deg moves the same maxima by 3e-5 .. 1.8e-4
+    (smooth, 3 averaged cycles). The slack/contact events amplify round-off (sensitive dependence), so any maximum from a short window
+    carries ~1e-4 relative noise (more for snap cases). An earlier note here blamed the static-relaxation tolerance; a direct test refuted
+    that (tightening the tolerance reduced the static difference from 1.6e-6 to 2.8e-8 N but not the dynamic one). `maxOutOfPlane` is sampled every 64
+    steps, so it can miss short excursions.
 24. The out-of-plane stability check is empirical (three Chalmers cases, 1 mm perturbation, 6 cycles). It shows no growth
     there; it is **not** a proof that no parametric out-of-plane instability exists elsewhere in the parameter space.
 25. **Point elements** (`PointElement`, `LumpedMassCable::addPointElement`): weight m g always; buoyancy rho_w g V, drag
@@ -77,3 +80,33 @@
     the bed rests via the stiff contact of its node (penetration ~ W/(Ks D1 l0)). `energy()` ignores point elements.
 26. Point-element drag acts in still water as well as in a current via `Environment::water`; there is no wave-surface
     interaction before milestone 9.
+27. **Platform model (milestone 7).** `RigidBody6DOF`/`CoupledSystem`: (M + A) xi'' + B xi' + C xi + Dq|xi'|xi' = F0 + line loads,
+    with constant (frequency-independent) 6x6 A, B, C, as in Paredes (2016) Eq. 3.59. xi = CG translation and a rotation vector
+    measured from the free-floating reference pose; the rotational dynamics use omega ~ d(theta)/dt and a constant inertia tensor
+    (small-angle model). Fairlead positions use the exact exponential map R(theta) (orthonormal), fairlead velocity is
+    u' + theta' x (R a). **Not implemented yet:** full nonlinear rigid-body dynamics (quaternion + Euler equations), and any
+    frequency dependence of A and B. The small-angle model is adequate up to roughly 15-20 deg, which is also the limit of the linear
+    hydrostatic stiffness C. BEM coefficients are to be supplied as constants (file reader for Capytaine/NEMOH output: milestone 8/9).
+28. **Mean loads.** Weight and buoyancy are not modelled separately: the reference pose is the free-floating equilibrium of the hull alone
+    (weight = buoyancy there), C holds the hydrostatic restoring stiffness, and `F0` carries any other constant load. The lines
+    then shift the equilibrium (pretension), found by `solveEquilibrium`. For a body hanging in air use F0 = -m g and C = 0.
+29. **Coupling scheme** (explicit, partitioned, conventional serial staggered): per body step dt, (i) body kick-drift with the old
+    acceleration (velocity-Verlet half step), (ii) every line is advanced to t+dt inside `forceOnBody` with its own CFL sub-steps and
+    the fairlead moving linearly from its old to its new position, (iii) the body velocity is completed with the new line force
+    (linear damping B implicit). The line force is therefore evaluated at the new pose but the pose used the old force: second-order
+    for smooth problems (free heave decay error ratio 4.0 per dt halving) with no iteration. The sub-step ratio reported is
+    ceil(dt_body / shortest line step).
+30. **Stability limit of the coupling.** Measured for eight combinations of EA, N and M (heave of a body on a vertical line): the largest stable
+    dt_body is about 0.5-0.9 x 2/omega_s with omega_s^2 = k_line / (M + A + m_line/3), k_line = EA/L (static stiffness of the taut line at the
+    fairlead, summed over lines in the load direction); coarse lines (N = 5) sit at the lower end. It is the body step, not the line's CFL step,
+    that is limited, so the sub-step ratio can be several hundred without problem. Recommendation: dt_body <= 0.25 * 2/omega_s. For the
+    Paredes buoy (M + A ~ 62 kg, k ~ tens of N/m heave from the lines but hydrostatic 2040 N/m) the hydrostatic stiffness dominates, so the
+    limit is far above the 1e-3 s one would choose for accuracy. Tests: stable at 0.4 x and unstable at 2 x the estimate.
+    The explicit scheme can also be destabilised by a light body on heavy lines (added-mass-like effect: line inertia m_line
+    comparable to M + A); this was not explored beyond M = 0.2 kg with a 0.01 kg line.
+31. **Equilibrium solve** is a Newton iteration with a finite-difference Jacobian (step 1e-4 m / rad) on F0 - C xi + sum(line loads(xi)),
+    solving every line statically at each evaluation (warm start from the previous shape). It needs taut lines at the start: a slack line
+    is a one-sided spring with a zero Jacobian (found the hard way in a test). Static line solves use forceTol 1e-7 of the force scale
+    max(w l0, m_l g l0, 1e-7 EA), i.e. a few 1e-10 N for the test lines; 1e-9 of the scale is below the round-off floor and never converges.
+32. **Static relaxation tolerance scale** changed (also for the single-line runner): it was w*l0 and is now max(w l0, m_l g l0, 1e-7 EA) so
+    that weightless taut lines converge; results for weighted lines are unchanged.

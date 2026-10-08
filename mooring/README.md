@@ -9,7 +9,7 @@ the GPL `LICENSE` at the repository root belongs to the profile repository, not 
 Warnings: `-Wall -Wextra -Wpedantic`. Dependencies: see `THIRD_PARTY.md`.
 
 ## Status
-Milestones 1-6 done (static solver, dynamics, hydrodynamics + seabed, Chalmers validation, planar/3D regression, point elements).
+Milestones 1-7 done (static solver, dynamics, hydrodynamics + seabed, Chalmers validation, planar/3D regression, point elements, 6-DOF platform with multi-line coupling).
 
 | Test (milestone 1) | Result |
 |---|---|
@@ -29,7 +29,7 @@ Milestones 1-6 done (static solver, dynamics, hydrodynamics + seabed, Chalmers v
 | Chalmers 30-case grid vs Table 7 (clockwise motion) | regression r2 = 0.985 (published 0.98), RMSE 1.4 N, bias +0.12 N, 24/30 within 5 %, max 6.7 % |
 | Same grid, opposite rotation sense (sensitivity) | r2 vs 1:1 = 0.81, bias +4.4 N (+9.8 %) - direction matters, see docs/chalmers_validation.md |
 | Planar mode vs 3D, Chalmers (3 cases) | identical (difference 0.0); 3D run stays in plane (< 1e-12 m) |
-| Rotation of the set-up by 37 deg about z | smooth cases 3e-5 relative, snap case 0.5 % (within its scatter) |
+| Rotation of the set-up by 37 deg about z | smooth cases 1e-4..2.4e-4, snap case 0.1-0.5 %: all inside the measured round-off noise floor of the metric (1e-12 change in dt gives 3e-5..1.8e-4) |
 | Lateral current +/-0.3 m/s | tension identical, deflection mirrored (max \|y\| 1.160 m both); no-current run stays planar |
 | 1 mm out-of-plane perturbation, 6 cycles | never exceeds 1 mm, 0.3-0.5 mm at the end; maxima change by <= 0.8 % |
 | Circularly polarised string (3D analytic) | radial error 1.6e-8, phase error 1e-7 rad after 0.92 periods |
@@ -37,11 +37,19 @@ Milestones 1-6 done (static solver, dynamics, hydrodynamics + seabed, Chalmers v
 | Floater (2500 N buoyancy, arch) vs exact | rel. L2 2.0e-5 -> 3.1e-7, order 1.99 |
 | Point drag in a 1.5 m/s current | support load 10.602875 N = Morison drag (exact) |
 | Point added mass, 2-segment oscillator | period 3.31136 s = exact; Cm=1/Cm=0 ratio 1.10554 = exact |
+| Rotation kinematics, free heave decay with A, B, C | orthonormal R; decay error 2.4e-5 / 6.0e-6 / 1.5e-6 for dt = 2 / 1 / 0.5 ms (order 2) |
+| Body on a vertical line: heave frequency | 9.99230 vs exact end-mass spring 9.99167 rad/s (6e-5); ratio 1-50 differ by <= 1e-3 |
+| Body on a line: pendulum period | 6.37436 vs 6.37495 s (-9e-5); independent of sub-step ratio 1-100 |
+| JSON platform runner, same pendulum | period error -1.1e-4, sub-step ratio 51 |
+| 3 legs at 120 deg, asymmetric: static equilibrium | Newton in 4 iterations, residual 9e-10 N / 3e-11 N m; independent force/moment balance to 1e-6 |
+| Coupling stability | stable at 0.4 x, unstable at 2 x the estimate 2/omega_s (two body masses) |
 | Support reactions, static line | vertical sum = weight (1e-6), horizontal sum = 0 |
 
 Details: `docs/chalmers_validation.md` (results, convergence, caveats), `docs/config.md` (configuration fields).
 Run the Chalmers case: `build/mooring_run examples/chalmers/chalmers_config.json`; full grid:
 `ctest --test-dir build -R chalmers_grid` or `scripts/chalmers_grid.py OUTDIR` (plots need matplotlib; analysis only).
+
+Platform: `build/mooring_platform examples/platform/three_leg_example.json` (config fields in `docs/config.md`).
 
 ## Equation-to-code map
 | Equation (Paredes 2016) | Code |
@@ -51,9 +59,10 @@ Run the Chalmers case: `build/mooring_run examples/chalmers/chalmers_config.json
 | 3.27 added mass | `addedMassSolve` (`hydro.hpp`), `acceleration` |
 | 3.28-3.29 drag | `morisonDrag` |
 | 3.32-3.36 seabed | `seabedForce` |
+| 3.59 body equation (constant A, B, C) | `RigidBody6DOF`, `CoupledSystem::step` |
 | 3.57 / 3.58 string wave | `tests/test_dynamics.cpp` (exact solution) |
 | 3.54-3.56 elastic catenary | `ElasticCatenary` (`src/catenary.cpp`) |
 
 ## Limitations (so far)
-Perfectly flexible cable (no bending/torsion/VIV); still water only (no wave kinematics until milestone 9), flat seabed, no soil dynamics beyond the spring-damper; momentum conservation not tested (ends are held).
+Perfectly flexible cable (no bending/torsion/VIV); small-angle rigid-body dynamics (no quaternion/Euler nonlinearity), constant A and B, still water only (no wave kinematics until milestone 9), flat seabed, no soil dynamics beyond the spring-damper; momentum conservation not tested (ends are held).
 See `docs/assumptions.md`.

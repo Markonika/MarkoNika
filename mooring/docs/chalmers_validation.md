@@ -80,6 +80,11 @@ Mean maximum top tension [N]:
 * RK4 and velocity-Verlet agree (51.966 vs 51.964 N; 40.904 vs 40.900 N; snap case 72.49 vs 72.29 N at default dt).
 * The static top tension converges slowly with N (-1.7 % at N = 16 to +0.1 % at N = 264, limit about 22.72 N).
 
+## Noise floor of the maximum-tension metric
+A change of the time step by 1 part in 10^12, or of the circle phase by 1e-9 deg, changes the 3-cycle mean of the maxima by 3e-5 to 1.8e-4
+(smooth cases; milestone-5 measurement, `docs/assumptions.md` item 23). This sensitive dependence is why differences below about 2e-4 (smooth)
+or ~1e-2 (snap case) in the tables above are not meaningful. It is far below the 5 % reading error of the measured data.
+
 ## Things that disagree with the reference or are uncertain
 * The simulated static tension converges to ~22.72 N, 0.2 % above the published 22.68 N (within the geometry tolerance).
 * The headline r^2 depends on the rotation sense being clockwise. With the other sense the model over-predicts by 10 %.

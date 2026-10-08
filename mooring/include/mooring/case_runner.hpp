@@ -3,6 +3,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include "mooring/lumped_mass_cable.hpp"
 #include "nlohmann/json.hpp"
 
 namespace mooring {
@@ -32,6 +33,10 @@ struct CaseResult {
 // Run a case. Output files (time series, cycle maxima, parameter log) are written to
 // cfg["output"]["directory"] with the prefix cfg["output"]["tag"] when "write" is true (default).
 CaseResult runCase(const nlohmann::json& cfg);
+
+// Build one line from a config object holding "line", "environment", "soil", "numerics" (planar), "point_elements"
+// and "initial.shape" (touchdown catenary start when a seabed is present). Anchor and fairlead are global positions.
+std::unique_ptr<LumpedMassCable> buildLine(const nlohmann::json& cfg, const Vec3& anchor, const Vec3& fairlead);
 
 // Apply "a.b.c=value" overrides (value parsed as JSON, falling back to a string).
 void applyOverride(nlohmann::json& cfg, const std::string& assignment);

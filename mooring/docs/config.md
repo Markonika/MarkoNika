@@ -27,3 +27,24 @@ configuration plus derived values, time step, slack/clipping/contact counters).
 | `point_elements[]` | list of `{type: "floater"\|"clump"\|"generic", node \| arclength_m (nearest node), mass_kg, diameter_m, Cd, Cm, buoyancy_N (floater) \| submerged_weight_N (clump) \| volume_m3, area_m2 (generic)}` |
 | `statistics.first_cycle` | first cycle included in the mean of the cycle maxima |
 | `output.directory`, `.tag`, `.dt_out_s`, `.write` | output control |
+
+## Platform runner (`build/mooring_platform config.json [key.path=value ...]`)
+One file holds the body, the lines and their fairleads. Outputs: `<tag>_timeseries.csv` (time, 6 DOF, and per line the fairlead force
+magnitude and the end-segment tension) and `<tag>_params.json` (full config + derived values: dt_body, shortest line step, sub-step
+ratio, coupling scheme, equilibrium status).
+
+| Key | Meaning |
+|---|---|
+| `body.mass_kg`, `body.inertia_diag_kg_m2` (3) or `body.inertia_kg_m2` (9) | rigid-body mass and inertia about the CG (reference axes) |
+| `body.cg_ref_m` | global position of the CG in the reference (free-floating equilibrium) pose |
+| `body.A`, `.B`, `.C` (6x6 or 36 numbers) or `body.A_diag`, `.B_diag`, `.C_diag` (6) | added mass, damping, hydrostatic stiffness (constants) |
+| `body.Dq` (6), `body.F0` (6) | quadratic drag per DOF; constant generalised load |
+| `lines[]` | `{name, anchor_m, fairlead_body_m (relative to the CG, reference axes), line: {...}, point_elements: [...], initial: {shape}}` |
+| `line_defaults` | `line` fields shared by all legs; each leg's `line` overrides them |
+| `environment`, `soil`, `numerics` (top level) | defaults for every line (same keys as the single-line runner) |
+| `initial.xi0`, `.xi_dot0` | pose / velocity before the equilibrium solve |
+| `initial.equilibrium`, `.equilibrium_tol`, `.xi_offset` | solve the static equilibrium, then displace by `xi_offset` (e.g. for a decay test) |
+| `numerics.dt_body_s`, `.t_end_s` | body step and end time; `numerics.cfl`/`line_dt_s`/`scheme` set the line integration |
+| `output.directory`, `.tag`, `.dt_out_s`, `.write` | output control |
+
+Example: `examples/platform/three_leg_example.json` (generic, **not** the Paredes buoy).

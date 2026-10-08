@@ -191,7 +191,9 @@ RelaxResult LumpedMassCable::relaxStatic(const RelaxOptions& opt) {
     const double mFict = opt.massFactor * res.dt * res.dt * p_.EA / p_.l0();
     std::vector<Vec3> v(n), f(n);
     const std::vector<Vec3> vz(n);                // fictitious velocities must not feed c_int damping
-    const double tol = opt.forceTol * std::max(p_.w, 1e-12) * p_.l0();
+    // Force scale for the convergence test: nodal weight, or (taut, weightless lines) a small fraction of the axial stiffness.
+    const double fScale = std::max({p_.w * p_.l0(), p_.m_l * p_.g * p_.l0(), 1e-7 * p_.EA});
+    const double tol = opt.forceTol * fScale;
     double keOld = 0.0;
     // Soil stiffness is capped so that the node contact stiffness equals the axial one (EA/l0); the
     // equilibrium penetration becomes w l0^2/EA instead of w/(Ks D1) - both negligible - and the
@@ -217,6 +219,7 @@ RelaxResult LumpedMassCable::relaxStatic(const RelaxOptions& opt) {
         keOld = ke;
     }
     ksCap_ = 1e300;
+    v_.assign(r_.size(), Vec3());                  // the line is left at rest
     return res;
 }
 
@@ -350,6 +353,19 @@ Vec3 LumpedMassCable::forceOnBody(const Vec3& pos, const Vec3& vel, double t) {
         advanceTo(t);
         fairPrevPos_ = pos; fairPrevVel_ = vel; fairPrevT_ = t;
     }
+    return endForce(true);
+}
+
+void LumpedMassCable::setFairlead(const Vec3& pos) {
+    r_[p_.N] = pos;
+    v_.assign(r_.size(), Vec3());
+    fairInit_ = false;                             // next forceOnBody() restarts the fairlead interpolation
+}
+
+Vec3 LumpedMassCable::staticForceOnBody(const Vec3& fairleadPos) {
+    setFairlead(fairleadPos);
+    RelaxOptions ro; ro.forceTol = 1e-7; ro.maxSteps = 5000000;   // 1e-7 of the force scale: ~1e-9 N here, above the round-off floor
+    relaxStatic(ro);
     return endForce(true);
 }
 

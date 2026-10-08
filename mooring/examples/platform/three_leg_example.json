@@ -1,0 +1,22 @@
+{
+  "_comment": "Generic floating body on three taut elastic legs at 120 deg (NOT the Paredes buoy): demonstrates the platform config. Leg chord 4.383 m, unstretched 4.36 m -> ~16 N pretension. SI units. See docs/config.md.",
+  "body": {
+    "mass_kg": 35.5,
+    "inertia_diag_kg_m2": [0.87, 0.87, 0.5],
+    "cg_ref_m": [0.0, 0.0, 0.0],
+    "A_diag": [0.0, 0.0, 26.92, 0.0, 0.0, 0.0],
+    "B_diag": [0.0, 0.0, 10.0, 0.0, 0.0, 0.0],
+    "C_diag": [0.0, 0.0, 2040.0, 150.0, 150.0, 0.0],
+    "Dq": [0, 0, 0, 0, 0, 0],
+    "F0": [0, 0, 0, 0, 0, 0]
+  },
+  "line_defaults": { "length_m": 4.5, "segments": 16, "EA_N": 3000.0, "mass_per_length_kg_m": 0.01, "weight_per_length_N_m": 0.0 },
+  "lines": [
+    { "name": "leg1", "anchor_m": [4.0, 0.0, -2.5],      "fairlead_body_m": [0.3, 0.0, -0.15],      "line": { "length_m": 4.36 } },
+    { "name": "leg2", "anchor_m": [-2.0, 3.4641, -2.5],  "fairlead_body_m": [-0.15, 0.2598, -0.15], "line": { "length_m": 4.36 } },
+    { "name": "leg3", "anchor_m": [-2.0, -3.4641, -2.5], "fairlead_body_m": [-0.15, -0.2598, -0.15], "line": { "length_m": 4.36 } }
+  ],
+  "initial": { "equilibrium": true, "xi_offset": [0.02, 0.0, 0.0, 0.0, 0.0, 0.0] },
+  "numerics": { "dt_body_s": 0.002, "t_end_s": 3.0, "scheme": "rk4", "cfl": 0.5 },
+  "output": { "directory": "out/platform", "tag": "three_leg", "dt_out_s": 0.01, "write": true }
+}
