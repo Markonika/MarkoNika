@@ -11,14 +11,19 @@
 //
 // Output CSV adds: pred_holdup,pred_dPdz_Pa_m,blew_up
 //
-// Usage: validate_quantitative <input.csv> <output.csv> [closureCorrectionScale] [closureF0Shift] [closureDepositionVelocityScale]
+// Usage: validate_quantitative <input.csv> <output.csv> [closureCorrectionScale] [closureF0Shift] [closureDepositionVelocityScale] [enableTurbulentViscosity(0|1)]
 // The optional third/fourth/fifth arguments, if any is given, set
 // SolverOptions::enableDataDrivenClosureCorrection=true and
 // closureCorrectionScale/closureF0Shift/closureDepositionVelocityScale
 // to the given values (default 1.0/0.0/1.0, i.e. no-ops, for whichever
 // are omitted) for every case -- used to line-search the fits in
 // VALIDATION.md's data-driven closure correction section; omitted
-// entirely, behavior is the original, unmodified closure.
+// entirely, behavior is the original, unmodified closure. The optional
+// sixth argument, if nonzero, sets
+// SolverOptions::enableTurbulentViscosity=true for every case --
+// unrelated to the closure-correction knobs above, used to test the
+// turbulent-viscosity regularization against the same holdup
+// validation (see VALIDATION.md).
 
 #include "mfs/Constants.hpp"
 #include "mfs/FourFieldSolver.hpp"
@@ -99,7 +104,8 @@ struct RunResult {
 
 RunResult runOneCase(const Case& c, bool haveClosureScale, double closureScale,
                       bool haveF0Shift, double f0Shift,
-                      bool haveDepositionScale, double depositionScale) {
+                      bool haveDepositionScale, double depositionScale,
+                      bool enableTurbVisc) {
     const double D = c.D;
     const double L = std::clamp(60.0 * D, 0.6, 20.0);
     const int N = 60;
@@ -120,6 +126,7 @@ RunResult runOneCase(const Case& c, bool haveClosureScale, double closureScale,
         if (haveF0Shift) opt.closureF0Shift = f0Shift;
         if (haveDepositionScale) opt.closureDepositionVelocityScale = depositionScale;
     }
+    if (enableTurbVisc) opt.enableTurbulentViscosity = true;
     mfs::FourFieldSolver solver(D, L, N, fluid, opt);
     solver.setInclinationConstant(c.angle_deg * mfs::constants::pi / 180.0);
 
@@ -210,7 +217,7 @@ RunResult runOneCase(const Case& c, bool haveClosureScale, double closureScale,
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::cerr << "Usage: validate_quantitative <input.csv> <output.csv> [closureCorrectionScale] [closureF0Shift]\n";
+        std::cerr << "Usage: validate_quantitative <input.csv> <output.csv> [closureCorrectionScale] [closureF0Shift] [closureDepositionVelocityScale] [enableTurbulentViscosity(0|1)]\n";
         return 1;
     }
     const bool haveClosureScale = (argc >= 4);
@@ -219,6 +226,7 @@ int main(int argc, char** argv) {
     const double f0Shift = haveF0Shift ? std::stod(argv[4]) : 0.0;
     const bool haveDepositionScale = (argc >= 6);
     const double depositionScale = haveDepositionScale ? std::stod(argv[5]) : 1.0;
+    const bool enableTurbVisc = (argc >= 7) && std::stoi(argv[6]) != 0;
     const auto cases = readCases(argv[1]);
 
     // Each case is an independent FourFieldSolver instance (no shared
@@ -234,7 +242,7 @@ int main(int argc, char** argv) {
 #endif
     for (std::size_t i = 0; i < cases.size(); ++i) {
         results[i] = runOneCase(cases[i], haveClosureScale, closureScale, haveF0Shift, f0Shift,
-                                 haveDepositionScale, depositionScale);
+                                 haveDepositionScale, depositionScale, enableTurbVisc);
 #ifdef _OPENMP
 #pragma omp critical
 #endif
