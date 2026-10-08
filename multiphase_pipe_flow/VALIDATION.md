@@ -756,3 +756,45 @@ methodology, tables, and figures are in the paper (Section 7,
     this one correlation. `closureF0Shift`'s default stays at 0.0 for
     the same reason. Regression-confirmed bit-for-bit identical
     `step()` behaviour throughout.
+15. **Done: a third closure tweak, then the actual root cause.** Tried
+    `SolverOptions::closureDepositionVelocityScale` (a different closure
+    than items 13-14: how fast suspended droplets return to the
+    continuous film) on the chance the gap was about suspended-droplet
+    holdup specifically. Same train/test methodology; an even flatter,
+    more decisive negative result -- even a 10x scale on the held-out
+    set changed MAE by under 0.4%. See README.md, "A third attempt" and
+    "Root cause, not a closure problem" for the full account, but the
+    short version: three independent, physically-motivated single-
+    parameter corrections to two different closures all showing the
+    same non-generalizing pattern was enough to stop asking "which
+    parameter" and start asking "is this a closure problem at all."
+    Looking directly at the held-out error shows it is not. The error is
+    one-sided (81% of the 126 held-out cases under-predicted, not just
+    large-on-average) and correlates strongly with the solver's OWN
+    predicted holdup (r=-0.76): the worst cases predict a thin film
+    (holdup 0.02-0.05) where measured holdup is 0.8-0.95+. Insufficient
+    simulated time was checked and ruled out (several worst cases run
+    7-10x their own residence time before sampling). The conditions
+    driving this -- low superficial liquid velocity, moderate
+    superficial gas velocity -- are a textbook slug-flow signature,
+    where a high *time-averaged* experimental holdup comes from
+    intermittent, nearly pipe-filling liquid slugs, not a uniform film;
+    this four-field model has no slug/intermittency mechanism, so it
+    converges to its own different, thin-film equilibrium rather than
+    failing to converge to the right one. This is corroborated, not
+    newly invented: it sharpens this same section's existing finding
+    (error growing with experimental holdup magnitude, item from the
+    "Quantitative validation" section above) into a specific directional
+    mechanism, and explains it via the held-out set's own nature -- the
+    Abdul-Majeed (2022) compilation is explicitly a "slug-holdup
+    database," not an incidental mix. The same under-prediction
+    signature checked within Kokal 1987's own high-holdup half (mixed
+    inclinations/regimes, not slug-curated) is present but far weaker
+    (43% under-predicted, correlation ~0.0), consistent with the gap
+    being specifically about slug intermittency rather than "high
+    holdup" generically. Closing it would need an actual intermittency
+    mechanism (a slug-tracking extension, a unit-cell-slug-derived
+    closure, or an accepted scope limitation), not a scalar tweak to any
+    one closure -- now ruled out as a fix by three independently tested
+    attempts across two closures, not assumed. Regression-confirmed
+    bit-for-bit identical `step()` behaviour throughout.

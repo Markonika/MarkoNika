@@ -1281,6 +1281,105 @@ behaviour against the full demo suite; `closureF0Shift` is read only
 when `enableDataDrivenClosureCorrection` is enabled and is otherwise a
 literal no-op.
 
+#### A third attempt: droplet deposition velocity (`SolverOptions::closureDepositionVelocityScale`)
+
+A different closure entirely, tried next: `closureDepositionVelocityScale`
+scales the droplet deposition velocity (`DropletDepositionInputs`,
+hardcoded at `0.1` in `computeClosures()`) governing how fast liquid
+droplets suspended in the gas core return to the continuous film.
+Motivated by the validation driver's own holdup metric, which sums
+`el + ed` (continuous liquid plus dispersed droplets): if deposition
+were returning droplets to the film faster than real droplets settle,
+suspended holdup would be systematically underestimated -- a different,
+independently plausible mechanism than either knob on the interfacial
+friction closure above.
+
+**Same methodology, an even flatter result.** A line search from `0.1`
+to `10.0` x the baseline deposition velocity on the training set
+produced a response barely distinguishable from noise (MAE 0.0949 to
+0.0963 against the unmodified closure's 0.0960 -- less than 1.5%
+spread across a 100x range of the parameter). On the held-out Mendeley
+test set, even the most extreme value tried (`10.0`, i.e. ten times
+faster deposition) changed the result by less than 0.4% (0.3022 vs.
+0.3032 unmodified) -- the flattest, most decisive of the three negative
+results, and informative in its own right: droplet suspension/
+deposition dynamics are evidently not even an active mechanism in the
+specific low-superficial-gas-velocity cases where this gap concentrates
+(unsurprising in hindsight -- droplet entrainment is a high-Vsg,
+annular/mist-flow phenomenon, and these cases are not that).
+
+#### Root cause, not a closure problem: this gap is a structural one
+
+With three independent, physically well-motivated single-parameter
+corrections to two different closures all showing the same flat,
+non-generalizing pattern, the question stopped being "which parameter is
+miscalibrated" and became "is this a closure problem at all." Looking
+directly at *where* the error concentrates in the held-out set answers
+that:
+
+- **The error is one-sided, not just large.** 102 of 126 held-out cases
+  (81%) are *under*-predicted (measured holdup exceeds predicted), and
+  predicted holdup itself correlates strongly with the error
+  (r = -0.76): the lower the solver's own predicted holdup, the larger
+  the miss. The worst cases are not borderline -- they predict a thin,
+  fast-moving film (holdup 0.02-0.05, barely above the validation
+  driver's own initial-condition floor) where the experiment measured
+  the pipe as 80-95% full of liquid (e.g. Brito 2012's
+  Vsl=0.055/Vsg=2.6 m/s case: predicted 0.021, measured 0.912).
+- **Ruled out: insufficient simulated time.** Several of the worst
+  cases run for 7-10x their own convective residence time before
+  holdup is sampled -- ample for an initial-condition transient to
+  wash out if the solver were converging toward the right answer
+  slowly. It reaches a stable, wrong answer quickly, not the right one
+  slowly.
+- **These conditions are a textbook slug-flow signature**: low
+  superficial liquid velocity with moderate superficial gas velocity
+  is exactly where real pipe flow goes intermittent, and a high
+  *time-averaged* experimental holdup in that regime comes from slow,
+  nearly-pipe-filling liquid slugs dominating the average -- not from a
+  uniformly thick stratified film. This model has no explicit slug/
+  intermittency structure; it is a continuous, layer-averaged
+  formulation. It is not failing to converge to the slug-flow average --
+  it is correctly converging to its own, different, thin-film
+  equilibrium, which is a structurally different *answer* than the
+  intermittent-slug time-average the experiment reports.
+- **This is corroborated by this codebase's own prior validation work**,
+  not a new, isolated observation: the quantitative validation section
+  below already documents error growing with experimental holdup
+  magnitude across all three datasets, and separately, that this
+  solver's flow-regime classifier was already shown never to correctly
+  identify slug flow at all (see "Results"/"Interpretation" below). The
+  present finding sharpens that into a specific, directional mechanism
+  (systematic *under*-prediction, not just larger error) and explains
+  *why* -- the held-out Mendeley set is, by its own compiler's
+  description (Abdul-Majeed 2022, a "compiled **slug-holdup database**
+  from 21 independent studies"), composed of slug-flow conditions by
+  construction, not incidentally. Checking the same under-prediction
+  signature within Kokal 1987's own high-measured-holdup half (a more
+  heterogeneous mix of inclinations and regimes, not a slug-curated
+  compilation) finds it present but much weaker (43% under-predicted,
+  correlation with predicted holdup ~0.0, against Mendeley's 81% and
+  -0.76) -- consistent with the gap being specifically about slug-flow
+  intermittency, not "high holdup" in general.
+
+**What this means for this line of investigation.** Closing this gap
+would need something that gives the model an actual intermittency
+mechanism -- a genuine slug-tracking extension, a correction derived
+from a slug-flow closure (e.g. unit-cell slug models already used in
+mechanistic slug-flow design correlations), or accepting it as a
+documented scope limitation of a flow-regime-independent, continuous-
+field formulation -- not a scalar correction to any one closure's rate
+or threshold, which is now ruled out by three independent, honestly
+tested attempts, not assumed. `enableDataDrivenClosureCorrection` and
+all three of its knobs are kept, at their no-op defaults, as reusable,
+regression-tested scaffolding for whatever that actual fix turns out
+to be.
+
+**Confirmed:** regression-tested bit-for-bit identical `step()`
+behaviour against the full demo suite; `closureDepositionVelocityScale`
+is read only when `enableDataDrivenClosureCorrection` is enabled and is
+otherwise a literal no-op.
+
 ## Validation against experimental data
 
 **[VALIDATION.md](VALIDATION.md)** compares the solver's predicted flow
