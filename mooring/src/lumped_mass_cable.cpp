@@ -32,15 +32,21 @@ double LumpedMassCable::segmentTension(const std::vector<Vec3>& r, int seg) cons
     return eps > 0.0 ? p_.EA * eps : 0.0;
 }
 
-void LumpedMassCable::computeForces(const std::vector<Vec3>& r, const std::vector<Vec3>& /*v*/,
+void LumpedMassCable::computeForces(const std::vector<Vec3>& r, const std::vector<Vec3>& v,
                                     std::vector<Vec3>& f) const {
     f.assign(r.size(), Vec3());
     for (int i = 0; i < p_.N; ++i) {
         const Vec3 d = r[i + 1] - r[i];
         const double len = norm(d);
         const double eps = len / p_.l0() - 1.0;
-        if (eps <= 0.0 || len <= 0.0) continue;
-        const Vec3 F = d * (p_.EA * eps / len);
+        if (eps <= 0.0 || len <= 0.0) { ++stats_.slackSegmentEvals; continue; }   // Eq. 3.25: T = 0
+        double T = p_.EA * eps;
+        if (p_.c_int != 0.0) {
+            const double epsDot = dot(d, v[i + 1] - v[i]) / (len * p_.l0());
+            T += p_.c_int * epsDot;
+            if (T < 0.0) { T = 0.0; ++stats_.clippedTensionEvals; }
+        }
+        const Vec3 F = d * (T / len);
         f[i] += F;
         f[i + 1] -= F;
     }
@@ -54,6 +60,13 @@ Vec3 LumpedMassCable::endTension(bool top) const {
     return len > 0 ? d * (segmentTension(r_, seg) / len) : Vec3();
 }
 
+Vec3 LumpedMassCable::endForce(bool top) const {
+    std::vector<Vec3> f;
+    const std::vector<Vec3> vz(r_.size());
+    computeForces(r_, v_.size() == r_.size() ? v_ : vz, f);
+    return top ? f[p_.N] : f[0];
+}
+
 RelaxResult LumpedMassCable::relaxStatic(const RelaxOptions& opt) {
     // Dynamic relaxation with kinetic damping. Only the final equilibrium is physical, so the
     // inertia is fictitious: m_i = massFactor * dt^2 * EA / l0 keeps the explicit scheme stable for
@@ -64,10 +77,11 @@ RelaxResult LumpedMassCable::relaxStatic(const RelaxOptions& opt) {
     res.dt = 1.0;
     const double mFict = opt.massFactor * res.dt * res.dt * p_.EA / p_.l0();
     std::vector<Vec3> v(n), f(n);
+    const std::vector<Vec3> vz(n);                // fictitious velocities must not feed c_int damping
     const double tol = opt.forceTol * std::max(p_.w, 1e-12) * p_.l0();
     double keOld = 0.0;
     for (long k = 0; k < opt.maxSteps; ++k) {
-        computeForces(r_, v, f);
+        computeForces(r_, vz, f);
         double ke = 0.0, rmax = 0.0;
         for (int i = 1; i < p_.N; ++i) {          // end nodes fixed
             v[i] += f[i] * (res.dt / mFict);
@@ -86,6 +100,110 @@ RelaxResult LumpedMassCable::relaxStatic(const RelaxOptions& opt) {
         keOld = ke;
     }
     return res;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Dynamics
+// ---------------------------------------------------------------------------------------------
+
+double LumpedMassCable::stableDt() const {
+    if (dyn_.dt > 0.0) return dyn_.dt;
+    double dt = dyn_.cfl * p_.l0() / p_.waveSpeed();                      // axial wave CFL
+    // Explicit internal damping (c_int/l0 per segment, up to 4 c_int/(m_l l0^2) per node) adds its own limit.
+    if (p_.c_int > 0.0) dt = std::min(dt, dyn_.cfl * p_.m_l * p_.l0() * p_.l0() / (2.0 * p_.c_int));
+    return dt;
+}
+
+void LumpedMassCable::setInitialState(const std::vector<Vec3>& r, const std::vector<Vec3>& v, double t0) {
+    if (r.size() != r_.size() || v.size() != r_.size()) throw std::invalid_argument("state size mismatch");
+    r_ = r; v_ = v; t_ = t0;
+}
+
+void LumpedMassCable::acceleration(std::vector<Vec3>& r, std::vector<Vec3>& v, double t,
+                                   std::vector<Vec3>& a) const {
+    const int N = p_.N;
+    r[0] = r_[0]; v[0] = Vec3();                   // anchor fixed
+    if (top_) top_(t, r[N], v[N]);                 // otherwise the top end is held where it is
+    std::vector<Vec3>& f = a;
+    computeForces(r, v, f);
+    for (int i = 1; i < N; ++i) f[i] = f[i] / nodeMass(i);
+    f[0] = Vec3(); f[N] = Vec3();
+}
+
+void LumpedMassCable::step(double dt) {
+    const int n = p_.N + 1, N = p_.N;
+    if (v_.size() != r_.size()) v_.assign(n, Vec3());
+    if (top_) top_(t_, r_[N], v_[N]);
+    std::vector<Vec3> a(n);
+    if (dyn_.scheme == Scheme::Verlet) {
+        acceleration(r_, v_, t_, a);
+        std::vector<Vec3> vh = v_;
+        for (int i = 1; i < N; ++i) { vh[i] += a[i] * (0.5 * dt); r_[i] += vh[i] * dt; }
+        acceleration(r_, vh, t_ + dt, a);
+        for (int i = 1; i < N; ++i) v_[i] = vh[i] + a[i] * (0.5 * dt);
+    } else {
+        std::vector<Vec3> r1 = r_, v1 = v_, k1v(n), k2v(n), k3v(n), k4v(n), k2r(n), k3r(n), k4r(n);
+        std::vector<Vec3> rs(n), vs(n);
+        // stage 1
+        acceleration(r1, v1, t_, k1v);
+        const std::vector<Vec3>& k1r = v1;
+        // stage 2
+        rs = r_; vs = v_;
+        for (int i = 1; i < N; ++i) { rs[i] = r_[i] + k1r[i] * (0.5 * dt); vs[i] = v_[i] + k1v[i] * (0.5 * dt); }
+        acceleration(rs, vs, t_ + 0.5 * dt, k2v); k2r = vs;
+        // stage 3
+        for (int i = 1; i < N; ++i) { rs[i] = r_[i] + k2r[i] * (0.5 * dt); vs[i] = v_[i] + k2v[i] * (0.5 * dt); }
+        acceleration(rs, vs, t_ + 0.5 * dt, k3v); k3r = vs;
+        // stage 4
+        for (int i = 1; i < N; ++i) { rs[i] = r_[i] + k3r[i] * dt; vs[i] = v_[i] + k3v[i] * dt; }
+        acceleration(rs, vs, t_ + dt, k4v); k4r = vs;
+        for (int i = 1; i < N; ++i) {
+            r_[i] += (k1r[i] + k2r[i] * 2.0 + k3r[i] * 2.0 + k4r[i]) * (dt / 6.0);
+            v_[i] += (k1v[i] + k2v[i] * 2.0 + k3v[i] * 2.0 + k4v[i]) * (dt / 6.0);
+        }
+    }
+    t_ += dt;
+    if (top_) top_(t_, r_[N], v_[N]);
+    ++stats_.steps;
+}
+
+void LumpedMassCable::advanceTo(double tEnd) {
+    const double dt0 = stableDt();
+    stats_.dtUsed = dt0;
+    if (v_.size() != r_.size()) v_.assign(r_.size(), Vec3());
+    while (t_ < tEnd - 1e-12 * dt0) step(std::min(dt0, tEnd - t_));
+}
+
+double LumpedMassCable::energy() const {
+    double E = 0.0;
+    for (int i = 0; i <= p_.N; ++i) {
+        if (!v_.empty()) E += 0.5 * nodeMass(i) * dot(v_[i], v_[i]);
+        E += p_.w * p_.l0() * ((i == 0 || i == p_.N) ? 0.5 : 1.0) * r_[i].z;
+    }
+    for (int i = 0; i < p_.N; ++i) {
+        const double eps = norm(r_[i + 1] - r_[i]) / p_.l0() - 1.0;
+        if (eps > 0.0) E += 0.5 * p_.EA * eps * eps * p_.l0();
+    }
+    return E;
+}
+
+Vec3 LumpedMassCable::forceOnBody(const Vec3& pos, const Vec3& vel, double t) {
+    if (!fairInit_) {
+        fairPrevPos_ = pos; fairPrevVel_ = vel; fairPrevT_ = t; fairInit_ = true;
+        r_[p_.N] = pos; if (v_.size() == r_.size()) v_[p_.N] = vel;
+        t_ = t;
+    } else if (t > fairPrevT_) {
+        const Vec3 p0 = fairPrevPos_, p1 = pos;
+        const double t0 = fairPrevT_, t1 = t;
+        top_ = [p0, p1, t0, t1](double tt, Vec3& r, Vec3& v) {   // linear interpolation of fairlead motion
+            const double u = (tt - t0) / (t1 - t0);
+            r = p0 + (p1 - p0) * u;
+            v = (p1 - p0) / (t1 - t0);
+        };
+        advanceTo(t);
+        fairPrevPos_ = pos; fairPrevVel_ = vel; fairPrevT_ = t;
+    }
+    return endForce(true);
 }
 
 }  // namespace mooring
