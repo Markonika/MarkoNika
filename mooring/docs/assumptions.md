@@ -61,3 +61,11 @@
     2-cycle cosine ramp of the radius. The thesis ran 15 cycles; maxima were stationary to <0.1 % after the ramp.
 21. Top/anchor tension in outputs is the raw end-segment tension (EA eps + c_int d(eps)/dt, clipped at 0), not the
     support force (which also contains the end node's half-weight and hydrodynamic force).
+22. **Planar mode** (`CableParams::planar`, `numerics.planar`): y-forces are set to zero and y is flattened to the anchor's y in the
+    constructor and `setInitialState`; a top-motion function must stay in the plane. It is a consistency/cost option: 3D runs
+    with in-plane data give identical results (bit-for-bit in the tests), so there is no separate 2D code path.
+23. **Rotation invariance** holds to ~3e-5 (smooth cases) limited by the static-relaxation tolerance (1e-6 N), amplified by the
+    dynamics; the snap case (T = 1.25 s) differs by 0.1-0.5 % between rotated and unrotated runs (same scatter as its N/dt
+    scatter in milestone 4). `maxOutOfPlane` is sampled every 64 steps, so it can miss short excursions.
+24. The out-of-plane stability check is empirical (three Chalmers cases, 1 mm perturbation, 6 cycles). It shows no growth
+    there; it is **not** a proof that no parametric out-of-plane instability exists elsewhere in the parameter space.

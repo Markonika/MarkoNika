@@ -4,12 +4,12 @@ Copyright Marko Nika. All rights reserved. Proprietary and confidential. No lice
 the GPL `LICENSE` at the repository root belongs to the profile repository, not to this directory.
 
 ## Build and test
-    cmake -S . -B build && cmake --build build -j && ./build/mooring_tests
+    cmake -S . -B build && cmake --build build -j && ./build/mooring_tests   # about 1 min; full Chalmers grid: ctest -R chalmers_grid
 
 Warnings: `-Wall -Wextra -Wpedantic`. Dependencies: see `THIRD_PARTY.md`.
 
 ## Status
-Milestones 1-4 done (static solver, dynamics, hydrodynamics + seabed, Chalmers validation).
+Milestones 1-5 done (static solver, dynamics, hydrodynamics + seabed, Chalmers validation, planar/3D regression).
 
 | Test (milestone 1) | Result |
 |---|---|
@@ -28,6 +28,11 @@ Milestones 1-4 done (static solver, dynamics, hydrodynamics + seabed, Chalmers v
 | Chalmers static top tension (22.68 N published) | 22.653 N (N = 66), 22.685 N (N = 132) |
 | Chalmers 30-case grid vs Table 7 (clockwise motion) | regression r2 = 0.985 (published 0.98), RMSE 1.4 N, bias +0.12 N, 24/30 within 5 %, max 6.7 % |
 | Same grid, opposite rotation sense (sensitivity) | r2 vs 1:1 = 0.81, bias +4.4 N (+9.8 %) - direction matters, see docs/chalmers_validation.md |
+| Planar mode vs 3D, Chalmers (3 cases) | identical (difference 0.0); 3D run stays in plane (< 1e-12 m) |
+| Rotation of the set-up by 37 deg about z | smooth cases 3e-5 relative, snap case 0.5 % (within its scatter) |
+| Lateral current +/-0.3 m/s | tension identical, deflection mirrored (max \|y\| 1.160 m both); no-current run stays planar |
+| 1 mm out-of-plane perturbation, 6 cycles | never exceeds 1 mm, 0.3-0.5 mm at the end; maxima change by <= 0.8 % |
+| Circularly polarised string (3D analytic) | radial error 1.6e-8, phase error 1e-7 rad after 0.92 periods |
 | Support reactions, static line | vertical sum = weight (1e-6), horizontal sum = 0 |
 
 Details: `docs/chalmers_validation.md` (results, convergence, caveats), `docs/config.md` (configuration fields).

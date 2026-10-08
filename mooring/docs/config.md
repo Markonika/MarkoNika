@@ -18,7 +18,11 @@ configuration plus derived values, time step, slack/clipping/contact counters).
 | `anchor_m`, `fairlead_rest_m` | anchor (fixed) and top end at rest |
 | `initial.shape` | `touchdown` (catenary lying on the bed, then static relaxation) |
 | `motion.type` | `none` or `circle_xz` (top end on a circle about `centre_m`, default = rest position) |
+| `motion.plane_angle_deg` | rotates the circle plane about the vertical axis (set `fairlead_rest_m` consistently) |
+| `environment.current_m_s` | uniform steady current vector [m/s] (drag only; also applied in the static solve) |
+| `initial.perturbation_y_m` | out-of-plane half-sine perturbation of the relaxed line, released from rest (3D only) |
 | `motion.radius_m`, `.period_s`, `.direction` (+1 counter-clockwise in x-z, -1 clockwise), `.phase_deg`, `.ramp_cycles`, `.cycles` | excitation |
+| `numerics.planar` | true: 2D mode, motion confined to the plane y = y_anchor (forces/velocities in y dropped) |
 | `numerics.scheme` (`rk4`/`verlet`), `.cfl`, `.dt_s` (override), `.relax_force_tol`, `.relax_max_steps` | integration and static relaxation |
 | `statistics.first_cycle` | first cycle included in the mean of the cycle maxima |
 | `output.directory`, `.tag`, `.dt_out_s`, `.write` | output control |

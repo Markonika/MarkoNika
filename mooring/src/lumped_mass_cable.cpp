@@ -20,6 +20,7 @@ LumpedMassCable::LumpedMassCable(const CableParams& p, const Vec3& anchor, const
         const double u = double(i) / p.N;
         r_[i] = anchor + d * u + Vec3(0, 0, -4.0 * sag * u * (1.0 - u));
     }
+    if (p.planar) for (Vec3& q : r_) q.y = anchor.y;
 }
 
 double LumpedMassCable::nodeMass(int i) const {
@@ -97,6 +98,7 @@ void LumpedMassCable::computeForces(const std::vector<Vec3>& r, const std::vecto
             }
         }
     }
+    if (p_.planar) for (Vec3& q : f) q.y = 0.0;      // 2D mode: no out-of-plane force
 }
 
 Vec3 LumpedMassCable::endTension(bool top) const {
@@ -210,6 +212,7 @@ double LumpedMassCable::stableDt() const {
 void LumpedMassCable::setInitialState(const std::vector<Vec3>& r, const std::vector<Vec3>& v, double t0) {
     if (r.size() != r_.size() || v.size() != r_.size()) throw std::invalid_argument("state size mismatch");
     r_ = r; v_ = v; t_ = t0;
+    if (p_.planar) for (size_t i = 0; i < r_.size(); ++i) { r_[i].y = r_[0].y; v_[i].y = 0.0; }
 }
 
 void LumpedMassCable::acceleration(std::vector<Vec3>& r, std::vector<Vec3>& v, double t,

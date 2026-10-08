@@ -20,6 +20,7 @@ struct CableParams {
     double D0{0}, D1{0}, A1{0};
     double Cm{0}, Cdt{0}, Cdn{0};
     SoilParams soil;
+    bool planar{false};   // 2D mode: motion confined to the plane y = y_anchor (forces and velocities in y are dropped)
     double l0() const { return L / N; }
     double dryWeight() const { return m_l * g; }          // weight per length above the surface
     double nominalArea() const { return A1 > 0.0 ? A1 : 0.7853981633974483 * D0 * D0; }

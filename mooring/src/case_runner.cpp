@@ -51,6 +51,7 @@ CaseResult runCase(const json& cfg) {
     p.c_int = get(jl, "internal_damping_Ns", 0.0);
     p.D0 = get(jl, "hydro_diameter_m", 0.0); p.D1 = get(jl, "soil_diameter_m", p.D0);
     p.A1 = get(jl, "nominal_area_m2", 0.0);
+    p.planar = get(jn, "planar", false);
     p.Cm = get(jl, "Cm", 0.0); p.Cdt = get(jl, "Cdt", 0.0); p.Cdn = get(jl, "Cdn", 0.0);
     Environment env;
     env.hydro = get(jenv, "hydro", false); env.seabed = get(jenv, "seabed", false);
@@ -62,6 +63,10 @@ CaseResult runCase(const json& cfg) {
     p.soil.mu = get(jsoil, "friction", 0.0); p.soil.vlim = get(jsoil, "v_lim_m_s", 0.01);
 
     const Vec3 anchor = vec(cfg.at("anchor_m")), rest = vec(cfg.at("fairlead_rest_m"));
+    if (jenv.contains("current_m_s")) {              // uniform steady current (no water acceleration)
+        const Vec3 U = vec(jenv["current_m_s"]);
+        env.water = [U](const Vec3&, double, Vec3& vw, Vec3& aw) { vw = U; aw = Vec3(); };
+    }
     LumpedMassCable cable(p, anchor, rest);
     cable.setEnvironment(env);
 
@@ -76,6 +81,13 @@ CaseResult runCase(const json& cfg) {
     res.staticTopTension = norm(cable.endTension(true));
     res.staticAnchorTension = norm(cable.endTension(false));
 
+    const double pert = get(cfg.value("initial", json::object()), "perturbation_y_m", 0.0);
+    std::vector<Vec3> rp = cable.nodes();
+    if (pert != 0.0 && !p.planar) {                    // small out-of-plane half-sine, released from rest
+        for (int i = 1; i < p.N; ++i) rp[i].y += pert * std::sin(kPi * i / p.N);
+        cable.setInitialState(rp, std::vector<Vec3>(rp.size()), 0.0);
+    }
+    double maxY = 0.0;
     DynOptions dyn;
     dyn.scheme = get<std::string>(jn, "scheme", "rk4") == "verlet" ? Scheme::Verlet : Scheme::RK4;
     dyn.cfl = get(jn, "cfl", 0.5); dyn.dt = get(jn, "dt_s", 0.0);
@@ -84,6 +96,8 @@ CaseResult runCase(const json& cfg) {
 
     // ---- prescribed top-end motion: circle in the x-z plane about the rest position, cosine ramp ----
     const std::string mtype = get<std::string>(jm, "type", "none");
+    const double planeAng = get(jm, "plane_angle_deg", 0.0) * kPi / 180.0;   // rotation of the motion plane about z
+    const Vec3 ex(std::cos(planeAng), std::sin(planeAng), 0.0);
     const double radius = get(jm, "radius_m", 0.0), period = get(jm, "period_s", 1.0);
     const double dir = get(jm, "direction", 1.0), phase = get(jm, "phase_deg", 0.0) * kPi / 180.0;
     const double rampCycles = get(jm, "ramp_cycles", 2.0), nCycles = get(jm, "cycles", 10.0);
@@ -94,7 +108,7 @@ CaseResult runCase(const json& cfg) {
             double rho = 1.0, drho = 0.0;
             if (t < Tramp) { rho = 0.5 * (1.0 - std::cos(kPi * t / Tramp)); drho = 0.5 * kPi / Tramp * std::sin(kPi * t / Tramp); }
             const double th = phase + dir * om * t;
-            const Vec3 e(std::cos(th), 0.0, std::sin(th)), de(-std::sin(th) * dir * om, 0.0, std::cos(th) * dir * om);
+            const Vec3 e = ex * std::cos(th) + Vec3(0, 0, std::sin(th)), de = ex * (-std::sin(th) * dir * om) + Vec3(0, 0, std::cos(th) * dir * om);
             pos = centre + e * (radius * rho);
             vel = e * (radius * drho) + de * (radius * rho);
         });
@@ -114,7 +128,10 @@ CaseResult runCase(const json& cfg) {
     }
     std::map<int, CycleMax> cyc;
     bool finite = true;
+    const Vec3 nrm(-std::sin(planeAng), std::cos(planeAng), 0.0);
     cable.setStepObserver([&](const LumpedMassCable& c) {
+        if ((c.stats().steps & 63) == 0)
+            for (const Vec3& q : c.nodes()) maxY = std::max(maxY, std::fabs(dot(q - anchor, nrm)));
         const double T = c.endSegmentTension(true), A = c.endSegmentTension(false);
         if (!std::isfinite(T) || !std::isfinite(A)) { finite = false; return; }
         const int k = static_cast<int>(c.time() / period);
@@ -142,6 +159,8 @@ CaseResult runCase(const json& cfg) {
             emit(cable.time());
         }
     }
+    res.maxOutOfPlane = maxY;
+    for (const Vec3& q : cable.nodes()) res.finalOutOfPlane = std::max(res.finalOutOfPlane, std::fabs(dot(q - anchor, nrm)));
     res.finite = finite;
     res.steps = cable.stats().steps;
     res.slackSegmentEvals = cable.stats().slackSegmentEvals;

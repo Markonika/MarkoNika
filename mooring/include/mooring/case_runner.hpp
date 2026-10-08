@@ -23,6 +23,8 @@ struct CaseResult {
     double meanMax{0};              // mean of cycle maxima over cycles >= statistics.first_cycle
     int cyclesAveraged{0};
     double maxTopOverall{0};
+    double maxOutOfPlane{0};        // max distance of any node from the vertical plane through the anchor [m] (sampled)
+    double finalOutOfPlane{0};      // same, at the final time
     bool finite{true};
     double wallSeconds{0};
 };
