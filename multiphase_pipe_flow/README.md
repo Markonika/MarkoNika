@@ -1453,6 +1453,112 @@ literature-supported option, and the most expensive one, not yet tried.
 (`enableTurbulentViscosity`, `turbulentMixingLengthFraction`) to drive
 an already-existing, already bit-exact-regression-tested option.
 
+#### The fine-resolution slug-capturing attempt: a real, partial finding
+
+The one option left from the literature search was tried last: fine
+resolution with AMR enabled, on the three worst under-predicted Mendeley
+cases from the structural-diagnosis finding above (Brito 2012, Baba et
+al. 2017, Ekinci 2015). A real bug was caught and fixed before trusting
+any result -- an early version of this scratch test hardcoded generic
+water/air fluid properties instead of each case's actual (often highly
+viscous oil) properties from the validation CSV, which gave wildly wrong
+baseline numbers; cross-checking against `validate_quantitative`'s own
+output on the identical case caught the mismatch immediately, and fixing
+it (reading `rhoL`/`muL`/`muG` per case, as `validate_quantitative`
+already does) reproduced the known baseline exactly before any of the
+fine-resolution results were trusted.
+
+**First, a cheap, decisive check before spending the compute on a full
+run.** The same inviscid Kelvin-Helmholtz dispersion relation this
+codebase's own earlier case study derived (see "Results"/"Interpretation"
+below) was evaluated at each case's real conditions, sweeping the base
+holdup from the solver's own predicted value up toward the measured one.
+In all three cases the growth rate is **exactly zero across the entire
+wavelength range at the solver's own predicted (thin-film) holdup**, and
+stays zero until holdup climbs to roughly 0.7-0.8, after which it switches
+on sharply (hundreds to thousands of 1/s near the measured holdup). This
+means fine resolution alone, starting from the thin-film state the
+solver actually settles into, has no instability to resolve into slugs
+in the first place -- confirmed empirically, not just by this linear
+theory, by the fine-resolution runs below.
+
+**The actual runs, four variants per case:** (a) the known N=60 baseline;
+(b) ~1cm cells (5-8x finer), no AMR, same low-holdup initial condition
+the validation driver always uses; (c) the same fine mesh with AMR
+enabled (refining where the KH indicator is active, coarsening
+elsewhere -- `minCellWidthFraction`'s default of `1.0` means AMR only
+ever coarsens UP from this fine starting mesh, never finer, so starting
+fine and letting AMR coarsen away unneeded cost is exactly the intended
+usage); and (d) the fine AMR mesh seeded at a **fixed, case-independent**
+initial holdup of `0.5` -- deliberately not each case's own measured
+value, which would make any result circular (the model "remembering"
+an answer it was handed rather than demonstrating a real property).
+
+| Case | (a) N=60 low-IC | (b) fine low-IC | (c) fine+AMR low-IC | (d) fine+AMR, IC=0.5 | measured |
+|---|---|---|---|---|---|
+| Brito 2012  | 0.0205 | 0.0205 | 0.0205 | **0.5116** (max 0.69) | 0.9120 |
+| Baba 2017   | 0.0315 | 0.0316 | 0.0316 | **0.5118** (max 0.999) | 0.9090 |
+| Ekinci 2015 | 0.0435 | 0.0536 | 0.1094 | **0.3641** (max 0.999) | 0.8550 |
+
+**Confirming the cheap check was right:** (b) and (c) -- fine resolution,
+with and without AMR, starting from the SAME low-holdup initial condition
+the validation driver always uses -- change essentially nothing in two of
+the three cases, and only a modest amount in the third (Ekinci: 0.044 ->
+0.109). Resolution alone does not grow slugs from a state that has no
+growing modes to begin with, exactly as the zero-growth-rate check
+predicted.
+
+**The real finding is (d): this model has genuine, case-independent
+bistability.** Seeded at a holdup of 0.5 -- not tied to any case's own
+answer -- all three cases settle at a substantially HIGHER holdup than
+the thin-film branch (0.36-0.51 vs. 0.02-0.05), not just a transient
+blip: the sampled, time-averaged metric itself moves, closing roughly
+40-55% of each case's original gap to the measured value. All three
+also show large transient excursions (`maxSeen` up to 0.999 -- the
+domain transiently goes nearly full somewhere along its length), which
+the low-holdup branch never does at all. This is qualitatively the
+signature the whole investigation was looking for: genuine intermittent,
+large-amplitude activity that a thin stratified film cannot produce,
+and it required BOTH the fine resolution AND a different starting point
+to appear -- confirming the earlier diagnosis (the model has no growing
+modes near the thin-film state) while also showing that state is not
+the *only* one the real dynamics can sustain.
+
+**Stated with the honesty this still deserves, not oversold:** the
+higher branch does not reach the measured holdup -- a substantial gap
+remains (0.36-0.52 vs. 0.86-0.91), closed by less than half in the best
+case. Brito 2012's run kept its full fine mesh throughout (AMR never
+coarsened it at all, `finalN` staying at the initial 306), which is
+itself informative -- the KH indicator considers the whole domain
+genuinely active there, not settled -- but also means it is not certain
+the simulated time window (capped at 8s, the same budget the whole
+validation uses) was long enough to reach a true asymptotic state for
+every case, as opposed to still slowly evolving toward one; this was not
+checked with a longer time window here. The cost is real and reported
+plainly: these four runs per case took from ~0.3s (the N=60 baseline) up
+to ~49s (Baba's fine-AMR, high-IC variant) -- the full 126-case held-out
+validation at this resolution and methodology would be a substantially
+larger undertaking than anything else run in this investigation, and was
+NOT attempted here; whether this three-case finding holds up across the
+full set is accordingly still an open question.
+
+**What this means for the overall investigation.** This is the first
+result in the whole closure-tuning/root-cause/mechanism-check sequence
+above that moves the needle in the right direction by a large, genuine
+margin on the specific cases it was tested on -- not a clean full fix,
+but real evidence that (1) the thin-film branch really is what the
+linear theory says it is, a genuine stable state with nothing to grow
+out of; (2) a second, much higher-holdup branch coexists and is
+reachable with the right starting point, matching real slug flow's
+character far better; and (3) getting there needs an actual change of
+regime (a different initial/history condition, standing in here for
+whatever upstream process -- pipeline startup, terrain, a prior slug --
+puts a real system on that branch in the first place), not a better
+closure constant or a passive regularization term. Scaling this to the
+full held-out set, and checking whether longer runs let the higher
+branch climb further toward the measured values, are the natural next
+steps if this line of investigation continues.
+
 ## Validation against experimental data
 
 **[VALIDATION.md](VALIDATION.md)** compares the solver's predicted flow

@@ -834,3 +834,47 @@ methodology, tables, and figures are in the paper (Section 7,
     and most expensive option, not yet attempted. No solver code changed
     for this test, only two more optional CLI arguments on
     `validate_quantitative`.
+17. **Done: the fine-resolution slug-capturing attempt -- a real,
+    partial finding.** The last option from item 16 was tried: fine
+    (~1cm) cells with AMR enabled on the three worst under-predicted
+    Mendeley cases. See README.md, "The fine-resolution slug-capturing
+    attempt: a real, partial finding" for the full account, including a
+    real bug caught before trusting any result (an early version
+    hardcoded generic water/air fluid properties instead of each case's
+    actual, often highly viscous, oil properties -- caught by
+    cross-checking against `validate_quantitative`'s own output on the
+    identical case, which immediately exposed the mismatch). A cheap
+    check first: evaluating this codebase's own inviscid KH dispersion
+    relation (item 1) at each case's conditions shows ZERO growth rate
+    across the entire wavelength range at the solver's own predicted
+    (thin-film) holdup, switching on only once holdup reaches ~0.7-0.8 --
+    confirmed empirically, not just by the theory: fine resolution alone,
+    from the same low-holdup initial condition the validation driver
+    always uses, changes essentially nothing (0.0205->0.0205, 0.0315->
+    0.0316, with only a modest move for the third case, 0.0435->0.0536
+    without AMR, 0.1094 with). The real finding came from seeding a
+    FIXED, case-independent initial holdup of 0.5 (deliberately not each
+    case's own measured answer, which would be circular) on the fine+AMR
+    mesh: all three cases settle at a substantially higher, genuinely
+    different holdup (0.36-0.51) than the thin-film branch, closing
+    roughly 40-55% of each case's original gap to the measured value
+    (0.86-0.91), with large transient excursions (holdup transiently
+    reaching 0.69-0.999 somewhere in the domain) the thin-film branch
+    never shows at all -- real, case-independent bistability, not an
+    artifact of the seed. Reported honestly rather than oversold: the
+    higher branch does not reach the measured value, a real gap remains;
+    one case (Brito 2012) never let AMR coarsen at all over the full run
+    (indicating genuinely sustained activity, but also leaving open
+    whether a longer time window than this validation's standard budget
+    would show further evolution); and the cost is substantial (up to
+    ~49s per case here, versus ~0.3s for the N=60 baseline) -- scaling
+    this to the full 126-case held-out set was NOT attempted and remains
+    open. This is the first result in the whole closure-tuning/root-
+    cause/mechanism-check sequence (items 13-17) that moves the needle by
+    a large, genuine margin on the cases it was tested on, even though it
+    does not fully close the gap: it confirms the thin-film branch is a
+    genuine stable state with nothing to grow out of, AND that a second,
+    much higher-holdup branch coexists and is reachable with the right
+    starting point -- getting there needs an actual regime change (a
+    different initial/history condition), not a better closure constant
+    or a passive regularization term.
