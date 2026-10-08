@@ -1380,6 +1380,79 @@ behaviour against the full demo suite; `closureDepositionVelocityScale`
 is read only when `enableDataDrivenClosureCorrection` is enabled and is
 otherwise a literal no-op.
 
+#### Checking the one mechanism the literature says should help: `SolverOptions::enableTurbulentViscosity`
+
+The root-cause finding above says this gap needs an actual intermittency
+mechanism, not a closure tweak. A follow-up literature search for how
+other continuous, area-averaged two-fluid models get one turned up a
+direct, specific lead: the standard 1D two-fluid model's short-wavelength
+ill-posedness -- the same issue this codebase's own earlier Kelvin-
+Helmholtz case study found and partially addressed with the biharmonic
+regularization above -- is also what the slug-capturing literature
+(Issa & Kempf 2003, later extended by Bonizzi & Issa 2003 for gas
+entrainment -- the same Bonizzi behind this codebase's own base paper)
+has to contend with to let slugs form at all. A 2025 Lopez-de-Bertodano
+& Clausse preprint proposes resolving that ill-posedness with a
+turbulent-viscosity closure specifically because, unlike pure numerical
+diffusion, it is compatible with inertial coupling and "captures the
+Kelvin-Helmholtz instability physically rather than suppressing it" --
+and reports that their own nonlinear simulations with it produce churn
+or slug flow as emergent output. That is the *same* paper this codebase
+already implements as `SolverOptions::enableTurbulentViscosity` (see
+that option's own documentation above). So the obvious, cheapest test
+was not a new implementation at all: re-run the existing holdup
+validation -- both datasets, no code changes beyond a CLI flag on
+`validate_quantitative` to turn the option on -- and see whether it
+changes the slug-regime under-prediction.
+
+**Result: essentially no effect, at its default parameter, and only a
+small one across two orders of magnitude of its one tunable parameter.**
+At the default mixing length (`turbulentMixingLengthFraction = 0.1`),
+enabling it barely moves either number: training MAE 0.0960 -> 0.0953,
+held-out test MAE 0.3032 -> 0.3030, and the held-out under-prediction
+fraction 81.0% -> 80.2% -- not the kind of change a genuine
+intermittency mechanism switching on would produce. Sweeping the
+mixing-length fraction itself from `0.02` to `2.0` (a 100x range,
+reaching all the way to an almost certainly unphysical value equal to
+twice the pipe diameter) on the held-out set moves the MAE only from
+0.3029 down to 0.2971 and the under-prediction fraction from 81.0% to
+78.6% -- a small, mildly monotonic trend, not the kind of qualitative
+change (predicted holdup actually reaching 0.8-0.95+ in the worst
+cases) that would indicate real slugs forming.
+
+**Why, stated honestly rather than left as "it just doesn't work":**
+this validation driver runs every case at a fixed, moderate resolution
+(N=60 cells over pipe lengths up to 20 m, i.e. cell widths of order
+10 cm) chosen for the holdup/pressure-gradient comparison this
+validation was originally built for, not for resolving a bridging
+event. The slug-capturing literature's whole premise is that slugs
+require *genuinely fine* grids and small time steps to resolve the
+wave growth that eventually bridges the pipe -- this test confirms the
+turbulent-viscosity term alone, at this validation's standard
+resolution, does not substitute for that; it does **not** test whether
+the term would behave differently at the fine resolution real slug
+capturing requires (this codebase's own AMR and moving-mesh machinery
+would be the natural way to get there, but driving a full slug-capturing
+attempt through the 349-case validation sweep at that resolution is a
+substantially larger undertaking than the test run here, and was not
+attempted).
+
+**Reading on this.** The existing `enableTurbulentViscosity`
+regularization, as validated elsewhere in this document (wave-growth
+saturation, well-posedness), is doing the job it was built for; this
+test shows that job is not the same job as producing slug-regime
+holdup, at least not at this validation's resolution. The root-cause
+finding above stands: closing this gap needs an actual intermittency
+mechanism, and this specific, already-implemented, literature-motivated
+candidate does not provide one at the resolution tested -- a genuine
+fine-resolution slug-capturing attempt remains the most direct,
+literature-supported option, and the most expensive one, not yet tried.
+
+**Confirmed:** no solver code changed for this test; only
+`validate_quantitative` gained two more optional CLI arguments
+(`enableTurbulentViscosity`, `turbulentMixingLengthFraction`) to drive
+an already-existing, already bit-exact-regression-tested option.
+
 ## Validation against experimental data
 
 **[VALIDATION.md](VALIDATION.md)** compares the solver's predicted flow

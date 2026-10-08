@@ -798,3 +798,39 @@ methodology, tables, and figures are in the paper (Section 7,
     one closure -- now ruled out as a fix by three independently tested
     attempts across two closures, not assumed. Regression-confirmed
     bit-for-bit identical `step()` behaviour throughout.
+16. **Done: checked the one mechanism the literature says should help.**
+    A follow-up literature search for how other continuous, area-
+    averaged two-fluid models get a slug-intermittency mechanism found
+    a direct lead: the "slug capturing" approach (Issa & Kempf 2003,
+    extended for gas entrainment by Bonizzi & Issa 2003 -- the same
+    Bonizzi behind this codebase's own base paper) lets slugs emerge
+    automatically from a *fine-resolution* solve of the same two-fluid
+    equations, and the obstacle to that -- the standard model's short-
+    wavelength ill-posedness, the same issue this document's own
+    Kelvin-Helmholtz case study (item 1) already found -- is exactly
+    what a 2025 Lopez-de-Bertodano & Clausse preprint's turbulent-
+    viscosity closure is proposed to fix, reporting that doing so lets
+    their own nonlinear simulations produce churn/slug flow as emergent
+    output. That is the same paper already implemented here as
+    `SolverOptions::enableTurbulentViscosity` (item 6) -- so the cheapest
+    test was re-running the existing holdup validation with it turned
+    on, no new solver code. Result: essentially no effect at its default
+    mixing length (train MAE 0.0960->0.0953, held-out test MAE
+    0.3032->0.3030, held-out under-prediction fraction 81.0%->80.2%),
+    and only a small, mildly monotonic trend sweeping the mixing-length
+    parameter across two orders of magnitude (0.02 to 2.0 x diameter,
+    the top end almost certainly unphysical): held-out MAE moves only
+    0.3029->0.2971. Stated honestly rather than left as "doesn't work":
+    this validation runs every case at a fixed, moderate resolution
+    (N=60 cells, ~10 cm cell widths) built for the holdup/pressure-
+    gradient comparison, not for resolving a bridging event -- the
+    slug-capturing literature's premise specifically requires much finer
+    grids and smaller time steps for that. This result shows the
+    turbulent-viscosity term alone does not substitute for that at this
+    validation's standard resolution; it does NOT test whether a genuine
+    fine-resolution slug-capturing attempt (this codebase's own AMR/
+    moving-mesh machinery being the natural route there) would behave
+    differently -- that remains the most direct, literature-supported,
+    and most expensive option, not yet attempted. No solver code changed
+    for this test, only two more optional CLI arguments on
+    `validate_quantitative`.
