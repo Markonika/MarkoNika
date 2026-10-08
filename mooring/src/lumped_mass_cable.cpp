@@ -1,4 +1,4 @@
-// Copyright (c) [OWNER NAME]. All rights reserved. Proprietary and confidential.
+// Copyright (c) Marko Nika. All rights reserved. Proprietary and confidential.
 #include "mooring/lumped_mass_cable.hpp"
 #include <algorithm>
 #include <cmath>

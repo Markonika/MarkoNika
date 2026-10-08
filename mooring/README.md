@@ -1,6 +1,6 @@
 # Mooring line dynamics solver (lumped-mass, C++17)
 
-Copyright [OWNER NAME]. All rights reserved. Proprietary and confidential. No licence is granted;
+Copyright Marko Nika. All rights reserved. Proprietary and confidential. No licence is granted;
 the GPL `LICENSE` at the repository root belongs to the profile repository, not to this directory.
 
 ## Build and test

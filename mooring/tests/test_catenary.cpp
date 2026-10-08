@@ -1,4 +1,4 @@
-// Copyright (c) [OWNER NAME]. All rights reserved. Proprietary and confidential.
+// Copyright (c) Marko Nika. All rights reserved. Proprietary and confidential.
 // Test 1 (static catenary): 100.5 m cable hung between points 100 m apart at equal height,
 // m_l = 1.738 kg/m (Paredes 2016, sec. 3.5.1). Settled LM shape vs. Eqs. 3.54-3.56.
 #include <cmath>

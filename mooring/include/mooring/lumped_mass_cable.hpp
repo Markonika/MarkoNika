@@ -1,4 +1,4 @@
-// Copyright (c) [OWNER NAME]. All rights reserved. Proprietary and confidential.
+// Copyright (c) Marko Nika. All rights reserved. Proprietary and confidential.
 #pragma once
 #include <vector>
 #include "mooring/vec3.hpp"
