@@ -68,6 +68,9 @@ struct DynStats {
     double dtUsed{0};
 };
 
+class LumpedMassCable;
+using StepObserver = std::function<void(const LumpedMassCable&)>;
+
 struct RelaxResult {
     bool converged{false};
     long steps{0};
@@ -110,6 +113,15 @@ public:
     Vec3 endForce(bool top) const;
 
     RelaxResult relaxStatic(const RelaxOptions& opt = {});
+    // Start shape for a line that lies on a flat seabed and rises to the fairlead: inextensible
+    // catenary with horizontal touchdown tangent (suspended part) plus a straight lying part. Needs
+    // the anchor on the seabed and Environment::seabed. Returns false (keeps the current shape) when the
+    // geometry has no such solution. Intended as the first guess for relaxStatic().
+    bool initTouchdownCatenary();
+    // Raw tension magnitude [N] in the end segment, including the c_int damping term (as in the force
+    // evaluation, clipped at 0). Uses the current velocities.
+    double endSegmentTension(bool top) const;
+    void setStepObserver(StepObserver o) { observer_ = std::move(o); }
 
     // ---- dynamics (milestone 2) ----
     void setDynOptions(const DynOptions& o) { dyn_ = o; }
@@ -140,6 +152,7 @@ private:
     TopMotion top_;
     mutable DynStats stats_;
     Environment env_;
+    StepObserver observer_;
     double ksCap_{1e300};      // soil stiffness cap used only during static relaxation
     Vec3 fairPrevPos_, fairPrevVel_;
     double fairPrevT_{0.0};

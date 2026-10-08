@@ -9,7 +9,7 @@ the GPL `LICENSE` at the repository root belongs to the profile repository, not 
 Warnings: `-Wall -Wextra -Wpedantic`. Dependencies: see `THIRD_PARTY.md`.
 
 ## Status
-Milestones 1 (static solver + catenary), 2 (dynamic solver) and 3 (hydrodynamics + seabed) done.
+Milestones 1-4 done (static solver, dynamics, hydrodynamics + seabed, Chalmers validation).
 
 | Test (milestone 1) | Result |
 |---|---|
@@ -25,7 +25,14 @@ Milestones 1 (static solver + catenary), 2 (dynamic solver) and 3 (hydrodynamics
 | Partly submerged catenary | support z sum = sum of node weights (1e-6) |
 | Chain with seabed touchdown (a = H/w = 5 m) | H 21.387 vs 21.381 N, V 17.765 vs 17.760 N (N = 60); 37 nodes on bed |
 | Dynamic drop onto seabed at true Ks | stable, settles to H = 21.373 vs 21.381 N, no penetration > 1e-7 m |
+| Chalmers static top tension (22.68 N published) | 22.653 N (N = 66), 22.685 N (N = 132) |
+| Chalmers 30-case grid vs Table 7 (clockwise motion) | regression r2 = 0.985 (published 0.98), RMSE 1.4 N, bias +0.12 N, 24/30 within 5 %, max 6.7 % |
+| Same grid, opposite rotation sense (sensitivity) | r2 vs 1:1 = 0.81, bias +4.4 N (+9.8 %) - direction matters, see docs/chalmers_validation.md |
 | Support reactions, static line | vertical sum = weight (1e-6), horizontal sum = 0 |
+
+Details: `docs/chalmers_validation.md` (results, convergence, caveats), `docs/config.md` (configuration fields).
+Run the Chalmers case: `build/mooring_run examples/chalmers/chalmers_config.json`; full grid:
+`ctest --test-dir build -R chalmers_grid` or `scripts/chalmers_grid.py OUTDIR` (plots need matplotlib; analysis only).
 
 ## Equation-to-code map
 | Equation (Paredes 2016) | Code |

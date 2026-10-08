@@ -1,0 +1,20 @@
+{
+  "_comment": "Chalmers/SSPA 33 m chain, model scale 1:37.6. Bergdahl, Eskilsson & Palm 2016 (Tables 3, 8); values from chalmers_model_inputs.json. SI units. See docs/config.md.",
+  "line": {
+    "length_m": 33.0, "segments": 66, "EA_N": 10000.0,
+    "mass_per_length_kg_m": 0.0818, "density_kg_m3": 7800.0,
+    "hydro_diameter_m": 0.0022, "soil_diameter_m": 0.0022,
+    "Cm": 3.8, "Cdt": 0.5, "Cdn": 2.5,
+    "internal_damping_Ns": 0.0
+  },
+  "environment": { "hydro": true, "seabed": true, "rho_w_kg_m3": 1000.0, "water_surface_z_m": 3.0, "seabed_z_m": 0.0 },
+  "soil": { "stiffness_Pa_per_m": 3.0e9, "damping_factor": 1.0, "friction": 0.3, "v_lim_m_s": 0.01 },
+  "anchor_m": [0.0, 0.0, 0.0],
+  "fairlead_rest_m": [32.554, 0.0, 3.3],
+  "initial": { "shape": "touchdown" },
+  "motion": { "type": "circle_xz", "radius_m": 0.2, "period_s": 3.5, "direction": -1.0, "phase_deg": 0.0,
+              "ramp_cycles": 2.0, "cycles": 10.0 },
+  "numerics": { "scheme": "rk4", "cfl": 0.5, "dt_s": 0.0, "relax_force_tol": 1e-6 },
+  "statistics": { "first_cycle": 5 },
+  "output": { "directory": "out/chalmers", "tag": "r0.200_T3.50", "dt_out_s": 0.01, "write": true }
+}

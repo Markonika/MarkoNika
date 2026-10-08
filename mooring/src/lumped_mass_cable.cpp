@@ -106,6 +106,41 @@ Vec3 LumpedMassCable::endTension(bool top) const {
     return len > 0 ? d * (segmentTension(r_, seg) / len) : Vec3();
 }
 
+double LumpedMassCable::endSegmentTension(bool top) const {
+    const int seg = top ? p_.N - 1 : 0;
+    const Vec3 d = r_[seg + 1] - r_[seg];
+    const double len = norm(d), eps = len / p_.l0() - 1.0;
+    if (eps <= 0.0 || len <= 0.0) return 0.0;
+    double T = p_.EA * eps;
+    if (p_.c_int != 0.0 && v_.size() == r_.size())
+        T = std::max(0.0, T + p_.c_int * dot(d, v_[seg + 1] - v_[seg]) / (len * p_.l0()));
+    return T;
+}
+
+bool LumpedMassCable::initTouchdownCatenary() {
+    const Vec3 a0 = r_[0], a1 = r_[p_.N];
+    const Vec3 dh(a1.x - a0.x, a1.y - a0.y, 0.0);
+    const double D = norm(dh), h = a1.z - a0.z, L = p_.L;
+    if (D <= 0.0 || h <= 0.0 || L <= std::sqrt(D * D + h * h)) return false;
+    // g(a) = horizontal reach of (lying + catenary) - D, a = H/w; monotone increasing in a.
+    auto g = [&](double a) { return (L - std::sqrt(h * h + 2.0 * a * h)) + a * std::acosh(1.0 + h / a) - D; };
+    double lo = 1e-3, hi = 1e9;
+    if (g(lo) > 0.0 || g(hi) < 0.0) return false;
+    for (int i = 0; i < 300; ++i) { const double mid = 0.5 * (lo + hi); (g(mid) > 0.0 ? hi : lo) = mid; }
+    const double a = 0.5 * (lo + hi), susp = std::sqrt(h * h + 2.0 * a * h), lying = L - susp;
+    const Vec3 e = dh / D;
+    for (int i = 0; i <= p_.N; ++i) {
+        const double s = i * p_.l0();
+        if (s <= lying) { r_[i] = a0 + e * s; }
+        else {
+            const double sg = s - lying;
+            r_[i] = a0 + e * (lying + a * std::asinh(sg / a)) + Vec3(0, 0, std::sqrt(a * a + sg * sg) - a);
+        }
+    }
+    r_[p_.N] = a1;
+    return true;
+}
+
 Vec3 LumpedMassCable::endForce(bool top) const {
     std::vector<Vec3> f;
     const std::vector<Vec3> vz(r_.size());
@@ -237,6 +272,7 @@ void LumpedMassCable::step(double dt) {
     t_ += dt;
     if (top_) top_(t_, r_[N], v_[N]);
     ++stats_.steps;
+    if (observer_) observer_(*this);
 }
 
 void LumpedMassCable::advanceTo(double tEnd) {

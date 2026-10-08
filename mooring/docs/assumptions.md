@@ -55,3 +55,9 @@
     area A1 is not tabulated: pi/4 D0^2 is assumed (only matters for Cm != 0; Cm = 0 also fits the data).
 18. Energy accounting (`energy()`) is valid only without hydro/seabed/variable weight (it includes no dissipation
     and assumes uniform w).
+19. **Chalmers rotation direction** is not in the supplied inputs; clockwise in x-z (`direction = -1`) was read from
+    thesis Fig. 3.5 (arrow on the motor circle). Results depend strongly on it (see docs/chalmers_validation.md).
+20. **Per-cycle maxima** are taken from every time step; "mean maximum" averages cycles 5-9 of a 10-cycle run after a
+    2-cycle cosine ramp of the radius. The thesis ran 15 cycles; maxima were stationary to <0.1 % after the ramp.
+21. Top/anchor tension in outputs is the raw end-segment tension (EA eps + c_int d(eps)/dt, clipped at 0), not the
+    support force (which also contains the end node's half-weight and hydrodynamic force).
