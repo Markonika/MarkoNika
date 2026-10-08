@@ -733,3 +733,26 @@ methodology, tables, and figures are in the paper (Section 7,
     stays at 1.0 (the unmodified closure) because no tested value
     actually generalized. Regression-confirmed bit-for-bit identical
     `step()` behaviour throughout.
+14. **Done:** tried the F0=0.36 threshold correction item 13 flagged as
+    a possible next step -- `SolverOptions::closureF0Shift`, shifting
+    the AndreussiPersen1987 correlation's own Kelvin-Helmholtz onset
+    threshold (`F > F0 + closureF0Shift` instead of `F > F0`) rather
+    than rescaling the enhancement's size -- see README.md, "A second
+    attempt: shifting the F0 threshold itself" for the full account.
+    Same train (Kokal+Newton, 223 cases) / held-out test (Mendeley, 126
+    cases) methodology as item 13; same kind of result. The train-set
+    response to the shift is just as flat as the magnitude knob's (MAE
+    0.0954-0.0970 across a `-0.3` to `+1.0` sweep, barely distinguishable
+    from the unmodified closure's 0.0960), and the nominal best value
+    (`-0.05`) makes the held-out test set very slightly worse (0.3036 vs.
+    0.3032 unmodified) -- the same overfitting signature item 13 already
+    found, now confirmed on an independent parameter of the same closure.
+    Conclusion, now doubly confirmed rather than a single inconclusive
+    trial: the stratified-vs-slug accuracy gap is not hiding in how the
+    AndreussiPersen1987 correlation is calibrated, in either of its two
+    natural free parameters; closing it would need a different closure
+    entirely, a structural change to the model, or scrutiny of the
+    validation driver's own holdup sampling -- not a scalar tweak to
+    this one correlation. `closureF0Shift`'s default stays at 0.0 for
+    the same reason. Regression-confirmed bit-for-bit identical
+    `step()` behaviour throughout.

@@ -1219,14 +1219,67 @@ actually generalized; the option is kept, and documented at this
 length, as a well-tested negative result and as reusable scaffolding
 (the train/test methodology, and `validate_quantitative`'s own
 `closureCorrectionScale` CLI argument used to run it) for whatever
-future, more structural correction -- a different functional form, a
-correction to F0 itself, or a fix addressing an entirely different
-closure -- might actually be needed to close this gap.
+future, more structural correction might actually be needed to close
+this gap -- see immediately below for the next, also-negative, attempt
+at one.
 
 **Confirmed:** regression-tested bit-for-bit identical `step()`
 behaviour against the full demo suite; the correction is applied at a
 single call site in `computeClosures()` and is a literal no-op whenever
 the option is disabled.
+
+#### A second attempt: shifting the F0 threshold itself (`SolverOptions::closureF0Shift`)
+
+`closureCorrectionScale` rescales the enhancement's *size*; a natural
+next thing to try, given that came back negative, is whether the
+closure is instead wrong about *where* the enhancement should switch on
+at all. `closureF0Shift` shifts the Andreussi-Persen correlation's own
+F0=0.36 Kelvin-Helmholtz onset threshold directly:
+`F > F0 + closureF0Shift` triggers the enhancement instead of `F > F0`
+(see `InterfacialFrictionInputs::f0Shift` in `Closures.hpp`, applied
+inside the `AndreussiPersen1987` branch in `Closures.cpp`). Gated behind
+the same `enableDataDrivenClosureCorrection` switch as the magnitude
+knob, since both correct the same closure; zero by default, a true
+no-op.
+
+**Same methodology, same kind of result.** A line search over
+`closureF0Shift` from `-0.3` to `+1.0` on the training set (Kokal 1987 +
+Newton 1997, 223 cases) produced a response just as flat as the
+magnitude knob's: every value tested landed within about 1.7% of every
+other (MAE 0.0954 to 0.0970, against the unmodified closure's 0.0960),
+with the nominal best (`-0.05`, MAE 0.0954) barely distinguishable from
+several other values tried. Evaluating `-0.05` on the held-out,
+never-fit-against Mendeley test set (126 cases) shows it makes that set
+very slightly *worse* (0.3036 vs. the unmodified closure's 0.3032) --
+the exact same overfitting signature `closureCorrectionScale` showed:
+the value that looks best on the data it was fit to does not transfer.
+Two other values tried on the test set purely for a broader picture
+(`-0.2` and `0.1`, chosen without any training-set justification) landed
+at 0.3023 and 0.3025 respectively -- closer to baseline than `-0.05`'s
+own result, underscoring that none of this is a real, exploitable trend;
+it is noise around an already-flat response surface.
+
+**Conclusion, now doubly confirmed.** Two independent, natural
+single-parameter corrections to the *same* closure -- one to its
+enhancement's magnitude, one to the threshold that decides whether the
+enhancement applies at all -- both show a flat, non-generalizing
+response to the real validation data. This is good evidence, not just
+a single inconclusive trial, that the stratified-vs-slug accuracy gap
+is not hiding in how this particular correlation is calibrated at all.
+Whatever is actually driving that gap is more likely a different
+closure entirely (entrainment, deposition, droplet/bubble closures), a
+genuine structural limitation of this four-field formulation in the
+slug/intermittent regime, or something in how holdup is being sampled/
+averaged in the validation driver itself -- none of which a scalar
+tweak to one correlation's threshold or magnitude could fix, however it
+were tuned. `closureF0Shift`'s default stays at `0.0` for the same
+reason `closureCorrectionScale`'s stays at `1.0`: nothing tested
+actually generalized.
+
+**Confirmed:** regression-tested bit-for-bit identical `step()`
+behaviour against the full demo suite; `closureF0Shift` is read only
+when `enableDataDrivenClosureCorrection` is enabled and is otherwise a
+literal no-op.
 
 ## Validation against experimental data
 
