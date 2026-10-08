@@ -56,7 +56,7 @@ Details: `docs/chalmers_validation.md` (results, convergence, caveats), `docs/co
 Run the Chalmers case: `build/mooring_run examples/chalmers/chalmers_config.json`; full grid:
 `ctest --test-dir build -R chalmers_grid` or `scripts/chalmers_grid.py OUTDIR` (plots need matplotlib; analysis only).
 
-Waves: `docs/waves_validation.md`. Paredes benchmark: `build/paredes_report examples/paredes` (details and caveats: `docs/paredes_validation.md`).
+Waves: `docs/waves_validation.md`. Candidate data for further validation (unverified, nothing downloaded): `docs/validation_data_candidates.md`. Paredes benchmark: `build/paredes_report examples/paredes` (details and caveats: `docs/paredes_validation.md`).
 Platform: `build/mooring_platform examples/platform/three_leg_example.json` (config fields in `docs/config.md`).
 
 ## Equation-to-code map
