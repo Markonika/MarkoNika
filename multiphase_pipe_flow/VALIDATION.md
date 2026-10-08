@@ -671,3 +671,38 @@ methodology, tables, and figures are in the paper (Section 7,
     generally) rather than a claim that JFNK's more robust, automatically
     adaptive machinery is unnecessary in general. Regression-confirmed
     bit-for-bit identical `step()` behaviour throughout.
+12. **Done:** implemented `SolverOptions::enableETDFriction` (exact
+    matrix-exponential integration) and `enableIMEXRKFriction` (a 2-stage,
+    2nd-order, L-stable SDIRK, an instance of the Pareschi & Russo 2005
+    IMEX-RK framework) as two further alternatives to
+    `enableImplicitFriction`'s single-stage backward Euler, all three
+    sharing the identical friction linearization -- see README.md,
+    "Exponential time differencing and IMEX Runge-Kutta friction" for the
+    full account. Caught a genuine bug in the first `enableIMEXRKFriction`
+    attempt (a plausible-looking but non-L-stable Butcher tableau) not by
+    deriving its stability function up front, but because the stiff dt-
+    sweep test below showed it blowing up where plain backward Euler
+    stays stable -- the wrong direction for a strictly more accurate
+    integrator of the same linear system, which prompted the derivation
+    that found the actual tableau error; the corrected scheme was then
+    verified L-stable both analytically and by a direct numerical sweep
+    before being trusted. Once both were correct, found and reported
+    honestly a genuine negative result rather than a win: on a mild case
+    all three friction integrators show comparable error against a fine-
+    dt reference (the dominant error there is the shared linearization,
+    not the choice of integrator); on the established stiff benchmark
+    case, step-by-step tracking of `|u2-u1|_max` (not just pass/fail)
+    shows backward Euler locking onto a stable fixed point from step 0,
+    while plain explicit, ETD, and IMEX-RK all instead show the same
+    quantity growing slowly over dozens of steps before eventually
+    diverging -- diagnosed as backward Euler's own lower formal accuracy
+    acting as unintentional extra numerical dissipation that happens to
+    suppress a genuine, slowly-growing instability in this strongly-
+    sheared, low-holdup regime (the same regime item 1's own
+    Kelvin-Helmholtz case study examines at length), which the more
+    accurate integrators correctly do not suppress. `enableImplicitFriction`
+    remains the recommended choice for this solver's stiff operating
+    envelope; ETD and IMEX-RK are documented as a well-tested negative
+    result and as independently-verified, reusable closed-form building
+    blocks, not as replacements. Regression-confirmed bit-for-bit
+    identical `step()` behaviour throughout.

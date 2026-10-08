@@ -263,6 +263,100 @@ struct SolverOptions {
     // separate undertaking not attempted here.
     bool enableImplicitFriction = false;
 
+    // Exponential time differencing (ETD) treatment of wall and
+    // interfacial friction, off by default. An alternative to
+    // enableImplicitFriction, not a replacement: both linearize the
+    // SAME friction terms the SAME way (freeze the friction factor and
+    // the |velocity| that makes each shear stress quadratic at the OLD
+    // state, giving an effective linear drag-rate matrix
+    // A = [[-(kw1+ki1), ki1], [ki2, -(kw2+ki2)]] and constant forcing
+    // b = (E1, E2), exactly as enableImplicitFriction derives it -- see
+    // that option's own documentation for the derivation of kw1, kw2,
+    // ki1, ki2), but integrate the resulting LINEAR ODE
+    // dU/dt = A*U + b (U = (u1, u2)) EXACTLY over the step via the
+    // matrix exponential, instead of backward-Euler's first-order
+    // approximation of it. For any constant-coefficient linear ODE this
+    // is the best possible local accuracy a method built on this exact
+    // linearization can achieve (zero truncation error in the
+    // linearized system itself; all remaining error comes from the
+    // linearization -- freezing the friction factor/|velocity| at the
+    // old state -- shared identically with enableImplicitFriction), at
+    // the same O(1)-per-face cost: a 2x2 matrix function evaluated in
+    // closed form, no linear solve needed at all.
+    //
+    // Closed form: exp(A*dt) = alpha0*I + alpha1*A, and the forcing
+    // integral integral_0^dt exp(A*s) ds = beta0*I + beta1*A, with
+    // alpha0, alpha1, beta0, beta1 built from A's eigenvalues via the
+    // standard divided-difference (confluent Vandermonde) representation
+    // of a 2x2 matrix function -- see FourFieldSolver.cpp,
+    // expAndPhiCoeffs2x2(). A's eigenvalues are GUARANTEED real and
+    // non-positive for this specific matrix: writing s1=kw1+ki1,
+    // s2=kw2+ki2 (both >=0), the trace is -(s1+s2) <= 0 and the
+    // discriminant (s1-s2)^2 + 4*ki1*ki2 is a sum of squares, hence
+    // always >= 0 -- so no complex-eigenvalue branch is needed, and the
+    // repeated-eigenvalue case (a measure-zero but reachable edge case,
+    // e.g. ki1 == ki2 == 0 with kw1 == kw2) is handled by its own
+    // confluent limit formula, not skipped.
+    bool enableETDFriction = false;
+
+    // Multi-stage IMEX Runge-Kutta treatment of wall and interfacial
+    // friction, off by default. A third alternative alongside
+    // enableImplicitFriction and enableETDFriction, all three sharing
+    // the SAME linearization (same A, b as described above) and
+    // differing only in how that linear ODE is integrated over the
+    // step: enableImplicitFriction uses single-stage backward Euler
+    // (1st order in the linearized system), enableETDFriction the exact
+    // matrix exponential (zero error in the linearized system), and this
+    // option a 2-stage, 2nd-order, L-stable diagonally-implicit
+    // Runge-Kutta (SDIRK) scheme for the implicit part, paired with the
+    // frozen explicit forcing below -- an instance of the IMEX-RK
+    // framework surveyed from Pareschi & Russo (2005, "Implicit-explicit
+    // Runge-Kutta schemes and applications to hyperbolic systems with
+    // relaxation", J. Sci. Comput. 25), the scheme that survey explicitly
+    // names as "a more rigorous completion" of the single-stage split
+    // already in place. Butcher tableau: c=(gamma,1),
+    // A_im=[[gamma,0],[1-gamma,gamma]], b=(1-gamma,gamma), with
+    // gamma = 1 - 1/sqrt(2):
+    //   (I - dt*gamma*A) U1 = U0
+    //   (I - dt*gamma*A) U2 = U0 + dt*b + dt*(1-gamma)*A*U1
+    //   U_new = U0 + dt*b + dt*[(1-gamma)*A*U1 + gamma*A*U2]
+    // L-stability was confirmed directly, not assumed: substituting a
+    // scalar test equation dy/dt=lambda*y gives the stability function
+    // R(z) = (1 - gamma^2*z) / (1 - gamma*z)^2 for z=dt*lambda, which
+    // ->0 as z->-infinity, as required. An EARLIER version of this
+    // scheme used a21=(1-2*gamma) and b=(1/2,1/2) instead of the
+    // (1-gamma, gamma) above -- a plausible-looking but WRONG tableau
+    // (its own R(infinity) works out to -1, not L-stable at all) caught
+    // not by re-deriving the stability function first, but because the
+    // direct stiff dt-sweep test (see README.md) showed it blowing up at
+    // exactly the dt where enableImplicitFriction's plain backward Euler
+    // stays stable -- the opposite of what a strictly more accurate
+    // integrator of the same linear system should ever do, which is what
+    // prompted re-deriving R(z) and finding the actual error.
+    //
+    // Both stage solves share the same 2x2 matrix (I - dt*gamma*A), only
+    // the right-hand side differs, so this costs two small linear solves
+    // per face (same closed-form Cramer's-rule style as
+    // enableImplicitFriction's single solve) plus one explicit
+    // combination -- still O(1) per face, no iteration.
+    //
+    // SCOPE, stated explicitly because it is the one simplification that
+    // distinguishes this from a genuine whole-equation multi-stage
+    // scheme: only the LOCAL, per-face friction ODE is advanced through
+    // the two stages. The non-stiff forcing b = (E1, E2)
+    // (advection, pressure gradient, gravity, mass-transfer and
+    // turbulent-viscosity sources) is frozen at the start-of-step state
+    // throughout BOTH stages -- it is never re-evaluated at an
+    // intermediate stage value, which would require re-coupling with the
+    // pressure-correction and advection steps at each stage, a much
+    // larger undertaking outside this option's scope. This is the same
+    // kind of explicit scoping restriction enableImplicitFriction and
+    // the JFNK solver's own lagged source terms already use, applied
+    // here for the same reason: it keeps the new code self-contained and
+    // independently testable without touching the rest of the time-
+    // advance pipeline.
+    bool enableIMEXRKFriction = false;
+
     // Well-balanced discretization of the interface-slope gravity term
     // (g*cos(theta)*dh1/dz + g*sin(theta) in Eq. 6-7), off by default so
     // existing behaviour is unchanged unless opted into. Relevant ONLY to

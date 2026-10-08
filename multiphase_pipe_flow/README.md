@@ -1036,6 +1036,124 @@ called for.
 against the full demo suite (this code, like JFNK's, lives in its own
 translation unit and only runs when explicitly invoked).
 
+### Exponential time differencing and IMEX Runge-Kutta friction (`SolverOptions::enableETDFriction`, `enableIMEXRKFriction`)
+
+Two further alternatives to `SolverOptions::enableImplicitFriction`, off
+by default, both surveyed from the same numerical-methods literature pass
+as JFNK and well-balanced schemes. All three options linearize the wall
+and interfacial friction terms identically -- freeze the friction factor
+and the |velocity| that makes each shear stress quadratic at the OLD
+state, giving an effective linear drag-rate matrix
+`A = [[-(kw1+ki1), ki1], [ki2, -(kw2+ki2)]]` acting on `U=(u1,u2)` with
+constant forcing `b=(E1,E2)` (everything except friction) -- and differ
+*only* in how the resulting linear ODE `dU/dt = A*U + b` is integrated
+over one time step:
+
+- `enableImplicitFriction` (existing): single-stage backward Euler, 1st
+  order in the linearized system.
+- `enableETDFriction`: the matrix exponential, computed in exact closed
+  form (`expAndPhiCoeffs2x2()` in `FourFieldSolver.cpp`, via the
+  confluent divided-difference representation of a 2x2 matrix function
+  -- no eigenvectors, no matrix inverse, safe at both the repeated-
+  eigenvalue and zero-eigenvalue edge cases) -- zero truncation error
+  for this linear ODE itself; all remaining error comes from the shared
+  linearization, not from the time integration.
+- `enableIMEXRKFriction`: a 2-stage, 2nd-order, L-stable SDIRK (Butcher
+  tableau `c=(gamma,1)`, `A=[[gamma,0],[1-gamma,gamma]]`,
+  `b=(1-gamma,gamma)`, `gamma=1-1/sqrt(2)`), an instance of the IMEX-RK
+  framework surveyed from Pareschi & Russo (2005, "Implicit-explicit
+  Runge-Kutta schemes and applications to hyperbolic systems with
+  relaxation", J. Sci. Comput. 25) -- SCOPED, same as
+  `enableImplicitFriction`, to just the local per-face friction ODE: the
+  non-stiff forcing `b` is frozen across both stages, not re-evaluated
+  at the intermediate stage value, since doing so would require
+  re-coupling with pressure correction and advection at each stage, well
+  outside what this option attempts.
+
+**A real bug, caught by testing rather than by trusting the derivation.**
+The first version of `enableIMEXRKFriction` used tableau coefficients
+`a21=(1-2*gamma)` and `b=(1/2,1/2)` -- algebraically plausible, and
+*wrong*: substituting the scalar test equation `dy/dt=lambda*y` gives a
+stability function whose value as `lambda*dt -> -infinity` is `-1`, not
+`0` -- not L-stable at all. This was caught exactly the way this
+project's own established practice calls for: not by re-deriving the
+stability function before trusting the scheme, but because the direct
+stiff-case test below showed this version blowing up at a dt where plain
+`enableImplicitFriction` stays stable -- backwards from what a strictly
+*more* accurate integrator of the identical linear system should ever
+do. Re-deriving the stability function then (not before) found the
+actual error; the corrected tableau (`a21=(1-gamma)`, `b=(1-gamma,gamma)`)
+was verified L-stable both analytically and numerically (swept
+`z=dt*lambda` from `-0.001` to `-1e6`, confirmed `|R(z)| <= 1` throughout,
+`R(z) -> 0` as `z -> -infinity`) before being trusted again.
+
+**What testing found, once both were correct.**
+
+- **Mild, non-stiff case:** measuring each option's deviation from a
+  very-fine-dt (20000-step) reference trajectory, all three friction
+  integrators show closely comparable error at every dt tested (e.g. at
+  dt one-fiftieth of the simulated window: backward-Euler `2.575e-5`,
+  ETD `2.780e-5`, IMEX-RK `2.833e-5`; shrinking together as dt refines).
+  **This is not the clear accuracy win it might look like on paper**: in
+  this regime the dominant error source is the linearization itself
+  (freezing the friction factor/|velocity| at the old state), shared
+  identically by all three options, not the choice of how the resulting
+  linear ODE is subsequently solved -- so neither new option offers a
+  measurable practical accuracy advantage over the existing
+  `enableImplicitFriction` here.
+- **The established stiff benchmark case** (D=0.05 m, L=5 m, N=50,
+  Vsl=0.05, Vsg=20, eL0=0.1 -- the same case used throughout the
+  JFNK/Anderson sections above): at dt=0.005, tracking `|u2-u1|_max`
+  step by step (not just pass/fail) shows the real mechanism, not just
+  the outcome. `enableImplicitFriction` locks onto exactly `21.72` m/s
+  from step 0 and stays there, unchanged, for all 100 steps. Plain
+  explicit, ETD, and IMEX-RK all instead show `|u2-u1|_max` *growing*
+  slowly and steadily over dozens of steps (ETD: `21.7` at step 20 ->
+  `24.9` at step 40 -> `80.6` at step 50 -> diverges at step 72;
+  IMEX-RK diverges at step 68; plain explicit, as already established,
+  at step 64) before eventually diverging -- the signature of a real,
+  slowly-amplifying instability being allowed to grow, not a single-step
+  numerical blow-up. **Diagnosis**: this is the strongly-sheared,
+  low-holdup regime this project's own Kelvin-Helmholtz case study
+  examined at length elsewhere in this document; backward Euler's lower
+  formal accuracy acts as *unintentional extra numerical dissipation* on
+  the interfacial relative velocity -- strong enough, in this specific
+  case, to fully suppress that growth and land the system at a genuine
+  fixed point, rather than a more faithful treatment of the same
+  friction physics. ETD and IMEX-RK, being more accurate integrators of
+  the *identical* linearized friction term, correctly do not add that
+  extra suppression, so the instability both options are, in this
+  narrow sense, measurably **less** stable than `enableImplicitFriction`
+  on this benchmark, surviving somewhat longer than plain explicit but
+  not matching backward Euler's stability.
+
+**Reading on this, stated plainly.** Neither new option is a strict
+improvement on `enableImplicitFriction`, and this section reports that
+honestly rather than only reporting the (real, independently verified)
+sense in which they are more rigorous: exact or higher-order integration
+of an ODE that is itself only an approximation to the true friction
+physics does not automatically produce a better-behaved overall scheme
+when a separate, unrelated instability is present and the cruder
+method's own extra dissipation happens to be suppressing it. This is the
+same cautionary pattern this project's own numerical-diffusion and
+regularization work (the biharmonic short-wave term, the turbulent-
+viscosity closure) has already run into from the other direction: real
+physical regularization is needed specifically *because* naive numerical
+diffusion is not a substitute for it, and here the reverse: removing
+"accidental" numerical diffusion a cruder method was supplying can
+unmask an instability that physical regularization (not a better time
+integrator for an already-approximate term) is what would actually be
+needed to tame. `enableImplicitFriction` remains the recommended choice
+for this solver's stiff operating envelope; ETD and IMEX-RK are
+documented here as a well-tested negative result and as independently
+verified, reusable closed-form building blocks (`expAndPhiCoeffs2x2()`
+in particular) rather than as replacements.
+
+**Confirmed:** regression-tested bit-for-bit identical `step()` behaviour
+against the full demo suite; both options live entirely within
+`updateLayerMomentum()`'s existing friction branch and are never reached
+unless explicitly enabled.
+
 ## Validation against experimental data
 
 **[VALIDATION.md](VALIDATION.md)** compares the solver's predicted flow

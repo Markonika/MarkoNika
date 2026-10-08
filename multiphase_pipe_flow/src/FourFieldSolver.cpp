@@ -279,6 +279,70 @@ namespace {
         return (s.eg[i] * rhoGasCell[i] + s.ed[i] * rhoL) / std::max(e2, small_e);
     }
 
+    // For the linear ODE dU/dt = A*U + b with constant 2x2 matrix
+    // A = [[A11,A12],[A21,A22]], returns (alpha0, alpha1, beta0, beta1)
+    // such that the EXACT solution over a step dt is
+    //   U(dt) = (alpha0*I + alpha1*A)*U0 + (beta0*I + beta1*A)*b.
+    // exp(A*dt) = alpha0*I + alpha1*A and the forcing integral
+    // integral_0^dt exp(A*s) ds = beta0*I + beta1*A are both standard 2x2
+    // matrix FUNCTIONS of A, built from A's eigenvalues via the confluent
+    // divided-difference (Cayley-Hamilton) representation f(A) = beta0*I
+    // + beta1*A: for distinct eigenvalues lam1 != lam2, beta1 =
+    // (f(lam1)-f(lam2))/(lam1-lam2), beta0 = f(lam1) - lam1*beta1; for a
+    // repeated eigenvalue, the confluent limit beta1 = f'(lam),
+    // beta0 = f(lam) - lam*f'(lam). Used by SolverOptions::enableETDFriction
+    // (f = exp(.*dt) for alpha, f = phi1-type (exp(.*dt)-1)/. for beta)
+    // and, via the same eigenvalues, by enableIMEXRKFriction's two stage
+    // solves. Assumes (and both callers' own documentation proves, for
+    // the specific physical drag matrices this is applied to) that A's
+    // eigenvalues are always real -- the discriminant is clamped to >= 0
+    // defensively rather than handling a complex case that should not
+    // arise.
+    inline void expAndPhiCoeffs2x2(double A11, double A12, double A21, double A22, double dt,
+                                    double& alpha0, double& alpha1, double& beta0, double& beta1) {
+        const double T = A11 + A22;
+        const double D = A11 * A22 - A12 * A21;
+        const double disc = std::max(T * T - 4.0 * D, 0.0);
+        const double sq = std::sqrt(disc);
+        const double lam1 = 0.5 * (T + sq);
+        const double lam2 = 0.5 * (T - sq);
+
+        // phi1-type function f(z) = (e^z - 1)/lam for z = lam*dt, with a
+        // direct (not 0/0) Taylor-series formula near z=0 -- the true
+        // removable singularity there, reached whenever a face has zero
+        // net drag along one of A's eigen-directions (e.g. no wall
+        // friction at all), not just a theoretical edge case.
+        auto fPhi = [dt](double lam) {
+            const double z = lam * dt;
+            if (std::fabs(z) < 1.0e-4) return dt * (1.0 + z * (0.5 + z * (1.0 / 6.0 + z * (1.0 / 24.0))));
+            return (std::exp(z) - 1.0) / lam;
+        };
+        // d(fPhi)/dlam, needed only in the repeated-eigenvalue branch
+        // below; same near-zero series safeguard, this time against the
+        // exact formula's own z->0 cancellation.
+        auto fPhiDeriv = [dt](double lam) {
+            const double z = lam * dt;
+            if (std::fabs(z) < 1.0e-4) return dt * dt * (0.5 + z * (1.0 / 3.0 + z * (1.0 / 8.0)));
+            return (dt * std::exp(z) * lam - (std::exp(z) - 1.0)) / (lam * lam);
+        };
+
+        if (std::fabs(lam1 - lam2) > 1.0e-9 * std::max(1.0, std::fabs(lam1) + std::fabs(lam2))) {
+            const double e1 = std::exp(lam1 * dt), e2 = std::exp(lam2 * dt);
+            alpha1 = (e1 - e2) / (lam1 - lam2);
+            alpha0 = e1 - lam1 * alpha1;
+            const double p1 = fPhi(lam1), p2 = fPhi(lam2);
+            beta1 = (p1 - p2) / (lam1 - lam2);
+            beta0 = p1 - lam1 * beta1;
+        } else {
+            const double lam = 0.5 * (lam1 + lam2);
+            const double e = std::exp(lam * dt);
+            alpha0 = e * (1.0 - lam * dt);
+            alpha1 = dt * e;
+            beta1 = fPhiDeriv(lam);
+            beta0 = fPhi(lam) - lam * beta1;
+        }
+    }
+
     // Flux-form (Burgers-type) MUSCL/TVD reconstruction for a face-centred
     // velocity field's OWN self-advection term u*du/dz, used by
     // updateLayerMomentum() in place of plain non-conservative upwind
@@ -508,7 +572,88 @@ void FourFieldSolver::updateLayerMomentum(double dt) {
             advectiveTerm2 = u2c * du2dzAdv;
         }
 
-        if (!options_.enableImplicitFriction) {
+        if (options_.enableIMEXRKFriction || options_.enableETDFriction) {
+            // Shared with enableImplicitFriction's own derivation (see that
+            // option's documentation): E1, E2 are everything EXCEPT wall
+            // and interfacial friction; freezing the friction factor and
+            // the |velocity| that makes each shear stress quadratic at
+            // the OLD state turns the two friction terms into a LINEAR
+            // drag-rate matrix A = [[-(kw1+ki1), ki1], [ki2, -(kw2+ki2)]]
+            // acting on U=(u1,u2), with constant forcing b=(E1,E2) -- the
+            // SAME linear ODE dU/dt = A*U + b that enableImplicitFriction
+            // solves by backward Euler, but integrated differently below.
+            // Computed fresh here (not shared with the branches above/
+            // below) deliberately -- same self-containment rationale as
+            // rho1Of/rho2Of's own duplication across translation units in
+            // this codebase: it keeps the two already bit-exact-verified
+            // branches below completely untouched by this addition.
+            const double E1 = -advectiveTerm1 - dPdz / rho1f - gravCosTerm - gravSinTerm + massSrc1 + turb1;
+            const double E2 = -advectiveTerm2 - dPdz / rho2f - gravCosTerm - gravSinTerm + massSrc2 + turb2;
+            const double epsVel = 1.0e-6;
+            const double u1Old = state_.u1[f], u2Old = state_.u2[f];
+            const double urMag = std::max(std::fabs(u2Old - u1Old), epsVel);
+            const double kw1 = std::fabs(tauW1_[f] * Swp1f / (A * e1fSafe * rho1f)) / std::max(std::fabs(u1Old), epsVel);
+            const double kw2 = std::fabs(tauW2_[f] * Swp2f / (A * e2fSafe * rho2f)) / std::max(std::fabs(u2Old), epsVel);
+            const double ki1 = std::fabs(tauI_[f] * Sif / (A * e1fSafe * rho1f)) / urMag;
+            const double ki2 = std::fabs(tauI_[f] * Sif / (A * e2fSafe * rho2f)) / urMag;
+            const double lA11 = -(kw1 + ki1), lA12 = ki1, lA21 = ki2, lA22 = -(kw2 + ki2);
+
+            if (options_.enableIMEXRKFriction) {
+                // Pareschi & Russo (2005) IMEX-SSP2(2,2,2): 2-stage,
+                // 2nd-order, L-stable (gamma = 1 - 1/sqrt(2)) -- see
+                // SolverOptions::enableIMEXRKFriction for the full
+                // derivation and explicit scoping note (E1, E2 frozen
+                // across both stages, not re-evaluated at U1). Butcher
+                // tableau: c=(gamma,1), A_im=[[gamma,0],[1-gamma,gamma]],
+                // b=(1-gamma,gamma) -- the standard 2-stage, 2nd-order,
+                // L-stable SDIRK, confirmed L-stable here (not assumed)
+                // by deriving its scalar stability function
+                // R(z)=(1-gamma^2*z)/(1-gamma*z)^2 and checking R(z)->0
+                // as z=dt*lambda->-infinity. An EARLIER version of this
+                // code used a21=(1-2*gamma) and b=(1/2,1/2) instead --
+                // algebraically plausible-looking but WRONG: its own
+                // stability function works out to R(infinity)=-1, not
+                // L-stable at all, and it was caught exactly the way this
+                // project catches this class of error -- not by
+                // re-deriving it on paper first, but because the direct
+                // stiff dt-sweep test below showed it blowing up at the
+                // same dt where plain backward-Euler (enableImplicitFriction)
+                // remains stable, the opposite of what a MORE accurate
+                // integrator of the same stiff term should ever do.
+                const double gamma = 1.0 - 1.0 / std::sqrt(2.0);
+                // Stage matrix M = I - dt*gamma*A, shared by both stages.
+                const double m11 = 1.0 - dt * gamma * lA11, m12 = -dt * gamma * lA12;
+                const double m21 = -dt * gamma * lA21, m22 = 1.0 - dt * gamma * lA22;
+                const double detM = m11 * m22 - m12 * m21;
+                // Stage 1: M*U1 = U0.
+                const double u1_1 = (u1Old * m22 - m12 * u2Old) / detM;
+                const double u2_1 = (m11 * u2Old - m21 * u1Old) / detM;
+                // Stage 2: M*U2 = U0 + dt*b + dt*(1-gamma)*A*U1.
+                const double rhs1 = u1Old + dt * E1 + dt * (1.0 - gamma) * (lA11 * u1_1 + lA12 * u2_1);
+                const double rhs2 = u2Old + dt * E2 + dt * (1.0 - gamma) * (lA21 * u1_1 + lA22 * u2_1);
+                const double u1_2 = (rhs1 * m22 - m12 * rhs2) / detM;
+                const double u2_2 = (m11 * rhs2 - m21 * rhs1) / detM;
+                // Final combination: U_new = U0 + dt*b + dt*[(1-gamma)*A*U1 + gamma*A*U2].
+                const double Au1 = lA11 * u1_1 + lA12 * u2_1;
+                const double Au2 = lA21 * u1_1 + lA22 * u2_1;
+                const double Av1 = lA11 * u1_2 + lA12 * u2_2;
+                const double Av2 = lA21 * u1_2 + lA22 * u2_2;
+                u1New[f] = u1Old + dt * E1 + dt * ((1.0 - gamma) * Au1 + gamma * Av1);
+                u2New[f] = u2Old + dt * E2 + dt * ((1.0 - gamma) * Au2 + gamma * Av2);
+            } else {
+                // Exponential time differencing: integrate dU/dt=A*U+b
+                // EXACTLY (zero error beyond the linearization itself) --
+                // see SolverOptions::enableETDFriction.
+                double alpha0, alpha1, beta0, beta1;
+                expAndPhiCoeffs2x2(lA11, lA12, lA21, lA22, dt, alpha0, alpha1, beta0, beta1);
+                const double AU1 = lA11 * u1Old + lA12 * u2Old;
+                const double AU2 = lA21 * u1Old + lA22 * u2Old;
+                const double Ab1 = lA11 * E1 + lA12 * E2;
+                const double Ab2 = lA21 * E1 + lA22 * E2;
+                u1New[f] = alpha0 * u1Old + alpha1 * AU1 + beta0 * E1 + beta1 * Ab1;
+                u2New[f] = alpha0 * u2Old + alpha1 * AU2 + beta0 * E2 + beta1 * Ab2;
+            }
+        } else if (!options_.enableImplicitFriction) {
             // Exact same left-to-right term order as before this option
             // existed (verified bit-for-bit reproducible against the
             // pre-existing benchmark) -- floating-point addition is not
