@@ -105,7 +105,7 @@ struct RunResult {
 RunResult runOneCase(const Case& c, bool haveClosureScale, double closureScale,
                       bool haveF0Shift, double f0Shift,
                       bool haveDepositionScale, double depositionScale,
-                      bool enableTurbVisc) {
+                      bool enableTurbVisc, bool haveMixingLength, double mixingLengthFraction) {
     const double D = c.D;
     const double L = std::clamp(60.0 * D, 0.6, 20.0);
     const int N = 60;
@@ -126,7 +126,10 @@ RunResult runOneCase(const Case& c, bool haveClosureScale, double closureScale,
         if (haveF0Shift) opt.closureF0Shift = f0Shift;
         if (haveDepositionScale) opt.closureDepositionVelocityScale = depositionScale;
     }
-    if (enableTurbVisc) opt.enableTurbulentViscosity = true;
+    if (enableTurbVisc) {
+        opt.enableTurbulentViscosity = true;
+        if (haveMixingLength) opt.turbulentMixingLengthFraction = mixingLengthFraction;
+    }
     mfs::FourFieldSolver solver(D, L, N, fluid, opt);
     solver.setInclinationConstant(c.angle_deg * mfs::constants::pi / 180.0);
 
@@ -227,6 +230,8 @@ int main(int argc, char** argv) {
     const bool haveDepositionScale = (argc >= 6);
     const double depositionScale = haveDepositionScale ? std::stod(argv[5]) : 1.0;
     const bool enableTurbVisc = (argc >= 7) && std::stoi(argv[6]) != 0;
+    const bool haveMixingLength = (argc >= 8);
+    const double mixingLengthFraction = haveMixingLength ? std::stod(argv[7]) : 0.1;
     const auto cases = readCases(argv[1]);
 
     // Each case is an independent FourFieldSolver instance (no shared
@@ -242,7 +247,8 @@ int main(int argc, char** argv) {
 #endif
     for (std::size_t i = 0; i < cases.size(); ++i) {
         results[i] = runOneCase(cases[i], haveClosureScale, closureScale, haveF0Shift, f0Shift,
-                                 haveDepositionScale, depositionScale, enableTurbVisc);
+                                 haveDepositionScale, depositionScale, enableTurbVisc,
+                                 haveMixingLength, mixingLengthFraction);
 #ifdef _OPENMP
 #pragma omp critical
 #endif
