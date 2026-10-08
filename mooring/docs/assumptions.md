@@ -69,3 +69,11 @@
     scatter in milestone 4). `maxOutOfPlane` is sampled every 64 steps, so it can miss short excursions.
 24. The out-of-plane stability check is empirical (three Chalmers cases, 1 mm perturbation, 6 cycles). It shows no growth
     there; it is **not** a proof that no parametric out-of-plane instability exists elsewhere in the parameter space.
+25. **Point elements** (`PointElement`, `LumpedMassCable::addPointElement`): weight m g always; buoyancy rho_w g V, drag
+    0.5 rho_w Cd A |v_rel| v_rel and added mass Cm rho_w V (a_w - a) only on the submerged fraction of the node and only with
+    `Environment::hydro`. Added mass is isotropic (point body) and added to the node inertia; the Froude-Krylov term is
+    omitted, consistently with Eq. 3.27 for the cable. `floater()`/`clump()` derive V from the thesis' table values
+    (buoyancy force / submerged weight and mass; Tables 5.7-5.8). Elements have no seabed contact of their own: a clump on
+    the bed rests via the stiff contact of its node (penetration ~ W/(Ks D1 l0)). `energy()` ignores point elements.
+26. Point-element drag acts in still water as well as in a current via `Environment::water`; there is no wave-surface
+    interaction before milestone 9.

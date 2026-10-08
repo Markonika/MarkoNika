@@ -39,6 +39,22 @@ double LumpedMassCable::submergedFraction(const std::vector<Vec3>& r, int i) con
     return std::min(1.0, std::max(0.0, 0.5 + (env_.surfaceZ - r[i].z) / p_.l0()));
 }
 
+void LumpedMassCable::addPointElement(const PointElement& pe) {
+    if (pe.node < 0 || pe.node > p_.N) throw std::invalid_argument("point element node out of range");
+    if (pe.mass < 0.0 || pe.volume < 0.0) throw std::invalid_argument("point element mass/volume must be >= 0");
+    points_.push_back(pe);
+}
+
+double LumpedMassCable::pointNetWeight(const std::vector<Vec3>& r, int i) const {
+    double w = 0.0;
+    for (const PointElement& pe : points_) {
+        if (pe.node != i) continue;
+        w += pe.mass * p_.g;
+        if (env_.hydro) w -= submergedFraction(r, i) * env_.rho_w * p_.g * pe.volume;
+    }
+    return w;
+}
+
 double LumpedMassCable::nodeWeight(const std::vector<Vec3>& r, int i) const {
     const double half = (i == 0 || i == p_.N) ? 0.5 : 1.0;
     const double phi = submergedFraction(r, i);
@@ -96,6 +112,20 @@ void LumpedMassCable::computeForces(const std::vector<Vec3>& r, const std::vecto
                 sp.Ks = std::min(sp.Ks, ksCap_);
                 f[i] += seabedForce(sp, p_.D1, p_.m_l, wSub, pen, v[i], p_.l0() * (end ? 0.5 : 1.0));
             }
+        }
+    }
+    for (const PointElement& pe : points_) {
+        const int i = pe.node;
+        f[i].z -= pe.mass * p_.g;
+        if (!env_.hydro) continue;
+        const double phi = submergedFraction(r, i);
+        if (phi <= 0.0) continue;
+        f[i].z += phi * env_.rho_w * p_.g * pe.volume;
+        if (pe.Cd > 0.0 && pe.area > 0.0) {
+            Vec3 vw, a_w;
+            if (env_.water) env_.water(r[i], t, vw, a_w);
+            const Vec3 vr = vw - v[i];
+            f[i] += vr * (0.5 * env_.rho_w * pe.Cd * pe.area * norm(vr) * phi);
         }
     }
     if (p_.planar) for (Vec3& q : f) q.y = 0.0;      // 2D mode: no out-of-plane force
@@ -224,8 +254,14 @@ void LumpedMassCable::acceleration(std::vector<Vec3>& r, std::vector<Vec3>& v, d
     std::vector<Vec3> aw;
     std::vector<Vec3>& f = a;
     computeForces(r, v, t, f, &ca, &aw);
+    std::vector<double> mPt(N + 1, 0.0), caPt(N + 1, 0.0);   // point-element inertia and isotropic added mass
+    for (const PointElement& pe : points_) {
+        mPt[pe.node] += pe.mass;
+        if (pe.Cm > 0.0 && env_.hydro) caPt[pe.node] += submergedFraction(r, pe.node) * pe.Cm * env_.rho_w * pe.volume;
+    }
     for (int i = 1; i < N; ++i) {
-        const double m = nodeMass(i);
+        const double m = nodeMass(i) + mPt[i] + caPt[i];
+        if (caPt[i] > 0.0) f[i] += aw[i] * caPt[i];             // RHS of Cm rho V (a_w - a)
         if (ca[i] > 0.0) {
             // Added mass: M = m I + ca (I - t t^T), RHS carries ca (I - t t^T) a_w (Eq. 3.27 with a_rel = a_w - a).
             const Vec3 dt = r[i + 1] - r[i - 1];

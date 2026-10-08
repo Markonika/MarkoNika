@@ -70,6 +70,20 @@ CaseResult runCase(const json& cfg) {
     LumpedMassCable cable(p, anchor, rest);
     cable.setEnvironment(env);
 
+    for (const json& jp : cfg.value("point_elements", json::array())) {
+        // Node by index ("node") or by unstretched arc length from the anchor ("arclength_m", nearest node).
+        const int node = jp.contains("node") ? jp["node"].get<int>()
+                                             : static_cast<int>(std::lround(jp.at("arclength_m").get<double>() / p.l0()));
+        const std::string type = get<std::string>(jp, "type", "generic");
+        const double D = get(jp, "diameter_m", 0.0), Cd = get(jp, "Cd", 0.0), Cm = get(jp, "Cm", 0.0);
+        const double mass = get(jp, "mass_kg", 0.0);
+        PointElement pe;
+        if (type == "floater") pe = PointElement::floater(node, mass, jp.at("buoyancy_N"), D, Cd, env.rho_w, p.g, Cm);
+        else if (type == "clump") pe = PointElement::clump(node, mass, jp.at("submerged_weight_N"), D, Cd, env.rho_w, p.g, Cm);
+        else { pe = {node, mass, get(jp, "volume_m3", 0.0), Cd, get(jp, "area_m2", 0.7853981633974483 * D * D), Cm}; }
+        cable.addPointElement(pe);
+    }
+
     CaseResult res;
     res.l0 = p.l0(); res.cWave = p.waveSpeed();
     const bool touchdown = get<std::string>(cfg.value("initial", json::object()), "shape", "touchdown") == "touchdown";

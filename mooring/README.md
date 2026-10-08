@@ -9,7 +9,7 @@ the GPL `LICENSE` at the repository root belongs to the profile repository, not 
 Warnings: `-Wall -Wextra -Wpedantic`. Dependencies: see `THIRD_PARTY.md`.
 
 ## Status
-Milestones 1-5 done (static solver, dynamics, hydrodynamics + seabed, Chalmers validation, planar/3D regression).
+Milestones 1-6 done (static solver, dynamics, hydrodynamics + seabed, Chalmers validation, planar/3D regression, point elements).
 
 | Test (milestone 1) | Result |
 |---|---|
@@ -33,6 +33,10 @@ Milestones 1-5 done (static solver, dynamics, hydrodynamics + seabed, Chalmers v
 | Lateral current +/-0.3 m/s | tension identical, deflection mirrored (max \|y\| 1.160 m both); no-current run stays planar |
 | 1 mm out-of-plane perturbation, 6 cycles | never exceeds 1 mm, 0.3-0.5 mm at the end; maxima change by <= 0.8 % |
 | Circularly polarised string (3D analytic) | radial error 1.6e-8, phase error 1e-7 rad after 0.92 periods |
+| Clump 300 N at mid-span vs exact elastic half-catenaries | rel. L2 6.0e-5 -> 9.6e-7 (N = 20..160), order 1.99; support loads sum to weight (< 3e-9) |
+| Floater (2500 N buoyancy, arch) vs exact | rel. L2 2.0e-5 -> 3.1e-7, order 1.99 |
+| Point drag in a 1.5 m/s current | support load 10.602875 N = Morison drag (exact) |
+| Point added mass, 2-segment oscillator | period 3.31136 s = exact; Cm=1/Cm=0 ratio 1.10554 = exact |
 | Support reactions, static line | vertical sum = weight (1e-6), horizontal sum = 0 |
 
 Details: `docs/chalmers_validation.md` (results, convergence, caveats), `docs/config.md` (configuration fields).

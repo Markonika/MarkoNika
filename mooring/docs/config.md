@@ -24,5 +24,6 @@ configuration plus derived values, time step, slack/clipping/contact counters).
 | `motion.radius_m`, `.period_s`, `.direction` (+1 counter-clockwise in x-z, -1 clockwise), `.phase_deg`, `.ramp_cycles`, `.cycles` | excitation |
 | `numerics.planar` | true: 2D mode, motion confined to the plane y = y_anchor (forces/velocities in y dropped) |
 | `numerics.scheme` (`rk4`/`verlet`), `.cfl`, `.dt_s` (override), `.relax_force_tol`, `.relax_max_steps` | integration and static relaxation |
+| `point_elements[]` | list of `{type: "floater"\|"clump"\|"generic", node \| arclength_m (nearest node), mass_kg, diameter_m, Cd, Cm, buoyancy_N (floater) \| submerged_weight_N (clump) \| volume_m3, area_m2 (generic)}` |
 | `statistics.first_cycle` | first cycle included in the mean of the cycle maxima |
 | `output.directory`, `.tag`, `.dt_out_s`, `.write` | output control |

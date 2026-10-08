@@ -49,6 +49,31 @@ struct RelaxOptions {
     long   maxSteps{2000000};  // pseudo-time step limit
 };
 
+// Point element lumped on a node: clump weight, floater, instrument... Weight m g acts always; buoyancy
+// rho_w g V, drag and added mass act on the submerged fraction of the node (requires Environment::hydro).
+// Drag: 0.5 rho_w Cd A |v_rel| v_rel (isotropic). Added mass: Cm rho_w V (a_w - a), isotropic; the
+// Froude-Krylov term is omitted, consistently with the cable's Eq. 3.27. No seabed contact of its own
+// (the node's cable-soil contact still acts).
+struct PointElement {
+    int node{0};
+    double mass{0};     // dry mass [kg]
+    double volume{0};   // displaced volume [m^3]
+    double Cd{0};
+    double area{0};     // drag reference area [m^2]
+    double Cm{0};
+
+    // Floater from its buoyancy force [N] (net upward in water when only the volume is counted) and diameter (sphere).
+    static PointElement floater(int node, double mass, double buoyancyN, double D, double Cd, double rho_w = 1000.0,
+                                double g = 9.81, double Cm = 0.0) {
+        return {node, mass, buoyancyN / (rho_w * g), Cd, 0.7853981633974483 * D * D, Cm};
+    }
+    // Clump weight from its mass and submerged weight [N]: V = (m g - W_sub) / (rho_w g).
+    static PointElement clump(int node, double mass, double submergedWeightN, double D, double Cd, double rho_w = 1000.0,
+                              double g = 9.81, double Cm = 0.0) {
+        return {node, mass, (mass * g - submergedWeightN) / (rho_w * g), Cd, 0.7853981633974483 * D * D, Cm};
+    }
+};
+
 enum class Scheme { RK4, Verlet };
 
 // Prescribed top-end motion: fills position and velocity at time t.
@@ -98,6 +123,11 @@ public:
                        std::vector<Vec3>& f, std::vector<double>* ca = nullptr,
                        std::vector<Vec3>* aw = nullptr) const;
     void setEnvironment(const Environment& e) { env_ = e; }
+    // Attach a point element to an interior or end node (0..N).
+    void addPointElement(const PointElement& pe);
+    const std::vector<PointElement>& pointElements() const { return points_; }
+    // Net vertical force of the point elements on node i in the current configuration (weight - buoyancy), N, down positive.
+    double pointNetWeight(const std::vector<Vec3>& r, int i) const;
     const Environment& environment() const { return env_; }
     // Weight [N] on node i for the given configuration (submergence-blended dry / submerged weight).
     double nodeWeight(const std::vector<Vec3>& r, int i) const;
@@ -153,6 +183,7 @@ private:
     TopMotion top_;
     mutable DynStats stats_;
     Environment env_;
+    std::vector<PointElement> points_;
     StepObserver observer_;
     double ksCap_{1e300};      // soil stiffness cap used only during static relaxation
     Vec3 fairPrevPos_, fairPrevVel_;
