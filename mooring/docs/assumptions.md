@@ -56,7 +56,7 @@
 18. Energy accounting (`energy()`) is valid only without hydro/seabed/variable weight (it includes no dissipation
     and assumes uniform w).
 19. **Chalmers rotation direction** is not in the supplied inputs; clockwise in x-z (`direction = -1`) was read from
-    thesis Fig. 3.5 (arrow on the motor circle). Results depend strongly on it (see docs/chalmers_validation.md).
+    thesis Fig. 3.5 (arrow on the motor circle) after a counter-clockwise first run over-predicted (not a blind choice). Results depend strongly on it (see docs/chalmers_validation.md).
 20. **Per-cycle maxima** are taken from every time step; "mean maximum" averages cycles 5-9 of a 10-cycle run after a
     2-cycle cosine ramp of the radius. The thesis ran 15 cycles; maxima were stationary to <0.1 % after the ramp.
 21. Top/anchor tension in outputs is the raw end-segment tension (EA eps + c_int d(eps)/dt, clipped at 0), not the

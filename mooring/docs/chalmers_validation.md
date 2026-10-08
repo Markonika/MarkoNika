@@ -14,8 +14,11 @@ mean of the per-cycle maxima of cycles 5-9 (maxima taken from every time step, n
 
 **Rotation direction.** The inputs do not state it. Figure 3.5 of the thesis shows the motor with the arrow on the
 left of the circle pointing up, i.e. the top of the circle moves toward the right (clockwise in x-z, `direction = -1`).
-This was read from the figure **before** looking at any comparison with Table 7 for that choice and was not fitted;
-the opposite direction is reported below as a sensitivity because it matters a great deal.
+**Disclosure:** the first full grid was run counter-clockwise (an arbitrary default) and over-predicted by ~10 %. A
+spot run with the sense reversed came out much closer to the data, and only then was Figure 3.5 consulted to see
+whether the thesis states the sense. The figure supports clockwise, so it is used, but the check was motivated by the
+mismatch and the choice cannot be called blind. No coefficient (Cd, Cm, mu, EA, ...) was changed. The opposite
+direction is reported below as a sensitivity because it matters a great deal.
 
 ## Results
 
