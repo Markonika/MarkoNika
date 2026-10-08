@@ -13,7 +13,7 @@ target_include_directories(mooring PUBLIC include)
 target_include_directories(mooring SYSTEM PUBLIC third_party)
 
 enable_testing()
-add_executable(mooring_tests tests/test_main.cpp tests/test_catenary.cpp tests/test_dynamics.cpp)
+add_executable(mooring_tests tests/test_main.cpp tests/test_catenary.cpp tests/test_dynamics.cpp tests/test_hydro.cpp)
 target_link_libraries(mooring_tests PRIVATE mooring)
 target_include_directories(mooring_tests SYSTEM PRIVATE third_party/doctest)
 add_test(NAME mooring_tests COMMAND mooring_tests)

@@ -3,6 +3,7 @@
 #include <functional>
 #include <vector>
 #include "mooring/cable_model.hpp"
+#include "mooring/hydro.hpp"
 #include "mooring/vec3.hpp"
 
 namespace mooring {
@@ -15,8 +16,30 @@ struct CableParams {
     double w{0};         // weight per unit length acting in -z [N/m] (submerged or dry, set by caller)
     double c_int{0};     // internal damping coefficient [N s], T = EA*eps + c_int*d(eps)/dt
     double g{9.81};
+    // Hydrodynamics (Eqs. 3.27-3.29). A1 = 0 means pi/4 D0^2.
+    double D0{0}, D1{0}, A1{0};
+    double Cm{0}, Cdt{0}, Cdn{0};
+    SoilParams soil;
     double l0() const { return L / N; }
+    double dryWeight() const { return m_l * g; }          // weight per length above the surface
+    double nominalArea() const { return A1 > 0.0 ? A1 : 0.7853981633974483 * D0 * D0; }
+    // Submerged weight per unit length, Eq. 3.26.
+    static double submergedWeight(double m_l, double rho_c, double rho_w, double g = 9.81) {
+        return (rho_c - rho_w) / rho_c * m_l * g;
+    }
     double waveSpeed() const;   // c = sqrt(EA / m_l)
+};
+
+// Water kinematics at a point: velocity and acceleration of the water. Default is still water.
+using WaterField = std::function<void(const Vec3& pos, double t, Vec3& vw, Vec3& aw)>;
+
+struct Environment {
+    bool hydro{false};          // Morison forces + submerged weight below the surface (else CableParams::w everywhere)
+    bool seabed{false};         // flat seabed contact at z = seabedZ
+    double rho_w{1000.0};
+    double surfaceZ{0.0};       // still-water level: nodes above carry dry weight and no hydrodynamics
+    double seabedZ{0.0};
+    WaterField water;           // empty = still water
 };
 
 struct RelaxOptions {
@@ -41,6 +64,7 @@ struct DynStats {
     long steps{0};
     long slackSegmentEvals{0};   // segment force evaluations with eps <= 0 (tension set to zero)
     long clippedTensionEvals{0}; // evaluations where damping made T < 0 and T was clipped to 0
+    long soilContactEvals{0};    // node evaluations in seabed contact
     double dtUsed{0};
 };
 
@@ -64,7 +88,17 @@ public:
 
     // Net force on each node from segment tension and weight (end nodes included; ends are held
     // fixed by the caller). Tension is zero in compression (bilinear, Eq. 3.25).
-    void computeForces(const std::vector<Vec3>& r, const std::vector<Vec3>& v, std::vector<Vec3>& f) const;
+    // Elastic + weight + (optional) hydrodynamic + seabed forces. If 'ca' / 'aw' are given they receive
+    // the per-node added-mass coefficient [kg] and water acceleration used by the added-mass solve.
+    void computeForces(const std::vector<Vec3>& r, const std::vector<Vec3>& v, double t,
+                       std::vector<Vec3>& f, std::vector<double>* ca = nullptr,
+                       std::vector<Vec3>* aw = nullptr) const;
+    void setEnvironment(const Environment& e) { env_ = e; }
+    const Environment& environment() const { return env_; }
+    // Weight [N] on node i for the given configuration (submergence-blended dry / submerged weight).
+    double nodeWeight(const std::vector<Vec3>& r, int i) const;
+    // Fraction of node i below the still-water level (0 = air, 1 = fully submerged).
+    double submergedFraction(const std::vector<Vec3>& r, int i) const;
     double segmentTension(const std::vector<Vec3>& r, int seg) const;
     double nodeMass(int i) const;
     // Tension force vector the end segment exerts on the end node (points into the line); this is the
@@ -105,6 +139,8 @@ private:
     DynOptions dyn_;
     TopMotion top_;
     mutable DynStats stats_;
+    Environment env_;
+    double ksCap_{1e300};      // soil stiffness cap used only during static relaxation
     Vec3 fairPrevPos_, fairPrevVel_;
     double fairPrevT_{0.0};
     bool fairInit_{false};

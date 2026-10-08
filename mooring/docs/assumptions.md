@@ -31,3 +31,27 @@
 11. **Momentum check (test 3).** The ends are always held (fixed or prescribed), so linear momentum is not
     conserved; only energy is checked. A free-end momentum test is deferred to the platform milestone.
 
+12. **Hydrodynamics (milestone 3).** Forces follow Eqs. 3.27-3.31 per node. Water velocity in Eq. 3.30/3.31 is
+    read as v_rel = v_w - dr/dt (the typeset "a_w" is a misprint). The tangential drag term is the
+    sign-preserving 0.5 Cdt rho D (v.t)|v.t| t (the typeset absolute value is lost). The (1+eps) factor is
+    realised by using the actual (stretched) tributary length of each node. Added mass uses
+    c_i = Cm rho_w A1 L_stretched with A1 = pi/4 D0^2 unless given; solved exactly per node as
+    M^-1 = t t^T/m + (I - t t^T)/(m + c), the water-acceleration term entering the right-hand side.
+    Node tangent = central difference of the neighbours (one-sided at the ends).
+13. **Surface.** Nodes blend linearly between dry weight m_l g (above) and submerged weight gamma_l (Eq. 3.26,
+    `CableParams::submergedWeight`) over one segment length around `surfaceZ`; hydrodynamic forces are
+    scaled by the same submerged fraction. Wave-surface kinematics (Wheeler) come in milestone 9.
+14. **Seabed.** Flat, normal +z. Ks is the thesis' "GPa/m" quantity: normal force per length = Ks D1 dH
+    (Pa/m * m * m = N/m); damping 2 zeta sqrt(Ks D1 m_l) while penetrating downward only (Eq. 3.32). Friction is
+    -gamma_l mu min(|v_st|/v_lim, 1) t_s (Eq. 3.34: scaled by submerged weight, not by the normal force) and acts
+    while in contact. Soil forces use the unstretched tributary length (no (1+eps), as in the equations).
+15. **Time step with a seabed.** The contact oscillator has omega^2 = Ks D1/m_l independent of l0 (9.0e3 rad/s for the
+    Chalmers chain), so `stableDt()` adds dt <= cfl*2/(omega (zeta + sqrt(zeta^2-1))) = 1.1e-4 s there. This
+    limit is real; the drop test runs at dt = 2.8e-5 s because c_int = 50 N s adds a tighter one.
+16. **Static relaxation with a seabed** caps the soil stiffness at EA/(l0^2 D1) (node contact stiffness = EA/l0) to keep
+    the fictitious-mass scheme stable. Equilibrium penetration is then w l0^2/EA (7e-8 m in the tests) instead
+    of w/(Ks D1); both are negligible. Dynamic runs use the true Ks.
+17. **Chalmers chain diameters.** Table 3.1 gives D0 = D1 = link thickness = 0.0022 m; the JSON agrees. The nominal
+    area A1 is not tabulated: pi/4 D0^2 is assumed (only matters for Cm != 0; Cm = 0 also fits the data).
+18. Energy accounting (`energy()`) is valid only without hydro/seabed/variable weight (it includes no dissipation
+    and assumes uniform w).

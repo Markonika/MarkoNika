@@ -32,25 +32,71 @@ double LumpedMassCable::segmentTension(const std::vector<Vec3>& r, int seg) cons
     return eps > 0.0 ? p_.EA * eps : 0.0;
 }
 
-void LumpedMassCable::computeForces(const std::vector<Vec3>& r, const std::vector<Vec3>& v,
-                                    std::vector<Vec3>& f) const {
+double LumpedMassCable::submergedFraction(const std::vector<Vec3>& r, int i) const {
+    if (!env_.hydro) return 1.0;
+    // Linear blend over one segment length around the still-water level (avoids a force step).
+    return std::min(1.0, std::max(0.0, 0.5 + (env_.surfaceZ - r[i].z) / p_.l0()));
+}
+
+double LumpedMassCable::nodeWeight(const std::vector<Vec3>& r, int i) const {
+    const double half = (i == 0 || i == p_.N) ? 0.5 : 1.0;
+    const double phi = submergedFraction(r, i);
+    const double wl = env_.hydro ? phi * p_.w + (1.0 - phi) * p_.dryWeight() : p_.w;
+    return wl * p_.l0() * half;
+}
+
+void LumpedMassCable::computeForces(const std::vector<Vec3>& r, const std::vector<Vec3>& v, double t,
+                                    std::vector<Vec3>& f, std::vector<double>* ca,
+                                    std::vector<Vec3>* aw) const {
+    const int N = p_.N;
     f.assign(r.size(), Vec3());
-    for (int i = 0; i < p_.N; ++i) {
+    std::vector<double> len(N);
+    for (int i = 0; i < N; ++i) {
         const Vec3 d = r[i + 1] - r[i];
-        const double len = norm(d);
-        const double eps = len / p_.l0() - 1.0;
-        if (eps <= 0.0 || len <= 0.0) { ++stats_.slackSegmentEvals; continue; }   // Eq. 3.25: T = 0
+        len[i] = norm(d);
+        const double eps = len[i] / p_.l0() - 1.0;
+        if (eps <= 0.0 || len[i] <= 0.0) { ++stats_.slackSegmentEvals; continue; }   // Eq. 3.25: T = 0
         double T = p_.EA * eps;
         if (p_.c_int != 0.0) {
-            const double epsDot = dot(d, v[i + 1] - v[i]) / (len * p_.l0());
+            const double epsDot = dot(d, v[i + 1] - v[i]) / (len[i] * p_.l0());
             T += p_.c_int * epsDot;
             if (T < 0.0) { T = 0.0; ++stats_.clippedTensionEvals; }
         }
-        const Vec3 F = d * (T / len);
+        const Vec3 F = d * (T / len[i]);
         f[i] += F;
         f[i + 1] -= F;
     }
-    for (int i = 0; i <= p_.N; ++i) f[i].z -= p_.w * p_.l0() * ((i == 0 || i == p_.N) ? 0.5 : 1.0);
+    if (ca) ca->assign(r.size(), 0.0);
+    if (aw) aw->assign(r.size(), Vec3());
+    const double wSub = p_.w;
+    for (int i = 0; i <= N; ++i) {
+        const bool end = (i == 0 || i == N);
+        f[i].z -= nodeWeight(r, i);
+        if (env_.hydro) {
+            const double phi = submergedFraction(r, i);
+            if (phi > 0.0) {
+                // Tangent from neighbours; stretched tributary length carries the (1+eps) of Eqs. 3.27-3.29.
+                const Vec3 dt = i == 0 ? r[1] - r[0] : (i == N ? r[N] - r[N - 1] : r[i + 1] - r[i - 1]);
+                const double ndt = norm(dt);
+                const Vec3 tg = ndt > 0.0 ? dt / ndt : Vec3(1, 0, 0);
+                const double Ls = 0.5 * ((i > 0 ? len[i - 1] : 0.0) + (i < N ? len[i] : 0.0));
+                Vec3 vw, a_w;
+                if (env_.water) env_.water(r[i], t, vw, a_w);
+                f[i] += morisonDrag(vw - v[i], tg, p_.Cdt, p_.Cdn, env_.rho_w, p_.D0, Ls) * phi;
+                if (ca) (*ca)[i] = phi * p_.Cm * env_.rho_w * p_.nominalArea() * Ls;
+                if (aw) (*aw)[i] = a_w;
+            }
+        }
+        if (env_.seabed) {
+            const double pen = env_.seabedZ - r[i].z;
+            if (pen > 0.0) {
+                ++stats_.soilContactEvals;
+                SoilParams sp = p_.soil;
+                sp.Ks = std::min(sp.Ks, ksCap_);
+                f[i] += seabedForce(sp, p_.D1, p_.m_l, wSub, pen, v[i], p_.l0() * (end ? 0.5 : 1.0));
+            }
+        }
+    }
 }
 
 Vec3 LumpedMassCable::endTension(bool top) const {
@@ -63,7 +109,7 @@ Vec3 LumpedMassCable::endTension(bool top) const {
 Vec3 LumpedMassCable::endForce(bool top) const {
     std::vector<Vec3> f;
     const std::vector<Vec3> vz(r_.size());
-    computeForces(r_, v_.size() == r_.size() ? v_ : vz, f);
+    computeForces(r_, v_.size() == r_.size() ? v_ : vz, t_, f);
     return top ? f[p_.N] : f[0];
 }
 
@@ -80,8 +126,12 @@ RelaxResult LumpedMassCable::relaxStatic(const RelaxOptions& opt) {
     const std::vector<Vec3> vz(n);                // fictitious velocities must not feed c_int damping
     const double tol = opt.forceTol * std::max(p_.w, 1e-12) * p_.l0();
     double keOld = 0.0;
+    // Soil stiffness is capped so that the node contact stiffness equals the axial one (EA/l0); the
+    // equilibrium penetration becomes w l0^2/EA instead of w/(Ks D1) - both negligible - and the
+    // relaxation stays stable. Dynamic runs use the true Ks.
+    ksCap_ = p_.D1 > 0.0 ? p_.EA / (p_.l0() * p_.l0() * p_.D1) : 1e300;
     for (long k = 0; k < opt.maxSteps; ++k) {
-        computeForces(r_, vz, f);
+        computeForces(r_, vz, t_, f);
         double ke = 0.0, rmax = 0.0;
         for (int i = 1; i < p_.N; ++i) {          // end nodes fixed
             v[i] += f[i] * (res.dt / mFict);
@@ -99,6 +149,7 @@ RelaxResult LumpedMassCable::relaxStatic(const RelaxOptions& opt) {
         }
         keOld = ke;
     }
+    ksCap_ = 1e300;
     return res;
 }
 
@@ -111,6 +162,13 @@ double LumpedMassCable::stableDt() const {
     double dt = dyn_.cfl * p_.l0() / p_.waveSpeed();                      // axial wave CFL
     // Explicit internal damping (c_int/l0 per segment, up to 4 c_int/(m_l l0^2) per node) adds its own limit.
     if (p_.c_int > 0.0) dt = std::min(dt, dyn_.cfl * p_.m_l * p_.l0() * p_.l0() / (2.0 * p_.c_int));
+    if (env_.seabed && p_.soil.Ks > 0.0 && p_.D1 > 0.0) {
+        // Contact oscillator: omega^2 = Ks D1 / m_l (independent of l0); largest eigenvalue magnitude
+        // of the damped spring is omega (zeta + sqrt(zeta^2 - 1)) for zeta >= 1, omega otherwise.
+        const double om = std::sqrt(p_.soil.Ks * p_.D1 / p_.m_l), z = p_.soil.zeta;
+        const double lam = om * (z > 1.0 ? z + std::sqrt(z * z - 1.0) : 1.0);
+        dt = std::min(dt, dyn_.cfl * 2.0 / lam);
+    }
     return dt;
 }
 
@@ -124,9 +182,23 @@ void LumpedMassCable::acceleration(std::vector<Vec3>& r, std::vector<Vec3>& v, d
     const int N = p_.N;
     r[0] = r_[0]; v[0] = Vec3();                   // anchor fixed
     if (top_) top_(t, r[N], v[N]);                 // otherwise the top end is held where it is
+    std::vector<double> ca;
+    std::vector<Vec3> aw;
     std::vector<Vec3>& f = a;
-    computeForces(r, v, f);
-    for (int i = 1; i < N; ++i) f[i] = f[i] / nodeMass(i);
+    computeForces(r, v, t, f, &ca, &aw);
+    for (int i = 1; i < N; ++i) {
+        const double m = nodeMass(i);
+        if (ca[i] > 0.0) {
+            // Added mass: M = m I + ca (I - t t^T), RHS carries ca (I - t t^T) a_w (Eq. 3.27 with a_rel = a_w - a).
+            const Vec3 dt = r[i + 1] - r[i - 1];
+            const double ndt = norm(dt);
+            const Vec3 tg = ndt > 0.0 ? dt / ndt : Vec3(1, 0, 0);
+            const Vec3 awn = aw[i] - tg * dot(aw[i], tg);
+            f[i] = addedMassSolve(m, ca[i], tg, f[i] + awn * ca[i]);
+        } else {
+            f[i] = f[i] / m;
+        }
+    }
     f[0] = Vec3(); f[N] = Vec3();
 }
 
