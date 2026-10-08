@@ -1154,6 +1154,80 @@ against the full demo suite; both options live entirely within
 `updateLayerMomentum()`'s existing friction branch and are never reached
 unless explicitly enabled.
 
+### Data-driven closure correction (`SolverOptions::enableDataDrivenClosureCorrection`)
+
+Off by default. Motivated directly by this codebase's own 349-case
+quantitative validation (see VALIDATION.md): predicted holdup tracks
+measured holdup well in the stratified-like regime (MAE 0.09 on Kokal
+1987's 168 cases, 0.11 on Newton 1997's 55) but degrades sharply closer
+to the slug/annular transition (MAE 0.30 across 21 independent
+Mendeley-archived campaigns, 126 cases) -- exactly the regime where
+`interfacialCorrelation`'s `AndreussiPersen1987` branch applies its
+enhancement above the baseline gas-wall friction factor (active once the
+Kelvin-Helmholtz parameter F exceeds the correlation's own F0=0.36
+threshold). This option rescales *only* that enhancement:
+`fi_corrected = fgw + closureCorrectionScale * (fi - fgw)`, a no-op
+wherever a case is far enough from the transition that `fi == fgw`
+already, and identical to the unmodified closure when
+`closureCorrectionScale == 1.0` (its default) even with the option
+enabled.
+
+**Methodology.** `closureCorrectionScale` was fit by a direct line
+search against the real experimental data itself, not assumed:
+training only against Kokal 1987 + Newton 1997 (223 cases), evaluating
+on the fully independent 126-case Mendeley set never used for fitting --
+a genuine generalization test (different experimental campaigns
+entirely), not a random split that could leak similar operating
+conditions between the two sides.
+
+**Result: a clean negative finding, reported honestly rather than
+tuned until something looked like a win.**
+
+| scale | train MAE (223 cases) | test MAE (126 held-out Mendeley cases) |
+|---|---|---|
+| 0.0 (no enhancement at all) | 0.1004 | **0.2887** |
+| 0.5 | 0.0969 | -- |
+| 1.0 (unmodified closure, default) | 0.0960 | 0.3032 |
+| 1.6 | 0.0953 | -- |
+| **2.0 (best on train)** | **0.0944** | 0.3047 |
+| 2.5 | 0.0945 | -- |
+| 3.0 | 0.0953 | 0.2985 |
+
+Two things stand out, both against a single-parameter rescaling being a
+useful fix. First, the training-set response is nearly flat and
+non-monotonic across more than a 10x range of the scale parameter (0.0
+to 3.0): every value from 1.6 to 3.0 clusters within about 1% of the
+best one found, which is the signature of noise, not a real
+relationship being tuned. Second, and decisively: the value that looks
+*best on the data it was fit to* (2.0) makes the held-out test set
+very slightly *worse* than doing nothing (0.3047 vs. the unmodified
+closure's 0.3032), while a value that looks *worse* on the training
+data (0.0, i.e. removing the enhancement entirely) gives the *lowest*
+test-set error of anything tried (0.2887) -- the opposite ranking on
+the two sets, exactly what overfitting a single scalar to 223 noisy
+data points looks like, not evidence that less (or more) interfacial-
+friction enhancement is the right physical fix.
+
+**Conclusion.** The remaining stratified-vs-slug accuracy gap this
+codebase's own validation work already identified is evidently *not*
+primarily attributable to the interfacial friction correlation's
+enhancement magnitude being miscalibrated by a single multiplicative
+factor -- rescaling it, however tuned, does not meaningfully close that
+gap on data it wasn't fit to. `closureCorrectionScale`'s default
+remains `1.0` (the unmodified closure) because no tested value
+actually generalized; the option is kept, and documented at this
+length, as a well-tested negative result and as reusable scaffolding
+(the train/test methodology, and `validate_quantitative`'s own
+`closureCorrectionScale` CLI argument used to run it) for whatever
+future, more structural correction -- a different functional form, a
+correction to F0 itself, or a fix addressing an entirely different
+closure -- might actually be needed to close this gap.
+
+**Confirmed:** regression-tested bit-for-bit identical `step()`
+behaviour against the full demo suite; the correction is applied at a
+single call site in `computeClosures()` and is a literal no-op whenever
+the option is disabled.
+
 ## Validation against experimental data
 
 **[VALIDATION.md](VALIDATION.md)** compares the solver's predicted flow

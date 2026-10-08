@@ -706,3 +706,30 @@ methodology, tables, and figures are in the paper (Section 7,
     result and as independently-verified, reusable closed-form building
     blocks, not as replacements. Regression-confirmed bit-for-bit
     identical `step()` behaviour throughout.
+13. **Done:** implemented `SolverOptions::enableDataDrivenClosureCorrection`,
+    rescaling only the `AndreussiPersen1987` interfacial friction
+    correlation's enhancement above the baseline gas-wall friction factor
+    -- see README.md, "Data-driven closure correction" for the full
+    account. Fit by a genuine train/test line search: trained on Kokal
+    1987 + Newton 1997 (223 cases), evaluated on the fully independent,
+    never-fit-against 126-case Mendeley set. Result is a clean negative
+    finding, reported as such rather than tuned until it looked like a
+    win: the training-set response to the scale parameter is nearly flat
+    and non-monotonic across a 10x range (0.0 to 3.0), and the value that
+    scores best on the training data (2.0, MAE 0.0944 vs. the unmodified
+    closure's 0.0960) makes the held-out test set very slightly *worse*
+    (0.3047 vs. 0.3032 unmodified), while a value that scores *worse* on
+    training (0.0, removing the enhancement entirely) gives the lowest
+    test error of anything tried (0.2887) -- opposite rankings on the two
+    sets, the classic signature of overfitting a single scalar to noise,
+    not a real physical relationship. Conclusion: the stratified-vs-slug
+    accuracy gap the "Quantitative validation" section above already
+    identified is not primarily attributable to this correlation's
+    enhancement *magnitude*
+    being miscalibrated by a single multiplicative factor; closing it
+    would need something more structural (a different functional form,
+    a correction to the F0=0.36 threshold itself, or a fix to an
+    entirely different closure). `closureCorrectionScale`'s default
+    stays at 1.0 (the unmodified closure) because no tested value
+    actually generalized. Regression-confirmed bit-for-bit identical
+    `step()` behaviour throughout.
