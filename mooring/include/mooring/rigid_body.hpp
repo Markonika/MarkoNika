@@ -2,6 +2,7 @@
 // Rigid-body platform with 6 DOF and multi-line fairlead coupling (milestone 7).
 #pragma once
 #include <array>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -92,6 +93,9 @@ public:
     // Residual generalised load at the current pose (lines solved statically), N and N m.
     Vec6 staticResidual();
 
+    // Time-dependent generalised load on the body (e.g. wave excitation, Eq. 3.60); added to the loads at every step.
+    void setExcitation(std::function<Vec6(double t)> f) { excitation_ = std::move(f); }
+
     // Start the time loop at time t0 from the current pose and velocity (lines assumed at rest/consistent).
     void begin(double t0 = 0.0);
     // One body step of size dt: velocity-Verlet for the body with implicit linear damping, lines sub-stepped
@@ -104,6 +108,7 @@ public:
 private:
     struct Slot { std::unique_ptr<CableModel> line; Vec3 a; std::string name; Vec3 force; };
     Vec6 externalLoad(const Vec6& xi, const std::vector<Vec3>& lineForces) const;
+    std::function<Vec6(double)> excitation_;
     RigidBody6DOF body_;
     std::vector<Slot> lines_;
     double t_{0.0};

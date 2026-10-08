@@ -117,3 +117,12 @@
     surge restoring force (surge imposed, other 5 DOF free) and for the heave/pitch stiffness of the mooring (+-0.01 m, +-1 deg).
 35. **Secant stiffness definition**: K(x) = -(F_x(x) - F_x(0))/x with the net line force at the free equilibrium subtracted (it is zero when there is no mean load).
     The thesis' Table 5.12 values carry no stated displacement; comparisons use the curves of its Fig. 5.21 (digitised by eye, about +-1.5 N/m).
+36. **Waves** (milestone 9): see docs/waves_validation.md. Linear Airy waves; Wheeler stretching of the kinematics (stretched linear accelerations);
+    submergence of nodes and point elements from the still-water level; no second-order forces; body excitation `f = w A sin(omega t + delta)` at the mean position.
+37. **Approx tolerance pitfall (found in milestone 9):** doctest's default `Approx` adds an absolute scale of 1.0, so a 'relative' epsilon on quantities of order 0.1
+    or smaller is effectively absolute. Milestone 9 tests use `.scale(0)` for such comparisons. All `Approx` uses of milestones 1-8 were re-checked: the low-valued ones
+    (soil friction forces 0.035-0.05 N, the ratio 0.7071, periods of 3-6 s) have effective tolerances of about 1e-5 absolute or 0.12-0.27 % relative instead of the nominal
+    0.1-0.2 %; the rest compare quantities of order 1 to 1e3 and are unaffected. No quoted result is based on such a tolerance: every number in the README and the docs comes from the
+    values printed by the tests, not from a pass/fail threshold.
+38. **Steady-state start for moored wave runs:** pose and velocity are initialised from the closed-form response of the free body (6-DOF model without lines)
+    because the surge-pitch mode needs ~1000 s to settle from rest. The remaining transient is the mooring-induced one; checked on CAT (60 s from rest vs 30 s from the steady state: same RAOs within 1 %).

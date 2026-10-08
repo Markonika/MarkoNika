@@ -1,5 +1,5 @@
 // Copyright (c) Marko Nika. All rights reserved. Proprietary and confidential.
-// Usage: paredes_report [dir_with_configs] [statics|stiffness|free|decay|all] [con1|con2|cat]
+// Usage: paredes_report [dir_with_configs] [statics|stiffness|free|decay|waves|all] [con1|con2|cat]
 #include <cstdio>
 #include <fstream>
 #include <string>
@@ -38,6 +38,13 @@ int main(int argc, char** argv) {
             std::printf("== %s surge: F0 = %.3f N;  x [m] / Fx [N] / K [N/m]:", n, k.F0);
             for (size_t i = 0; i < k.x.size(); ++i) std::printf("  (%.2f %.3f %.2f%s)", k.x[i], k.Fx[i], k.K[i], k.converged[i] ? "" : "!");
             std::printf("\n   heave Km = %.2f N/m, pitch Km = %.3f N m/rad\n", paredesHeaveStiffness(cfg), paredesPitchStiffness(cfg));
+        }
+        if (what == "waves") {
+            for (double T : {1.30, 1.40}) {
+                const ParedesRAO r = paredesWaveRAO(cfg, T, 0.08, 30.0, 15);
+                std::printf("== %s regular waves H = 0.08 m, T = %.2f s: RAO surge %.3f, heave %.3f, pitch/(ka) %.3f (mean surge offset %.4f m)\n", n, T, r.surge, r.heave, r.pitch, r.meanSurge);
+                std::fflush(stdout);
+            }
         }
         if (all || what == "decay") {
             std::printf("== %s surge decay: T_d = %.3f s\n", n, paredesDecayPeriod(cfg, 0, 0.1, 45.0, 2e-3));

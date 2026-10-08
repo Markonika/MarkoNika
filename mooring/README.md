@@ -9,7 +9,7 @@ the GPL `LICENSE` at the repository root belongs to the profile repository, not 
 Warnings: `-Wall -Wextra -Wpedantic`. Dependencies: see `THIRD_PARTY.md`.
 
 ## Status
-Milestones 1-8 done (static solver, dynamics, hydrodynamics + seabed, Chalmers validation, planar/3D regression, point elements, 6-DOF platform with multi-line coupling, Paredes free-buoy and moored-buoy validation).
+Milestones 1-9 done (static solver, dynamics, hydrodynamics + seabed, Chalmers validation, planar/3D regression, point elements, 6-DOF platform with multi-line coupling, Paredes free-buoy and moored-buoy validation, Airy/Wheeler wave module with regular-wave RAOs).
 
 | Test (milestone 1) | Result |
 |---|---|
@@ -47,13 +47,16 @@ Milestones 1-8 done (static solver, dynamics, hydrodynamics + seabed, Chalmers v
 | Paredes moored statics, CON1 / CON2 / CAT (no tuning) | leg tension 2.75 / 10.9-11.0 / 2.93 N vs 2.8-3.1 / 10.6-11.0 / 3.0-3.1 N; draft change +0.6 / +12.9 / +3.4 mm vs +1 / +13 / +4 mm |
 | Paredes surge secant stiffness vs thesis Fig. 5.21 curves | CON2 within 3 %, CAT 7-10 % low (U-shape reproduced), **CON1 15-19 % low** (all below the 41 N/m design value, as measured) |
 | Paredes damped surge periods CON1 / CON2 / CAT | 9.286 / 9.207 / 9.349 s vs 8.561 / 9.22 / 9.14 s (+8.5 % / -0.1 % / +2.3 %) |
+| Wave module verification (dispersion, Airy/Wheeler kinematics, superposition) | exact to 1e-6 .. 1e-12; Wheeler acceleration within 3.6 % of A w^2 of the exact derivative |
+| Free buoy in regular waves (Table 3.4) vs closed-form RAO | agree to < 1e-3 (steady-state start: 8.6e-6) |
+| Moored buoy RAO at T = 1.3 / 1.4 s vs thesis Figs 5.22-5.24 (read by eye) | heave 10-21 % low (6/6 within the 25 % criterion); pitch 3/6 within 30 % (CAT 35-50 % low); **surge over-predicted by 14 % to 3x** - see docs/waves_validation.md |
 | Support reactions, static line | vertical sum = weight (1e-6), horizontal sum = 0 |
 
 Details: `docs/chalmers_validation.md` (results, convergence, caveats), `docs/config.md` (configuration fields).
 Run the Chalmers case: `build/mooring_run examples/chalmers/chalmers_config.json`; full grid:
 `ctest --test-dir build -R chalmers_grid` or `scripts/chalmers_grid.py OUTDIR` (plots need matplotlib; analysis only).
 
-Paredes benchmark: `build/paredes_report examples/paredes` (details and caveats: `docs/paredes_validation.md`).
+Waves: `docs/waves_validation.md`. Paredes benchmark: `build/paredes_report examples/paredes` (details and caveats: `docs/paredes_validation.md`).
 Platform: `build/mooring_platform examples/platform/three_leg_example.json` (config fields in `docs/config.md`).
 
 ## Equation-to-code map

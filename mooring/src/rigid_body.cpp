@@ -137,6 +137,7 @@ void CoupledSystem::begin(double t0) {
         lf[i] = s.force;
     }
     Fnow_ = externalLoad(body_.xi, lf);
+    if (excitation_) { const Vec6 e = excitation_(t0); for (int k = 0; k < 6; ++k) Fnow_[k] += e[k]; }
     Vec6 F = Fnow_;
     const Mat6 Bm = body_.params().B;
     const Vec6 Bv = Bm * body_.xiDot;
@@ -164,6 +165,7 @@ void CoupledSystem::step(double dt) {
         dtLineMin = std::min(dtLineMin, s.line->internalTimeStep());
     }
     Fnow_ = externalLoad(body_.xi, lf);
+    if (excitation_) { const Vec6 e = excitation_(tNew); for (int k = 0; k < 6; ++k) Fnow_[k] += e[k]; }
 
     // v_{n+1}: (M + dt/2 B) v = M vh + dt/2 (F - Dq|vh|vh)
     Vec6 rhs = body_.totalMass() * vh;

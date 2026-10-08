@@ -7,6 +7,7 @@
 #include <fstream>
 #include <stdexcept>
 #include "mooring/case_runner.hpp"
+#include "mooring/waves.hpp"
 #include "mooring/lumped_mass_cable.hpp"
 
 namespace mooring {
@@ -47,6 +48,31 @@ std::unique_ptr<CoupledSystem> buildCoupledSystem(const json& cfg, std::vector<s
     auto sysPtr = std::make_unique<CoupledSystem>(bp);
     CoupledSystem& sys = *sysPtr;
 
+    // Waves: Airy components (+ Wheeler stretching), used for the line/point-element kinematics and, with
+    // body.wave_force {w [N/m or N per m of amplitude], delta [rad]}, for the body excitation f_i = w_i A sin(omega t + delta_i) (Eq. 3.60).
+    std::shared_ptr<WaveField> waves;
+    if (cfg.contains("waves")) {
+        const json& jw = cfg["waves"];
+        const double depth = jw.at("depth_m");
+        const double surfaceZ = jw.value("surface_z_m", cfg.value("environment", json::object()).value("water_surface_z_m", 0.0));
+        waves = std::make_shared<WaveField>(depth, surfaceZ, jw.value("stretching", std::string("wheeler")) == "none" ? Stretching::None : Stretching::Wheeler);
+        for (const json& c : jw.at("components"))
+            waves->addComponent(c.contains("amplitude_m") ? c["amplitude_m"].get<double>() : 0.5 * c.at("height_m").get<double>(),
+                                c.at("period_s"), c.value("phase_rad", 0.0), c.value("direction_deg", 0.0));
+        waves->setRampTime(jw.value("ramp_time_s", 0.0));
+        if (jb.contains("wave_force")) {
+            const Vec6 w = vector6(jb["wave_force"], "w"), dl = vector6(jb["wave_force"], "delta");
+            const WaveComponent c0 = waves->components().at(0);          // the force coefficients belong to the first (regular) component
+            auto wp = waves;
+            sys.setExcitation([w, dl, c0, wp](double t) {
+                Vec6 F{};
+                const double r = wp->rampFactor(t);
+                for (int k = 0; k < 6; ++k) F[k] = w[k] * c0.amplitude * r * std::sin(c0.omega * t + dl[k]);
+                return F;
+            });
+        }
+    }
+
     const json jn = cfg.value("numerics", json::object());
     const json jinit = cfg.value("initial", json::object());
     sys.body().xi = vector6(jinit, "xi0");
@@ -61,6 +87,7 @@ std::unique_ptr<CoupledSystem> buildCoupledSystem(const json& cfg, std::vector<s
         }
         const Vec3 a = vec(jl.at("fairlead_body_m")), anchor = vec(jl.at("anchor_m"));
         std::unique_ptr<LumpedMassCable> cab = buildLine(lc, anchor, sys.body().pointPosition(a));
+        if (waves) { Environment e = cab->environment(); e.water = waves->asWaterField(); cab->setEnvironment(e); }
         if (jn.contains("cfl") || jn.contains("line_dt_s")) {
             DynOptions o; o.cfl = jn.value("cfl", 0.5); o.dt = jn.value("line_dt_s", 0.0);
             o.scheme = jn.value("scheme", std::string("rk4")) == "verlet" ? Scheme::Verlet : Scheme::RK4;
@@ -89,6 +116,7 @@ CoupledResult runCoupledCase(const json& cfg) {
             for (int k = 0; k < 6; ++k) sys.body().xi[k] += off[k];
             sys.staticResidual();
         }
+        if (jinit.contains("xi_dot0")) sys.body().xiDot = vector6(jinit, "xi_dot0");     // the equilibrium solve leaves the body at rest
     } else {
         sys.staticResidual();                                      // lines at their static shape for the given pose
     }

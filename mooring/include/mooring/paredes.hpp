@@ -33,4 +33,11 @@ double paredesPitchStiffness(const nlohmann::json& cfg, double deltaRad = 0.0174
 // sec. 5.5): time between the first and last crossing divided by the cycles in between. 0 if fewer than 3 crossings.
 double paredesDecayPeriod(nlohmann::json cfg, int dof, double offset, double tEnd, double dtBody);
 
+// Regular-wave response of a Paredes configuration: first-order amplitudes (least-squares fit at the wave frequency over the last
+// 'fitCycles' wave periods) of surge, heave and pitch, normalised as in the thesis (Figs 5.22-5.24): surge/a, heave/a, pitch/(k a).
+// Body coefficients A, B, wave force w, delta are those of Table 3.4 for T = 1.30 or 1.40 s (including the surge-pitch coupling).
+struct ParedesRAO { double surge{0}, heave{0}, pitch{0}; double a{0}, k{0}; bool finite{true}; double meanSurge{0}; };
+// steadyStart: initialise pose and velocity with the steady response of the free body (closed form) instead of starting from rest with a ramp.
+ParedesRAO paredesWaveRAO(nlohmann::json cfg, double period, double height, double tEnd, int fitCycles, double dtBody = 2e-3, bool steadyStart = true);
+
 }  // namespace mooring
