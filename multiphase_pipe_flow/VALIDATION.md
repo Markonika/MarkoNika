@@ -963,3 +963,28 @@ methodology, tables, and figures are in the paper (Section 7,
     whenever the option IS enabled), independent of this negative
     accuracy result. Regression-confirmed bit-for-bit identical `step()`
     behaviour throughout with the option off.
+20. **Done: slug tracking revisited more deeply (verdict unchanged, now
+    better supported), and a direct, decisive check on boundary
+    conditions.** See README.md, "Slug tracking, revisited more deeply,
+    and a direct check on boundary conditions" for the full account. The
+    slug-TRACKING (Lagrangian unit-cell) literature's own stated
+    limitation -- accuracy bottlenecked by closure laws, not by the
+    framework -- plus its fundamentally different architecture (a
+    chain of local steady-state solves advancing slug-by-slug in space,
+    not an Eulerian PDE) reconfirms the earlier verdict: not a good fit,
+    would mean a second solver, not an extension of this one. Separately,
+    the same literature pass flagged that this model class's known
+    ill-posedness can make results depend on boundary-perturbation
+    details -- tested directly rather than left as a plausible
+    alternative explanation for the holdup gap: `BoundaryConditions`'s
+    inlet disturbance amplitude (0.03 up to 0.95) and frequency (0.05 to
+    5 Hz, two orders of magnitude) were swept on the same three
+    worst-case Mendeley conditions at standard validation resolution
+    (N=60, no AMR). Result: zero effect -- all three stay pinned at their
+    usual thin-film value across the entire sweep. Confirms empirically,
+    not just by the earlier linear-theory argument, that the thin film is
+    a genuinely stable equilibrium no amount of boundary forcing can
+    dislodge at this resolution, and that the fine-resolution+AMR
+    bistability mechanism (items 17-18) is doing real, necessary work --
+    not standing in for a simpler boundary-condition fix. No solver code
+    changed for either check.

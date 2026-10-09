@@ -1770,6 +1770,61 @@ whenever the option IS enabled (e.g. a genuinely implicit treatment of
 this term, not attempted here), not merely a response to this specific
 negative result.
 
+#### Slug tracking, revisited more deeply, and a direct check on boundary conditions
+
+A deeper pass over the slug-TRACKING (as opposed to slug-CAPTURING)
+literature was done next, specifically to firm up the earlier dismissal
+rather than leave it a one-line judgment call. It holds up, now with more
+detail: the field's own meta-finding is that "the accuracy of slug
+tracking is limited due to the employed closure laws rather than a lack
+of physical representativeness of the 1D transient slug tracking
+concept" -- i.e. even the Lagrangian-tracking community's own best models
+(Rosa et al. 2015's extension of the basic unit-cell approach, adding
+slug-acceleration terms for elongated-bubble compression/expansion
+oscillations) are bottlenecked by the SAME kind of empirical closures
+(bubble-nose velocity `U_nose = W_eff * U_bendiksen`, slug-length
+distributions, a Taitel et al. 1990 unit-cell solve just to INITIALIZE
+each tracked slug) this codebase doesn't have and was never going to get
+for free. More importantly, it is architecturally a different thing
+entirely: a chain of local steady-state unit-cell solves advancing
+slug-by-slug in space, each one's output explicitly stored and fed in as
+the next slug's inlet data -- not an Eulerian PDE solved on a grid at
+all. Adopting it would mean building a second, separate solver, not
+extending this one. The original verdict (not a good fit, closures this
+codebase doesn't have) stands, now on firmer ground.
+
+The same literature pass surfaced something directly actionable, though:
+a paper on this model class's own ill-posedness notes that "ill-
+posedness can make the result depend on the perturbation details" --
+i.e. the SPECIFIC inlet disturbance (amplitude, frequency) this
+codebase's `BoundaryConditions::seedDisturbance` imposes could plausibly
+matter for which branch a run settles into, given this investigation's
+own established bistability finding (items 17-18: the SAME equations
+admit both a thin-film and a much-higher-holdup branch, reachable with
+the right starting point). This was checked directly, not left as a
+plausible-sounding alternative explanation: `disturbanceAmplitude` was
+swept from the default 0.03 up to 0.95 (a nearly full-swing periodic
+inlet oscillation) and `disturbanceFrequency` over two orders of
+magnitude (0.05 to 5 Hz), on the same three worst-case Mendeley
+conditions, at the STANDARD validation resolution (N=60, no AMR, no
+fine mesh). Result: no effect whatsoever -- all three cases stay pinned
+at their usual thin-film value (Brito 2012: 0.0205-0.0212 across the
+whole sweep; Baba 2017: 0.0315-0.0316; Ekinci 2015: 0.0435-0.0611)
+regardless of how hard or at what frequency the inlet is shaken. This is
+the expected, and now empirically CONFIRMED rather than merely assumed,
+consequence of the thin film being a genuinely linearly stable
+equilibrium (item 17's own KH-dispersion check): no boundary forcing,
+however large, pushes a linearly stable system away from its one stable
+state once the forcing transient passes -- the bistable branch found
+earlier is reachable only through the fine-resolution+AMR mesh mechanism
+that lets the NONLINEAR dynamics explore it, not through any amount of
+boundary-condition tuning at standard resolution. This closes off a
+real, literature-motivated alternative explanation with direct evidence
+rather than argument, and sharpens (rather than changes) the existing
+conclusion: the fine-resolution/AMR machinery is doing real, necessary
+work, not standing in for a simpler boundary-condition fix that was
+there all along.
+
 ## Validation against experimental data
 
 **[VALIDATION.md](VALIDATION.md)** compares the solver's predicted flow
