@@ -1,0 +1,16 @@
+[project]
+name = "fowt-stab"
+version = "0.0.1"
+description = "Reduced-order simulation of stabilisation methods for floating offshore wind turbines"
+requires-python = ">=3.10"
+dependencies = ["numpy>=2.0", "scipy"]
+
+[project.optional-dependencies]
+dev = ["pytest", "matplotlib"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
