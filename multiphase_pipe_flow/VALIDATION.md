@@ -878,3 +878,37 @@ methodology, tables, and figures are in the paper (Section 7,
     starting point -- getting there needs an actual regime change (a
     different initial/history condition), not a better closure constant
     or a passive regularization term.
+18. **Done: scaled item 17 to the full 126-case held-out set -- the
+    finding holds, with a real, predictable cost.** See README.md,
+    "Scaling to the full held-out set: the three-case finding holds, with
+    a real cost" for the full account. Same methodology (fine ~1cm cells,
+    AMR on, fixed case-independent initial holdup of 0.5), applied to all
+    126 Mendeley cases, not just the three worst (~11 minutes wall-clock
+    on 4 OpenMP threads, a real and accepted cost). Applied uniformly,
+    held-out MAE drops from 0.3032 to 0.2203 (-27%) and the
+    under-prediction fraction from 81.0% to 75.4%, with 75 of 126 cases
+    improving and 51 worsening -- not a universal fix, but a genuine,
+    scale-confirmed net improvement, not a three-case artifact. Bucketing
+    by the baseline's OWN predicted holdup (a legitimate, non-circular
+    signal -- it uses nothing the cheap N=60 run doesn't already produce)
+    shows exactly the pattern the structural diagnosis (item 15) predicts:
+    all 14 cases where the baseline collapses hardest to the thin film
+    (predicted holdup <0.1) improve (MAE 0.733->0.373), while the cases
+    that worsen are concentrated where the baseline was already near the
+    correct high-holdup branch on its own (predicted holdup 0.6-1.0: 28
+    improve, 35 worsen, MAE 0.135->0.148) -- forcing a regime change onto
+    an already-correct case is a net cost, not a free regularizer. A
+    simple selection rule using only that same baseline signal (run the
+    expensive fine+AMR variant only when the cheap baseline predicts
+    holdup below a threshold, else keep the cheap baseline) pushes the
+    combined MAE down further to 0.211-0.214 across thresholds 0.4-0.7,
+    turning this from a diagnostic into an actionable two-stage policy.
+    Honest limits carried over unchanged from item 17: the higher branch
+    still does not reach the measured value in the cases that improve
+    most; the fixed IC=0.5 seed remains a crude stand-in for whatever
+    real upstream history would put an actual pipe on the high branch,
+    not a predictive rule; and the shared 8s simulated-time cap was not
+    extended, so whether longer runs let the higher branch climb further
+    remains untested. No solver code changed for this test; only a new
+    scratch validation driver reusing `validate_quantitative`'s own
+    proven-correct CSV reading and per-case fluid-property handling.

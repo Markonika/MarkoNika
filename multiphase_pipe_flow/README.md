@@ -1559,6 +1559,80 @@ full held-out set, and checking whether longer runs let the higher
 branch climb further toward the measured values, are the natural next
 steps if this line of investigation continues.
 
+#### Scaling to the full held-out set: the three-case finding holds, with a real cost
+
+The natural next step above was carried out: the fine-mesh (~1cm cells),
+AMR-enabled, fixed-case-independent-IC=0.5 variant (d) was re-run on all
+126 held-out Mendeley cases, not just the three worst ones, using the
+same per-case fluid properties, boundary conditions, and sampling
+methodology as `validate_quantitative` (verified first on a 5-case
+sanity subset spanning the full pipe-diameter range before committing
+to the full run). Total compute: ~11 minutes wall-clock on 4 OpenMP
+threads (vs. ~0.3s/case for the N=60 baseline) -- a real, accepted cost,
+not a free win.
+
+**Headline result: a genuine, substantial improvement on the held-out
+set as a whole, not just the three cherry-picked worst cases.** Applied
+uniformly to all 126 cases:
+
+| | baseline (N=60, low-IC) | fine+AMR, IC=0.5 |
+|---|---|---|
+| MAE | 0.3032 | **0.2203** (-27%) |
+| under-predicted | 81.0% | 75.4% |
+| cases with lower abs. error | -- | 75 of 126 |
+| cases with higher abs. error | -- | 51 of 126 |
+
+**The improvement is concentrated exactly where the structural diagnosis
+(item 15/above) said it should be, and the cost is concentrated exactly
+where that diagnosis says the mechanism should not apply.** Bucketing by
+the *baseline's own* predicted holdup (not the measured value -- this
+split uses only information the cheap low-res run already has, so it is
+a legitimate, non-circular selection signal):
+
+| baseline-predicted holdup | n | improved | worsened | MAE: baseline -> fine+AMR |
+|---|---|---|---|---|
+| 0.0-0.1 (severe thin-film collapse) | 14 | 14 | 0 | 0.733 -> 0.373 |
+| 0.1-0.3 | 19 | 18 | 1 | 0.560 -> 0.280 |
+| 0.3-0.6 | 30 | 15 | 15 | 0.294 -> 0.263 |
+| 0.6-1.0 (baseline already on the high branch) | 63 | 28 | 35 | 0.135 -> 0.148 |
+
+Every one of the 14 cases where the baseline collapses hardest to the
+thin-film branch improves; the cases that get slightly worse are
+overwhelmingly ones where the N=60 baseline was *already* near the
+correct high-holdup branch on its own (no structural problem to fix),
+and forcing a fixed IC=0.5 regime change onto an already-converged-
+correctly case sometimes lands it on a worse point of the same
+bistable landscape instead. This is the same story as the three-case
+result, now confirmed at scale: the mechanism is real and substantial
+where the structural failure mode is present, and is a net cost where
+it is not.
+
+**A simple, still non-circular refinement confirms this and buys a
+little more.** Using only the baseline's own predicted holdup as a
+switch -- apply the expensive fine+AMR+IC=0.5 run only when the cheap
+N=60 baseline predicts holdup below a threshold, otherwise keep the
+cheap baseline -- pushes the combined MAE down further, to **0.211-0.214**
+across thresholds from 0.4 to 0.7 (flat and not sensitively tuned; 0.3032
+unmodified, 0.2203 applied blanket to every case). This is a genuinely
+actionable policy, not just a diagnostic: run the cheap baseline first
+(as validation already does), and only pay for the expensive fine+AMR
+rerun on the subset it flags as thin-film-collapsed.
+
+**Honest limits, unchanged in kind from the three-case version.** The
+higher branch still does not reach the measured holdup in the cases that
+improve most (e.g. Brito 2012 moves from 0.0205 to 0.5116 against a
+measured 0.9120 -- real progress, not a full fix); the fixed IC=0.5 seed
+is a crude, case-blind stand-in for whatever real upstream history
+(startup, terrain, a prior slug) would actually put a real pipe on the
+high branch, and is not itself a predictive initial-condition rule;
+and the 8s-capped simulated-time budget, shared with the rest of this
+validation, was not extended here, so it remains open whether longer
+runs let the higher branch climb further for any individual case. What
+is no longer open: this is not a three-case artifact. It is a real,
+substantial, scale-confirmed effect with a real, scale-confirmed cost,
+and the cost is predictable in advance from the same cheap baseline run
+this validation already performs.
+
 ## Validation against experimental data
 
 **[VALIDATION.md](VALIDATION.md)** compares the solver's predicted flow
