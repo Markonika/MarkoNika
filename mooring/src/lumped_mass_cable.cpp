@@ -6,10 +6,13 @@
 
 namespace mooring {
 
-double CableParams::waveSpeed() const { return std::sqrt(EA / m_l); }
+double CableParams::waveSpeed() const { return std::sqrt(rope.maxStiffness(EA) / m_l); }
 
 LumpedMassCable::LumpedMassCable(const CableParams& p, const Vec3& anchor, const Vec3& fairlead) : p_(p) {
-    if (p.N < 2 || p.L <= 0 || p.EA <= 0 || p.m_l <= 0) throw std::invalid_argument("invalid CableParams");
+    if (p.rope.nonlinear() && p_.EA <= 0) p_.EA = p.rope.curve[0][1] / p.rope.curve[0][0];   // initial slope as reference EA
+    if (p_.N < 2 || p_.L <= 0 || p_.EA <= 0 || p_.m_l <= 0) throw std::invalid_argument("invalid CableParams");
+    p_.rope.validate();
+    alpha_.assign(size_t(p_.N) * p_.rope.branches.size(), 0.0);
     r_.resize(p.N + 1);
     // Initial shape: straight chord with a parabolic sag matching the slack length.
     const Vec3 d = fairlead - anchor;
@@ -30,7 +33,24 @@ double LumpedMassCable::nodeMass(int i) const {
 
 double LumpedMassCable::segmentTension(const std::vector<Vec3>& r, int seg) const {
     const double eps = norm(r[seg + 1] - r[seg]) / p_.l0() - 1.0;
-    return eps > 0.0 ? p_.EA * eps : 0.0;
+    return eps > 0.0 ? std::max(0.0, segTension(seg, eps, 0.0)) : 0.0;
+}
+
+double LumpedMassCable::segTension(int seg, double eps, double epsDot) const {
+    double T = p_.rope.staticTension(p_.EA, eps);
+    if (!staticMode_) {
+        const size_t nb = p_.rope.branches.size();
+        for (size_t k = 0; k < nb; ++k) T += p_.rope.branches[k].K * (eps - alpha_[size_t(seg) * nb + k]);
+    }
+    return T + p_.c_int * epsDot;
+}
+
+void LumpedMassCable::resetInternalState() {
+    const size_t nb = p_.rope.branches.size();
+    for (int s = 0; s < p_.N && nb > 0; ++s) {
+        const double eps = norm(r_[s + 1] - r_[s]) / p_.l0() - 1.0;
+        for (size_t k = 0; k < nb; ++k) alpha_[size_t(s) * nb + k] = eps;
+    }
 }
 
 double LumpedMassCable::submergedFraction(const std::vector<Vec3>& r, int i) const {
@@ -73,12 +93,9 @@ void LumpedMassCable::computeForces(const std::vector<Vec3>& r, const std::vecto
         len[i] = norm(d);
         const double eps = len[i] / p_.l0() - 1.0;
         if (eps <= 0.0 || len[i] <= 0.0) { ++stats_.slackSegmentEvals; continue; }   // Eq. 3.25: T = 0
-        double T = p_.EA * eps;
-        if (p_.c_int != 0.0) {
-            const double epsDot = dot(d, v[i + 1] - v[i]) / (len[i] * p_.l0());
-            T += p_.c_int * epsDot;
-            if (T < 0.0) { T = 0.0; ++stats_.clippedTensionEvals; }
-        }
+        const double epsDot = p_.c_int != 0.0 ? dot(d, v[i + 1] - v[i]) / (len[i] * p_.l0()) : 0.0;
+        double T = segTension(i, eps, epsDot);
+        if (T < 0.0) { T = 0.0; ++stats_.clippedTensionEvals; }
         const Vec3 F = d * (T / len[i]);
         f[i] += F;
         f[i + 1] -= F;
@@ -154,10 +171,8 @@ double LumpedMassCable::endSegmentTension(bool top) const {
     const Vec3 d = r_[seg + 1] - r_[seg];
     const double len = norm(d), eps = len / p_.l0() - 1.0;
     if (eps <= 0.0 || len <= 0.0) return 0.0;
-    double T = p_.EA * eps;
-    if (p_.c_int != 0.0 && v_.size() == r_.size())
-        T = std::max(0.0, T + p_.c_int * dot(d, v_[seg + 1] - v_[seg]) / (len * p_.l0()));
-    return T;
+    const double epsDot = (p_.c_int != 0.0 && v_.size() == r_.size()) ? dot(d, v_[seg + 1] - v_[seg]) / (len * p_.l0()) : 0.0;
+    return std::max(0.0, segTension(seg, eps, epsDot));
 }
 
 bool LumpedMassCable::initTouchdownCatenary() {
@@ -199,17 +214,19 @@ RelaxResult LumpedMassCable::relaxStatic(const RelaxOptions& opt) {
     RelaxResult res;
     const int n = p_.N + 1;
     res.dt = 1.0;
-    const double mFict = opt.massFactor * res.dt * res.dt * p_.EA / p_.l0();
+    const double EAs = p_.rope.maxStaticStiffness(p_.EA);   // relaxed (static) stiffness governs the quasi-static relaxation
+    const double mFict = opt.massFactor * res.dt * res.dt * EAs / p_.l0();
+    staticMode_ = true;
     std::vector<Vec3> v(n), f(n);
     const std::vector<Vec3> vz(n);                // fictitious velocities must not feed c_int damping
     // Force scale for the convergence test: nodal weight, or (taut, weightless lines) a small fraction of the axial stiffness.
-    const double fScale = std::max({p_.w * p_.l0(), p_.m_l * p_.g * p_.l0(), 1e-7 * p_.EA});
+    const double fScale = std::max({p_.w * p_.l0(), p_.m_l * p_.g * p_.l0(), 1e-7 * EAs});
     const double tol = opt.forceTol * fScale;
     double keOld = 0.0;
     // Soil stiffness is capped so that the node contact stiffness equals the axial one (EA/l0); the
     // equilibrium penetration becomes w l0^2/EA instead of w/(Ks D1) - both negligible - and the
     // relaxation stays stable. Dynamic runs use the true Ks.
-    ksCap_ = p_.D1 > 0.0 ? p_.EA / (p_.l0() * p_.l0() * p_.D1) : 1e300;
+    ksCap_ = p_.D1 > 0.0 ? EAs / (p_.l0() * p_.l0() * p_.D1) : 1e300;
     for (long k = 0; k < opt.maxSteps; ++k) {
         computeForces(r_, vz, t_, f);
         double ke = 0.0, rmax = 0.0;
@@ -230,6 +247,8 @@ RelaxResult LumpedMassCable::relaxStatic(const RelaxOptions& opt) {
         keOld = ke;
     }
     ksCap_ = 1e300;
+    staticMode_ = false;
+    resetInternalState();
     v_.assign(r_.size(), Vec3());                  // the line is left at rest
     return res;
 }
@@ -257,6 +276,7 @@ void LumpedMassCable::setInitialState(const std::vector<Vec3>& r, const std::vec
     if (r.size() != r_.size() || v.size() != r_.size()) throw std::invalid_argument("state size mismatch");
     r_ = r; v_ = v; t_ = t0;
     if (p_.planar) for (size_t i = 0; i < r_.size(); ++i) { r_[i].y = r_[0].y; v_[i].y = 0.0; }
+    resetInternalState();
 }
 
 void LumpedMassCable::acceleration(std::vector<Vec3>& r, std::vector<Vec3>& v, double t,
@@ -298,6 +318,14 @@ void LumpedMassCable::step(double dt) {
     if (v_.size() != r_.size()) v_.assign(n, Vec3());
     if (top_) top_(t_, r_[N], v_[N]);
     std::vector<Vec3> a(n);
+    // Maxwell internal strains are held at their start-of-step values during the (RK4 / Verlet) stages and advanced exactly afterwards
+    // for a strain varying linearly over the step: first order in dt / tau (documented, docs/assumptions.md).
+    const size_t nb = p_.rope.branches.size();
+    std::vector<double> eps0;
+    if (nb > 0) {
+        eps0.resize(N);
+        for (int s = 0; s < N; ++s) eps0[s] = norm(r_[s + 1] - r_[s]) / p_.l0() - 1.0;
+    }
     if (dyn_.scheme == Scheme::Verlet) {
         acceleration(r_, v_, t_, a);
         std::vector<Vec3> vh = v_;
@@ -327,6 +355,11 @@ void LumpedMassCable::step(double dt) {
     }
     t_ += dt;
     if (top_) top_(t_, r_[N], v_[N]);
+    for (int s = 0; s < N && nb > 0; ++s) {
+        const double eps1 = norm(r_[s + 1] - r_[s]) / p_.l0() - 1.0;
+        for (size_t k = 0; k < nb; ++k)
+            alpha_[size_t(s) * nb + k] = RopeLaw::advanceAlpha(alpha_[size_t(s) * nb + k], eps0[s], eps1, dt, p_.rope.branches[k].tau);
+    }
     ++stats_.steps;
     if (observer_) observer_(*this);
 }
@@ -346,7 +379,7 @@ double LumpedMassCable::energy() const {
     }
     for (int i = 0; i < p_.N; ++i) {
         const double eps = norm(r_[i + 1] - r_[i]) / p_.l0() - 1.0;
-        if (eps > 0.0) E += 0.5 * p_.EA * eps * eps * p_.l0();
+        if (eps > 0.0) E += p_.rope.staticEnergy(p_.EA, eps) * p_.l0();
     }
     return E;
 }
@@ -373,6 +406,7 @@ Vec3 LumpedMassCable::forceOnBody(const Vec3& pos, const Vec3& vel, double t) {
 void LumpedMassCable::setFairlead(const Vec3& pos) {
     r_[p_.N] = pos;
     v_.assign(r_.size(), Vec3());
+    resetInternalState();
     fairInit_ = false;                             // next forceOnBody() restarts the fairlead interpolation
 }
 

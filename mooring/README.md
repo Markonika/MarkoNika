@@ -53,6 +53,7 @@ Milestones 1-9 done (static solver, dynamics, hydrodynamics + seabed, Chalmers v
 | Azcona et al. 2017 chain tests: static tension (Table 5) | 8.199 vs 8.13 N (+0.9 %), 15.02 vs 14.48 N (+3.7 %) |
 | Lopez-Olocco et al. 2022 clump-weight chain, max fairlead tension (Table 8) | clump-free 35 cases +2.0 % mean (worst +4.8 %); CW1 +0.8 %, CW2 -1.8 % (9 cases each); CW2 static rise +6.9 % vs paper ≈ +10 % |
 | Same, maximum fairlead tension, 6 dynamic cases (figure readings, +-0.5 N) | 5 of 6 within 1.6-6.7 %; snap case (conf. 2, 1.58 s) +29 % at 60 segments, 48-67 N across discretisations (not converged to better than ~+10-25 %) |
+| Rope law: piecewise-linear curve, Maxwell branch (stress relaxation, complex modulus), cable dynamic stiffness | exact / 1e-9 / 2e-3 / E' 0.03 %, E'' 0.5 % (no rope data yet) |
 | Support reactions, static line | vertical sum = weight (1e-6), horizontal sum = 0 |
 
 Details: `docs/chalmers_validation.md` (results, convergence, caveats), `docs/config.md` (configuration fields).
@@ -76,5 +77,6 @@ Platform: `build/mooring_platform examples/platform/three_leg_example.json` (con
 | 3.54-3.56 elastic catenary | `ElasticCatenary` (`src/catenary.cpp`) |
 
 ## Limitations (so far)
+Rope law is optional and unvalidated against rope tests (no hysteresis, mean-load dependence or creep; `docs/config.md`, assumptions item 43).
 Perfectly flexible cable (no bending/torsion/VIV); small-angle rigid-body dynamics (no quaternion/Euler nonlinearity), constant A and B, still water only (no wave kinematics until milestone 9), flat seabed, no soil dynamics beyond the spring-damper; momentum conservation not tested (ends are held).
 See `docs/assumptions.md`.

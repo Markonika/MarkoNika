@@ -43,9 +43,13 @@ std::unique_ptr<LumpedMassCable> buildLine(const json& cfg, const Vec3& anchor, 
     const json jsoil = cfg.value("soil", json::object());
     const json jn = cfg.value("numerics", json::object());
     CableParams p;
-    p.L = jl.at("length_m"); p.N = jl.at("segments"); p.EA = jl.at("EA_N");
+    p.L = jl.at("length_m"); p.N = jl.at("segments"); p.EA = jl.contains("EA_N") ? jl.at("EA_N").get<double>() : 0.0;
     p.m_l = jl.at("mass_per_length_kg_m"); p.g = get(jl, "gravity_m_s2", 9.81);
     p.c_int = get(jl, "internal_damping_Ns", 0.0);
+    if (jl.contains("tension_curve"))                 // [[strain, tension_N], ...] piecewise-linear static curve through (0,0)
+        for (const json& pt : jl["tension_curve"]) p.rope.curve.push_back({pt.at(0).get<double>(), pt.at(1).get<double>()});
+    if (jl.contains("maxwell_branches"))              // [{"K_N": ..., "tau_s": ...}, ...] viscoelastic branches
+        for (const json& b : jl["maxwell_branches"]) p.rope.branches.push_back({b.at("K_N").get<double>(), b.at("tau_s").get<double>()});
     p.D0 = get(jl, "hydro_diameter_m", 0.0); p.D1 = get(jl, "soil_diameter_m", p.D0);
     p.A1 = get(jl, "nominal_area_m2", 0.0);
     p.planar = get(jn, "planar", false);

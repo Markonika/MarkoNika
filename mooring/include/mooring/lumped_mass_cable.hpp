@@ -4,6 +4,7 @@
 #include <vector>
 #include "mooring/cable_model.hpp"
 #include "mooring/hydro.hpp"
+#include "mooring/rope.hpp"
 #include "mooring/vec3.hpp"
 
 namespace mooring {
@@ -15,6 +16,7 @@ struct CableParams {
     double m_l{0};       // mass per unit length [kg/m]
     double w{0};         // weight per unit length acting in -z [N/m] (submerged or dry, set by caller)
     double c_int{0};     // internal damping coefficient [N s], T = EA*eps + c_int*d(eps)/dt
+    RopeLaw rope;        // optional nonlinear static curve and Maxwell branches (see rope.hpp); EA is used when no curve is given
     double g{9.81};
     // Hydrodynamics (Eqs. 3.27-3.29). A1 = 0 means pi/4 D0^2.
     double D0{0}, D1{0}, A1{0};
@@ -28,7 +30,7 @@ struct CableParams {
     static double submergedWeight(double m_l, double rho_c, double rho_w, double g = 9.81) {
         return (rho_c - rho_w) / rho_c * m_l * g;
     }
-    double waveSpeed() const;   // c = sqrt(EA / m_l)
+    double waveSpeed() const;   // c = sqrt(EA / m_l); with a rope law the largest instantaneous stiffness is used
 };
 
 // Water kinematics at a point: velocity and acceleration of the water. Default is still water.
@@ -167,6 +169,8 @@ public:
     void setInitialState(const std::vector<Vec3>& r, const std::vector<Vec3>& v, double t0 = 0.0);
     // Advance to time tEnd with fixed sub-steps (last step shortened to land exactly on tEnd).
     void advanceTo(double tEnd);
+    // Reset the Maxwell internal strains to the current segment strains (zero branch force); done after the static solve.
+    void resetInternalState();
     double time() const { return t_; }
     const std::vector<Vec3>& velocities() const { return v_; }
     // Kinetic + elastic (eps>0) + gravitational energy [J]; excludes work done by the boundaries.
@@ -194,6 +198,9 @@ private:
     Environment env_;
     std::vector<PointElement> points_;
     StepObserver observer_;
+    std::vector<double> alpha_;   // Maxwell internal strains, segment-major [seg * nBranches + k]
+    bool staticMode_{false};      // ignore the Maxwell branches (relaxed state), used during the static relaxation
+    double segTension(int seg, double eps, double epsDot) const;   // unclipped rope tension of a segment
     double ksCap_{1e300};      // soil stiffness cap used only during static relaxation
     Vec3 fairPrevPos_, fairPrevVel_;
     double fairPrevT_{0.0};

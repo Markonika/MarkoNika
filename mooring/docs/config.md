@@ -11,6 +11,7 @@ configuration plus derived values, time step, slack/clipping/contact counters).
 | `line.density_kg_m3` | cable density -> submerged weight, Eq. 3.26 (else `line.weight_per_length_N_m`) |
 | `line.hydro_diameter_m` (D0), `line.soil_diameter_m` (D1), `line.nominal_area_m2` (A1, default pi/4 D0^2) | Morison / soil diameters |
 | `line.Cm`, `line.Cdt`, `line.Cdn` | added mass, tangential and normal drag coefficients |
+| `line.tension_curve`, `line.maxwell_branches` | optional rope law (below); `EA_N` may be omitted when a curve is given |
 | `line.internal_damping_Ns` | c_int in T = EA eps + c_int d(eps)/dt (0 = off; also the slack regularisation, logged) |
 | `environment.hydro`, `.seabed` | enable Morison forces + submerged weight; enable seabed |
 | `environment.rho_w_kg_m3`, `.water_surface_z_m`, `.seabed_z_m` | water density, still-water level, flat seabed height |
@@ -62,3 +63,8 @@ Elevation of a component is `A sin(omega t - k s + phase)` (s along the directio
 
 ### Point-element anisotropy keys (generic type)
 `Cd_t`, `area_t_m2`, `Cd_n`, `area_n_m2` (drag along/normal to the line; used when `Cd_t` or `Cd_n` is set) and `added_mass_t_kg`, `added_mass_n_kg` (anisotropic added mass). Absent keys keep the isotropic `Cd`/`area_m2`/`added_mass_kg` behaviour.
+
+### Rope law (nonlinear / viscoelastic axial behaviour)
+`line.tension_curve`: `[[strain, tension_N], ...]`, strictly increasing and positive, piecewise linear through (0, 0), last slope extrapolated; replaces `EA_N` (if both are given `EA_N` is only the reference stiffness).
+`line.maxwell_branches`: `[{"K_N": ..., "tau_s": ...}, ...]`, each a spring K in series with a dashpot (relaxation time tau) in parallel with the curve: tension = curve(eps) + sum K (eps - alpha), d alpha/dt = (eps - alpha)/tau.
+The relaxed (static) stiffness is the curve; the high-rate stiffness adds sum K. The static solve uses the relaxed state. Complex modulus of a branch: storage K w^2 tau^2 / (1 + w^2 tau^2), loss K w tau / (1 + w^2 tau^2).
