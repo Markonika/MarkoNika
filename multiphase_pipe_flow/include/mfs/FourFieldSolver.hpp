@@ -111,6 +111,52 @@ struct SolverOptions {
     // (depositionVelocity_used = 0.1 * closureDepositionVelocityScale).
     double closureDepositionVelocityScale = 1.0;
 
+    // A fourth closure knob, independent of (and NOT gated behind)
+    // enableDataDrivenClosureCorrection above -- the other three were
+    // each a single GLOBAL scalar, fit by directly line-searching
+    // against this project's own held-out validation data, and all
+    // found not to generalize (see VALIDATION.md, items 13-15). This one
+    // is motivated differently: a literature search specifically for
+    // richer, STATE-DEPENDENT closure inputs (rather than another global
+    // scalar) turned up Buist & Sanderse (CWI), who train a neural-
+    // network closure for a 1D two-fluid STRATIFIED pipe flow model
+    // against high-fidelity Gerris simulations and find that adding the
+    // LOCAL interfacial slope (dh1/dz) as a closure input -- not just
+    // point values of velocity/F the way AndreussiPersen1987 already
+    // uses -- measurably improves how well the closure reproduces
+    // high-fidelity dynamic behaviour, echoing older (1990s) work making
+    // interfacial shear an explicit function of interface waviness. This
+    // is a mechanical, deterministic reproduction of that IDEA (amplify
+    // the interfacial-friction enhancement by local slope), not a
+    // trained neural network -- the cheap sanity check before any
+    // learned-closure infrastructure would be worth building.
+    //
+    // Implementation (see FourFieldSolver.cpp, computeClosures()):
+    // letting fiUsed be whatever interfacialFrictionFactor() returns
+    // (after any enableDataDrivenClosureCorrection rescaling above, so
+    // the two mechanisms compose rather than compete),
+    //   fiFinal = fgw + (fiUsed - fgw) * (1 + interfacialSlopeCoefficient * |dh1/dz|)
+    // amplifying ONLY the enhancement above baseline gas-wall friction,
+    // by a factor that grows with how steeply the liquid height varies
+    // locally along the pipe -- near-zero for a gently varying
+    // stratified profile, large near a sharp wave front/forming slug
+    // nose, which is exactly the physical story (wave steepness/
+    // waviness increasing form drag) the cited 1990s closure and the
+    // CWI neural network's learned behaviour both point to. dh1/dz is
+    // built from the SAME per-cell liquid-height geometry
+    // (geom_[i].h1) already computed by computeGeometry() every step,
+    // at the SAME two-point centred difference updateLayerMomentum()
+    // uses for its own dh1dz -- no new geometric quantity, no new
+    // stencil. Off by default (interfacialSlopeCoefficient's value is
+    // irrelevant unless enableInterfacialSlopeClosure is true, matching
+    // this codebase's house convention of an explicit on/off switch
+    // rather than a defaults-to-neutral parameter alone); see
+    // VALIDATION.md for whether, and how, this generalizes under the
+    // same train/test methodology as the three closure-correction knobs
+    // above.
+    bool enableInterfacialSlopeClosure = false;
+    double interfacialSlopeCoefficient = 1.0;
+
     double courantTarget = 0.5;    // target Courant number, Eq. (23) requires < 1
     double minTimeStep = 1.0e-6;
     double maxTimeStep = 5.0e-2;

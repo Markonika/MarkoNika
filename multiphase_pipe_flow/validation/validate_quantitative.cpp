@@ -110,7 +110,8 @@ RunResult runOneCase(const Case& c, bool haveClosureScale, double closureScale,
                       bool haveF0Shift, double f0Shift,
                       bool haveDepositionScale, double depositionScale,
                       bool enableTurbVisc, bool haveMixingLength, double mixingLengthFraction,
-                      bool enableInterfacialPressureJump, bool haveCi, double Ci) {
+                      bool enableInterfacialPressureJump, bool haveCi, double Ci,
+                      bool enableInterfacialSlopeClosure, bool haveSlopeCoeff, double slopeCoeff) {
     const double D = c.D;
     const double L = std::clamp(60.0 * D, 0.6, 20.0);
     const int N = 60;
@@ -138,6 +139,10 @@ RunResult runOneCase(const Case& c, bool haveClosureScale, double closureScale,
     if (enableInterfacialPressureJump) {
         opt.enableInterfacialPressureJump = true;
         if (haveCi) opt.interfacialPressureJumpCoefficient = Ci;
+    }
+    if (enableInterfacialSlopeClosure) {
+        opt.enableInterfacialSlopeClosure = true;
+        if (haveSlopeCoeff) opt.interfacialSlopeCoefficient = slopeCoeff;
     }
     mfs::FourFieldSolver solver(D, L, N, fluid, opt);
     solver.setInclinationConstant(c.angle_deg * mfs::constants::pi / 180.0);
@@ -229,7 +234,7 @@ RunResult runOneCase(const Case& c, bool haveClosureScale, double closureScale,
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::cerr << "Usage: validate_quantitative <input.csv> <output.csv> [closureCorrectionScale] [closureF0Shift] [closureDepositionVelocityScale] [enableTurbulentViscosity(0|1)] [turbulentMixingLengthFraction] [enableInterfacialPressureJump(0|1)] [interfacialPressureJumpCoefficient]\n";
+        std::cerr << "Usage: validate_quantitative <input.csv> <output.csv> [closureCorrectionScale] [closureF0Shift] [closureDepositionVelocityScale] [enableTurbulentViscosity(0|1)] [turbulentMixingLengthFraction] [enableInterfacialPressureJump(0|1)] [interfacialPressureJumpCoefficient] [enableInterfacialSlopeClosure(0|1)] [interfacialSlopeCoefficient]\n";
         return 1;
     }
     const bool haveClosureScale = (argc >= 4);
@@ -244,6 +249,9 @@ int main(int argc, char** argv) {
     const bool enableInterfacialPressureJump = (argc >= 9) && std::stoi(argv[8]) != 0;
     const bool haveCi = (argc >= 10);
     const double Ci = haveCi ? std::stod(argv[9]) : 1.5;
+    const bool enableInterfacialSlopeClosure = (argc >= 11) && std::stoi(argv[10]) != 0;
+    const bool haveSlopeCoeff = (argc >= 12);
+    const double slopeCoeff = haveSlopeCoeff ? std::stod(argv[11]) : 1.0;
     const auto cases = readCases(argv[1]);
 
     // Each case is an independent FourFieldSolver instance (no shared
@@ -261,7 +269,8 @@ int main(int argc, char** argv) {
         results[i] = runOneCase(cases[i], haveClosureScale, closureScale, haveF0Shift, f0Shift,
                                  haveDepositionScale, depositionScale, enableTurbVisc,
                                  haveMixingLength, mixingLengthFraction,
-                                 enableInterfacialPressureJump, haveCi, Ci);
+                                 enableInterfacialPressureJump, haveCi, Ci,
+                                 enableInterfacialSlopeClosure, haveSlopeCoeff, slopeCoeff);
 #ifdef _OPENMP
 #pragma omp critical
 #endif

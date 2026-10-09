@@ -279,9 +279,25 @@ void FourFieldSolver::computeClosures() {
                                    ? fgw + options_.closureCorrectionScale * (fi - fgw)
                                    : fi;
 
+        // See SolverOptions::enableInterfacialSlopeClosure: amplifies
+        // ONLY the enhancement above baseline gas-wall friction (fi-fgw,
+        // already possibly rescaled by closureCorrectionScale above) by
+        // a factor depending on the LOCAL interfacial slope dh1/dz --
+        // independent of, and composable with, the data-driven closure
+        // correction above (both act on the same fi-fgw difference, in
+        // sequence). A true no-op when disabled: fiFinal is a direct,
+        // untouched copy of fiUsed, not a separate computation that
+        // happens to reduce to the same value.
+        double fiFinal = fiUsed;
+        if (options_.enableInterfacialSlopeClosure) {
+            const double centerDz = std::max(state_.centerDistance(cL, cR), tiny);
+            const double dh1dz = (geom_[cR].h1 - geom_[cL].h1) / centerDz;
+            fiFinal = fgw + (fiUsed - fgw) * (1.0 + options_.interfacialSlopeCoefficient * std::fabs(dh1dz));
+        }
+
         tauW1_[f] = wallShearStress(flw, rhoL, ulO);
         tauW2_[f] = wallShearStress(fgw, rhoGf, ugO);
-        tauI_[f] = interfacialShearStress(fiUsed, rhoGf, ugO, ulO);
+        tauI_[f] = interfacialShearStress(fiFinal, rhoGf, ugO, ulO);
     }
 
     for (int i = 0; i < N; ++i) {
