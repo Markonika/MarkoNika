@@ -126,3 +126,7 @@
     values printed by the tests, not from a pass/fail threshold.
 38. **Steady-state start for moored wave runs:** pose and velocity are initialised from the closed-form response of the free body (6-DOF model without lines)
     because the surge-pitch mode needs ~1000 s to settle from rest. The remaining transient is the mooring-induced one; checked on CAT (60 s from rest vs 30 s from the steady state: same RAOs within 1 %).
+39. **Azcona et al. validation** (docs/azcona_validation.md): the amplitude of Table 1 ("0.25 m") is read as the peak-to-peak stroke (+-0.125 m), from the axes of Figs 5/6; seabed
+    stiffness 20 N/m^2 per length is Ks*D1 = 20; damping 0.1 Ns/m^2 gives zeta = 0.0426; "structural damping 0.1 %" is not implemented (c_int = 0); v_lim = 0.01 m/s and the friction law (weight-based, tangential only) are
+    this code's, not the paper's. Dynamic tensions of the paper exist only as figures: the comparison values were read by eye (+-0.5 N).
+40. New runner option `motion.type = "harmonic"` (sinusoidal top-end motion along `direction_vec`, cosine ramp).

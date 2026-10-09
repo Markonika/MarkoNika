@@ -1,0 +1,17 @@
+# Azcona et al. (2017) Ocean Eng. 129:415-427. "table" = printed in a table; "digitised" = read by eye from Figs 5/6 (mean markers), uncertainty about +-0.5 N.
+# Quantities are fairlead tension [N]. The paper gives no tabulated dynamic tensions.
+configuration,distance_d_m,period_s,quantity,value_N,source
+conf1,19.364,static,static_tension,8.13,table (Table 5)
+conf2,19.872,static,static_tension,14.48,table (Table 5)
+conf1,19.364,1.58,max,14.5,digitised (Fig 5)
+conf1,19.364,1.58,min,3.0,digitised (Fig 5)
+conf1,19.364,3.16,max,9.8,digitised (Fig 5)
+conf1,19.364,3.16,min,6.1,digitised (Fig 5)
+conf1,19.364,4.74,max,9.2,digitised (Fig 5)
+conf1,19.364,4.74,min,7.3,digitised (Fig 5)
+conf2,19.872,1.58,max,44.5,digitised (Fig 6)
+conf2,19.872,1.58,min,1.5,digitised (Fig 6; the text says the measured tension is 0 for almost half the period)
+conf2,19.872,3.16,max,23.5,digitised (Fig 6)
+conf2,19.872,3.16,min,7.5,digitised (Fig 6)
+conf2,19.872,4.74,max,19.5,digitised (Fig 6)
+conf2,19.872,4.74,min,11.0,digitised (Fig 6)

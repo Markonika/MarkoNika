@@ -140,6 +140,17 @@ CaseResult runCase(const json& cfg) {
             pos = centre + e * (radius * rho);
             vel = e * (radius * drho) + de * (radius * rho);
         });
+    } else if (mtype == "harmonic") {
+        // Sinusoidal motion along 'direction_vec' about the rest position: x = A rho(t) sin(2 pi t/T + phase), cosine ramp over ramp_cycles.
+        Vec3 dv = jm.contains("direction_vec") ? vec(jm["direction_vec"]) : Vec3(1, 0, 0);
+        dv = dv / norm(dv);
+        cable.setTopMotion([=](double t, Vec3& pos, Vec3& vel) {
+            double rho = 1.0, drho = 0.0;
+            if (t < Tramp) { rho = 0.5 * (1.0 - std::cos(kPi * t / Tramp)); drho = 0.5 * kPi / Tramp * std::sin(kPi * t / Tramp); }
+            const double th = phase + om * t;
+            pos = centre + dv * (radius * rho * std::sin(th));
+            vel = dv * (radius * (drho * std::sin(th) + rho * om * std::cos(th)));
+        });
     } else if (mtype != "none") {
         throw std::invalid_argument("unknown motion type: " + mtype);
     }

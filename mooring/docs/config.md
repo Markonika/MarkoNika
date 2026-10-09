@@ -17,7 +17,7 @@ configuration plus derived values, time step, slack/clipping/contact counters).
 | `soil.stiffness_Pa_per_m`, `.damping_factor`, `.friction`, `.v_lim_m_s` | Ks, zeta_s, mu_s, v_lim (Eqs. 3.32-3.36) |
 | `anchor_m`, `fairlead_rest_m` | anchor (fixed) and top end at rest |
 | `initial.shape` | `touchdown` (catenary lying on the bed, then static relaxation) |
-| `motion.type` | `none` or `circle_xz` (top end on a circle about `centre_m`, default = rest position) |
+| `motion.type` | `none`, `circle_xz` or `harmonic` (sinusoidal along `direction_vec`, amplitude `radius_m`) (top end on a circle about `centre_m`, default = rest position) |
 | `motion.plane_angle_deg` | rotates the circle plane about the vertical axis (set `fairlead_rest_m` consistently) |
 | `environment.current_m_s` | uniform steady current vector [m/s] (drag only; also applied in the static solve) |
 | `initial.perturbation_y_m` | out-of-plane half-sine perturbation of the relaxed line, released from rest (3D only) |

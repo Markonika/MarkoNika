@@ -1,5 +1,7 @@
 # Candidate experimental data for further validation
 
+**Update 2026-10-09:** a first fetch was done; see `docs/validation_data_status.md` (Azcona et al. used in `docs/azcona_validation.md`; the TU Delft data and the Lopez-Olocco paper could not be obtained; the NLR data archive was not downloaded).
+
 Compiled from web search results on 2026-10-08. **Nothing here was opened or downloaded**: every host (4TU, MHKDR, Zenodo, MDPI, UPM, TU Delft, DOE A2e)
 was unreachable from the development environment (network policy). Licences, file formats, channel lists, sample rates and whether files are downloadable are
 therefore **unconfirmed** unless a row says otherwise. Statements below are what the search results said, not checked facts. Links were returned by the search and not tested.

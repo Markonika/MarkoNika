@@ -1,0 +1,69 @@
+{
+ "_comment": "Azcona et al. (2017) Ocean Eng. 129:415, submerged chain at ECN, conf2. Tables 1-5, Fig. 3. SI units. Assumptions: see docs/azcona_validation.md",
+ "line": {
+  "length_m": 21.0,
+  "segments": 60,
+  "EA_N": 340000.0,
+  "mass_per_length_kg_m": 0.069,
+  "density_kg_m3": 7850.0,
+  "hydro_diameter_m": 0.0034,
+  "soil_diameter_m": 0.0034,
+  "Cm": 1.0,
+  "Cdt": 0.67,
+  "Cdn": 1.4,
+  "internal_damping_Ns": 0.0
+ },
+ "environment": {
+  "hydro": true,
+  "seabed": true,
+  "rho_w_kg_m3": 1000.0,
+  "water_surface_z_m": 5.0,
+  "seabed_z_m": 0.0
+ },
+ "soil": {
+  "stiffness_Pa_per_m": 5882.353,
+  "damping_factor": 0.04256,
+  "friction": 0.5,
+  "v_lim_m_s": 0.01
+ },
+ "anchor_m": [
+  0.0,
+  0.0,
+  0.0
+ ],
+ "fairlead_rest_m": [
+  19.872,
+  0.0,
+  5.0
+ ],
+ "initial": {
+  "shape": "touchdown"
+ },
+ "motion": {
+  "type": "harmonic",
+  "radius_m": 0.125,
+  "period_s": 1.58,
+  "direction_vec": [
+   1,
+   0,
+   0
+  ],
+  "ramp_cycles": 2.0,
+  "cycles": 12.0
+ },
+ "numerics": {
+  "scheme": "rk4",
+  "cfl": 0.5,
+  "dt_s": 0.0,
+  "relax_force_tol": 1e-06
+ },
+ "statistics": {
+  "first_cycle": 6
+ },
+ "output": {
+  "directory": "out/azcona_conf2",
+  "tag": "conf2",
+  "dt_out_s": 0.005,
+  "write": true
+ }
+}
