@@ -1825,6 +1825,73 @@ conclusion: the fine-resolution/AMR machinery is doing real, necessary
 work, not standing in for a simpler boundary-condition fix that was
 there all along.
 
+#### The interfacial-slope closure input: a quick, honest sanity check, same verdict as before
+
+A deeper RL/ML-closures literature search turned up a more promising-
+sounding idea than another global scalar: Buist & Sanderse (CWI) train a
+neural-network closure for a 1D two-fluid STRATIFIED pipe flow model
+against high-fidelity Gerris simulations, and report that adding the
+LOCAL interfacial slope (`dh1/dz`) as a closure input measurably
+improves agreement versus a conventional closure -- a genuinely
+different hypothesis from this project's first three closure knobs
+(items 13-15), each a single GLOBAL scalar with no spatial dependence at
+all. `SolverOptions::enableInterfacialSlopeClosure` implements the idea
+mechanically (not a trained network, deliberately -- the cheap sanity
+check before building any learned-closure infrastructure):
+`fiFinal = fgw + (fiUsed - fgw) * (1 + coefficient*|dh1/dz|)`, amplifying
+the SAME enhancement-above-baseline the other three knobs already target,
+now by a factor that grows with local interfacial steepness.
+
+Run through the identical train (Kokal 1987 + Newton 1997, 223 cases) /
+held-out test (Mendeley, 126 cases) methodology as items 13-15, sweeping
+the coefficient from 0 to 300:
+
+| coefficient | train MAE | held-out MAE | held-out under-pred |
+|---|---|---|---|
+| 0 (off) | 0.0960 | 0.3032 | 81.0% |
+| 1 | 0.0955 | 0.3024 | 81.0% |
+| 5 | 0.0953 | 0.3016 | 81.0% |
+| 20 | 0.0943 | 0.3012 | 81.0% |
+| 50 | 0.0943 | 0.3014 | 80.2% |
+| 100 | 0.0936 | **0.2986** | 80.2% |
+| 300 (train-best) | **0.0920** | 0.3107 | 83.3% |
+
+A small, genuine difference from the first three closure knobs: here,
+train and held-out improve TOGETHER (not oppositely) across most of the
+tested range -- a slightly less obviously-overfit-looking signal at
+first glance. But two things cut against treating this as a real
+finding. First, the effect size is tiny: the best held-out point found
+(coefficient=100, MAE 0.2986) is only a 1.5% relative improvement over
+the unmodified closure, nowhere near closing -- or even meaningfully
+narrowing -- the ~3x gap between this dataset's train MAE (~0.09-0.11)
+and held-out MAE (~0.30) that defines this project's actual documented
+problem. Second, the SAME overfitting signature items 13-15 already
+established reappears exactly where it would be expected: pushing to the
+train-OPTIMAL coefficient (300) makes held-out performance WORSE than
+doing nothing (0.3107 vs. 0.3032), the classic sign that the response is
+fitting noise in the training set rather than a real physical
+relationship, just at a different point along the sweep than the
+earlier three knobs showed it. The held-out under-prediction fraction
+barely moves either (81.0% -> 80.2% at best), confirming this closure
+tweak, like the other three, does not touch the STRUCTURAL slug-
+intermittency root cause the earlier diagnosis (item 15) already
+identified -- it only reshuffles error magnitude slightly among cases
+that are already mispredicted in the same direction.
+
+**Verdict: a fourth closure-tuning attempt, now testing a genuinely
+richer (state-dependent, literature-motivated) hypothesis rather than
+another global scalar, reaching the same conclusion as the first three.**
+`enableInterfacialSlopeClosure` defaults to `false` for this reason. This
+also sharpens the earlier literature-search framing: Buist & Sanderse's
+own reported gain is from a NEURAL NETWORK with access to the full
+nonlinear flexibility of a trained model, not from mechanically bolting
+the same one input onto an existing hand-derived correlation -- the
+mechanical version tested here is a fair cheap first look, but the
+result does not by itself justify building the fuller learned-closure
+infrastructure (train/test split against synthetic manufactured-solution
+data, held-out generalization checks, etc.) that would be the next step
+if this had shown a larger, more consistent effect.
+
 ## Validation against experimental data
 
 **[VALIDATION.md](VALIDATION.md)** compares the solver's predicted flow

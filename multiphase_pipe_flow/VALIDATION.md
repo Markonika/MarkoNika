@@ -988,3 +988,35 @@ methodology, tables, and figures are in the paper (Section 7,
     bistability mechanism (items 17-18) is doing real, necessary work --
     not standing in for a simpler boundary-condition fix. No solver code
     changed for either check.
+21. **Done: a fourth closure-tuning attempt (interfacial slope as a
+    closure input, not another global scalar) -- same verdict as the
+    first three, reached more carefully.** See README.md, "The
+    interfacial-slope closure input: a quick, honest sanity check, same
+    verdict as before" for the full account and table. Implemented
+    `SolverOptions::enableInterfacialSlopeClosure`, motivated by Buist &
+    Sanderse (CWI) finding that adding the local interfacial slope
+    `dh1/dz` as a closure input (not a global scalar, and not just point
+    values the way AndreussiPersen1987 already uses) improved a
+    stratified two-fluid model's agreement with high-fidelity Gerris
+    simulations. Run through the SAME train (223 cases)/held-out test
+    (126 cases) methodology as items 13-15: a real but small difference
+    from the earlier three knobs is that train and held-out MAE improve
+    TOGETHER across most of the swept range, not oppositely -- but the
+    effect size is tiny (best held-out point: 0.2986 vs. 0.3032
+    unmodified, a 1.5% relative change, nowhere close to the ~3x train/
+    held-out gap this project is actually trying to close), the SAME
+    overfitting signature reappears at the train-optimal coefficient
+    (held-out MAE 0.3107, WORSE than doing nothing), and the held-out
+    under-prediction fraction barely moves (81.0% -> 80.2% at best) --
+    confirming this does not touch the structural slug-intermittency
+    root cause (item 15) any more than the first three closure knobs did.
+    `enableInterfacialSlopeClosure` defaults to `false` for this reason.
+    Also clarifies scope for any future closure-learning work: the cited
+    paper's own reported gain comes from a trained NEURAL NETWORK's full
+    nonlinear flexibility, not from mechanically bolting one new input
+    onto an existing hand-derived correlation the way this quick check
+    did -- a fair first look, but this result alone does not justify
+    building the fuller learned-closure infrastructure that would be the
+    natural next step after a more encouraging first look. Regression-
+    confirmed bit-for-bit identical `step()` behaviour throughout with
+    the option off.
