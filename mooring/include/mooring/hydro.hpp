@@ -23,6 +23,12 @@ inline Vec3 morisonDrag(const Vec3& vrel, const Vec3& t, double Cdt, double Cdn,
             vn * (0.5 * Cdn * rho * D * norm(vn))) * len;
 }
 
+// Same with different tangential and normal masses: M^-1 = t t^T / mt + (I - t t^T) / mn.
+inline Vec3 addedMassSolve2(double mt, double mn, const Vec3& t, const Vec3& f) {
+    const Vec3 ft = t * dot(f, t);
+    return ft / mt + (f - ft) / mn;
+}
+
 struct SoilParams {
     double Ks{0};      // soil stiffness per unit length and diameter [Pa/m = N/m^3]
     double zeta{1.0};  // damping factor

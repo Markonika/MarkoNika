@@ -61,6 +61,11 @@ struct PointElement {
     double Cd{0};
     double area{0};     // drag reference area [m^2]
     double Cm{0};
+    // Optional anisotropic body (e.g. a disc on a chain: broadside along the line, edge-on across it). If CdT >= 0 or CdN >= 0 the isotropic
+    // Cd/area above are ignored for drag and Cm for added mass: drag = 0.5 rho (CdT areaT |v_t| v_t + CdN areaN |v_n| v_n) and the
+    // added mass is the given mass [kg] along (maTan) and across (maNorm) the line tangent, both scaled by the submerged fraction.
+    double CdT{-1}, areaT{0}, CdN{-1}, areaN{0};
+    double maTan{0}, maNorm{0};
 
     // Floater from its buoyancy force [N] (net upward in water when only the volume is counted) and diameter (sphere).
     static PointElement floater(int node, double mass, double buoyancyN, double D, double Cd, double rho_w = 1000.0,

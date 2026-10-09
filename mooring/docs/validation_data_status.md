@@ -5,6 +5,7 @@ Fetched by opencode following `docs/opencode_fetch_prompt.md` and uploaded for a
 | id | received | verdict |
 |---|---|---|
 | `azcona2017` | open-access PDF (35 pages), opencode summary and test matrix | **used**: `docs/azcona_validation.md`. Its test matrix lists case 3 as "harmonic" (the paper calls 1.58 s the Snap Condition for both configurations) and d = 19.870 (Table 1: 19.872); the paper's numbers were taken from the PDF. |
+| `lopezolocco2022` | paper PDF (supplied directly) | **used**: `docs/lopezolocco_validation.md` (Tables 8/9 transcribed). |
 | `lopezolocco2022` | summary only; **no paper** (MDPI blocked the download; the raw file is a 0-byte placeholder) | not usable yet. The paper is open access (CC BY 4.0): it needs a manual download of the PDF. The summary's "findings from citing papers" is second-hand and was not used. |
 | `nlr_mooring_1_100` | `Dastaset Description.pdf`, `Metadata.xlsx` (sheets: Channel List, Tank Testing Matrix, Spring Constants Test Matrix, Configuration Properties, Load Cell Layout), saved MHKDR page, CSV export of the configuration sheet; **not** the 4.75 GB data archive | metadata only. The opencode summary's table of line properties has shifted columns for the semi-taut configurations (missing `-` entries): read the CSV/xlsx, not the summary. See below for a targeted download. |
 | `tud_oc5_taut_leg` | metadata page and small scripts; data download failed (HTTP 503) | no data. Retry later or download manually from the 4TU dataset page. |

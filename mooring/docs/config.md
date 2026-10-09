@@ -59,3 +59,6 @@ Example: `examples/platform/three_leg_example.json` (generic, **not** the Parede
 | `body.wave_force.w`, `.delta` | 6 + 6 numbers: `f_i = w_i A sin(omega t + delta_i)` with A and omega of the first component (Eq. 3.60) |
 | `initial.xi_dot0` | initial body velocity; applied **after** the equilibrium solve as well |
 Elevation of a component is `A sin(omega t - k s + phase)` (s along the direction): at the origin A sin(omega t). The water velocity/acceleration feed the lines and point elements.
+
+### Point-element anisotropy keys (generic type)
+`Cd_t`, `area_t_m2`, `Cd_n`, `area_n_m2` (drag along/normal to the line; used when `Cd_t` or `Cd_n` is set) and `added_mass_t_kg`, `added_mass_n_kg` (anisotropic added mass). Absent keys keep the isotropic `Cd`/`area_m2`/`added_mass_kg` behaviour.

@@ -51,6 +51,7 @@ Milestones 1-9 done (static solver, dynamics, hydrodynamics + seabed, Chalmers v
 | Free buoy in regular waves (Table 3.4) vs closed-form RAO | agree to < 1e-3 (steady-state start: 8.6e-6) |
 | Moored buoy RAO at T = 1.3 / 1.4 s vs thesis Figs 5.22-5.24 (read by eye) | heave 10-21 % low (6/6 within the 25 % criterion); pitch 3/6 within 30 % (CAT 35-50 % low); **surge over-predicted by 14 % to 3x** - see docs/waves_validation.md |
 | Azcona et al. 2017 chain tests: static tension (Table 5) | 8.199 vs 8.13 N (+0.9 %), 15.02 vs 14.48 N (+3.7 %) |
+| Lopez-Olocco et al. 2022 clump-weight chain, max fairlead tension (Table 8) | clump-free 35 cases +2.0 % mean (worst +4.8 %); CW1 +0.8 %, CW2 -1.8 % (9 cases each); CW2 static rise +6.9 % vs paper ≈ +10 % |
 | Same, maximum fairlead tension, 6 dynamic cases (figure readings, +-0.5 N) | 5 of 6 within 1.6-6.7 %; snap case (conf. 2, 1.58 s) +29 % at 60 segments, 48-67 N across discretisations (not converged to better than ~+10-25 %) |
 | Support reactions, static line | vertical sum = weight (1e-6), horizontal sum = 0 |
 
@@ -58,7 +59,7 @@ Details: `docs/chalmers_validation.md` (results, convergence, caveats), `docs/co
 Run the Chalmers case: `build/mooring_run examples/chalmers/chalmers_config.json`; full grid:
 `ctest --test-dir build -R chalmers_grid` or `scripts/chalmers_grid.py OUTDIR` (plots need matplotlib; analysis only).
 
-Waves: `docs/waves_validation.md`. Candidate data for further validation: `docs/validation_data_candidates.md`, status of the fetch `docs/validation_data_status.md`, first comparison (Azcona et al. 2017 submerged chain) `docs/azcona_validation.md`. Paredes benchmark: `build/paredes_report examples/paredes` (details and caveats: `docs/paredes_validation.md`).
+Waves: `docs/waves_validation.md`. Candidate data for further validation: `docs/validation_data_candidates.md`, status of the fetch `docs/validation_data_status.md`, Lopez-Olocco 2022 clump-weight chain `docs/lopezolocco_validation.md`; first comparison (Azcona et al. 2017 submerged chain) `docs/azcona_validation.md`. Paredes benchmark: `build/paredes_report examples/paredes` (details and caveats: `docs/paredes_validation.md`).
 Platform: `build/mooring_platform examples/platform/three_leg_example.json` (config fields in `docs/config.md`).
 
 ## Equation-to-code map

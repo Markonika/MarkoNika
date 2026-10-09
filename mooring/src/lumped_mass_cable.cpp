@@ -121,7 +121,18 @@ void LumpedMassCable::computeForces(const std::vector<Vec3>& r, const std::vecto
         const double phi = submergedFraction(r, i);
         if (phi <= 0.0) continue;
         f[i].z += phi * env_.rho_w * p_.g * pe.volume;
-        if (pe.Cd > 0.0 && pe.area > 0.0) {
+        const bool aniso = pe.CdT >= 0.0 || pe.CdN >= 0.0;
+        if (aniso) {
+            Vec3 vw, a_w;
+            if (env_.water) env_.water(r[i], t, vw, a_w);
+            const Vec3 vr = vw - v[i];
+            const Vec3 dtv = i == 0 ? r[1] - r[0] : (i == N ? r[N] - r[N - 1] : r[i + 1] - r[i - 1]);
+            const double ndt = norm(dtv);
+            const Vec3 tg = ndt > 0.0 ? dtv / ndt : Vec3(1, 0, 0);
+            const Vec3 vt = tg * dot(vr, tg), vn = vr - vt;
+            f[i] += (vt * (0.5 * env_.rho_w * std::max(pe.CdT, 0.0) * pe.areaT * norm(vt)) +
+                     vn * (0.5 * env_.rho_w * std::max(pe.CdN, 0.0) * pe.areaN * norm(vn))) * phi;
+        } else if (pe.Cd > 0.0 && pe.area > 0.0) {
             Vec3 vw, a_w;
             if (env_.water) env_.water(r[i], t, vw, a_w);
             const Vec3 vr = vw - v[i];
@@ -257,21 +268,24 @@ void LumpedMassCable::acceleration(std::vector<Vec3>& r, std::vector<Vec3>& v, d
     std::vector<Vec3> aw;
     std::vector<Vec3>& f = a;
     computeForces(r, v, t, f, &ca, &aw);
-    std::vector<double> mPt(N + 1, 0.0), caPt(N + 1, 0.0);   // point-element inertia and isotropic added mass
+    std::vector<double> mPt(N + 1, 0.0), caPt(N + 1, 0.0), maT(N + 1, 0.0), maN(N + 1, 0.0);   // point-element inertia and added masses
     for (const PointElement& pe : points_) {
         mPt[pe.node] += pe.mass;
-        if (pe.Cm > 0.0 && env_.hydro) caPt[pe.node] += submergedFraction(r, pe.node) * pe.Cm * env_.rho_w * pe.volume;
+        if (!env_.hydro) continue;
+        const double phi = submergedFraction(r, pe.node);
+        if (pe.Cm > 0.0) caPt[pe.node] += phi * pe.Cm * env_.rho_w * pe.volume;
+        maT[pe.node] += phi * pe.maTan; maN[pe.node] += phi * pe.maNorm;
     }
     for (int i = 1; i < N; ++i) {
         const double m = nodeMass(i) + mPt[i] + caPt[i];
-        if (caPt[i] > 0.0) f[i] += aw[i] * caPt[i];             // RHS of Cm rho V (a_w - a)
-        if (ca[i] > 0.0) {
-            // Added mass: M = m I + ca (I - t t^T), RHS carries ca (I - t t^T) a_w (Eq. 3.27 with a_rel = a_w - a).
+        if (caPt[i] > 0.0) f[i] += aw[i] * caPt[i];             // RHS of Cm rho V (a_w - a), isotropic
+        if (ca[i] > 0.0 || maT[i] > 0.0 || maN[i] > 0.0) {
+            // M = m I + (ca + maN) (I - t t^T) + maT t t^T; the right-hand side carries the water-acceleration parts.
             const Vec3 dt = r[i + 1] - r[i - 1];
             const double ndt = norm(dt);
             const Vec3 tg = ndt > 0.0 ? dt / ndt : Vec3(1, 0, 0);
-            const Vec3 awn = aw[i] - tg * dot(aw[i], tg);
-            f[i] = addedMassSolve(m, ca[i], tg, f[i] + awn * ca[i]);
+            const Vec3 awt = tg * dot(aw[i], tg), awn = aw[i] - awt;
+            f[i] = addedMassSolve2(m + maT[i], m + maN[i] + ca[i], tg, f[i] + awn * (ca[i] + maN[i]) + awt * maT[i]);
         } else {
             f[i] = f[i] / m;
         }

@@ -78,6 +78,9 @@ std::unique_ptr<LumpedMassCable> buildLine(const json& cfg, const Vec3& anchor, 
         if (type == "floater") pe = PointElement::floater(node, mass, jp.at("buoyancy_N"), D, Cd, env.rho_w, p.g, Cm);
         else if (type == "clump") pe = PointElement::clump(node, mass, jp.at("submerged_weight_N"), D, Cd, env.rho_w, p.g, Cm);
         else { pe = {node, mass, get(jp, "volume_m3", 0.0), Cd, get(jp, "area_m2", 0.7853981633974483 * D * D), Cm}; }
+        pe.CdT = get(jp, "Cd_t", -1.0); pe.areaT = get(jp, "area_t_m2", 0.0);                  // optional anisotropic body (see PointElement)
+        pe.CdN = get(jp, "Cd_n", -1.0); pe.areaN = get(jp, "area_n_m2", 0.0);
+        pe.maTan = get(jp, "added_mass_t_kg", 0.0); pe.maNorm = get(jp, "added_mass_n_kg", 0.0);
         cable.addPointElement(pe);
     }
 

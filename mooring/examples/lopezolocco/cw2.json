@@ -1,0 +1,84 @@
+{
+ "_comment": "Lopez-Olocco et al. (2022), configuration with the clumped weight at Ls/2 from the fairlead (Ls = 14.33 m suspended length from the static solution). Clump: 122 g, 80 cm3, D = 82.3 mm disc (Table 3). Tangential drag Cd 1.17 (assumed) and ideal-fluid disc added mass rho D^3/3 applied in the NORMAL direction as in the paper's Eq. 25 (see docs/lopezolocco_validation.md).",
+ "line": {
+  "length_m": 27.0,
+  "segments": 81,
+  "EA_N": 341600.0,
+  "mass_per_length_kg_m": 0.0678,
+  "density_kg_m3": 7850.0,
+  "hydro_diameter_m": 0.0033,
+  "soil_diameter_m": 0.0033,
+  "Cm": 1.0,
+  "Cdt": 0.697,
+  "Cdn": 1.445,
+  "internal_damping_Ns": 239.12
+ },
+ "environment": {
+  "hydro": true,
+  "seabed": true,
+  "rho_w_kg_m3": 1000.0,
+  "water_surface_z_m": 6.5,
+  "seabed_z_m": 0.0
+ },
+ "soil": {
+  "stiffness_Pa_per_m": 6060.606,
+  "damping_factor": 0.04294,
+  "friction": 0.0,
+  "v_lim_m_s": 0.01
+ },
+ "anchor_m": [
+  0,
+  0,
+  0
+ ],
+ "fairlead_rest_m": [
+  25.0,
+  0,
+  6.5
+ ],
+ "initial": {
+  "shape": "touchdown"
+ },
+ "motion": {
+  "type": "harmonic",
+  "radius_m": 0.175,
+  "period_s": 3.5,
+  "direction_vec": [
+   1,
+   0,
+   0
+  ],
+  "ramp_cycles": 2.0,
+  "cycles": 12.0
+ },
+ "numerics": {
+  "scheme": "rk4",
+  "cfl": 0.5,
+  "dt_s": 0.0,
+  "relax_force_tol": 1e-06
+ },
+ "statistics": {
+  "first_cycle": 6
+ },
+ "output": {
+  "directory": "out/lopezolocco_cw2",
+  "tag": "cw2",
+  "dt_out_s": 0.01,
+  "write": true
+ },
+ "point_elements": [
+  {
+   "type": "generic",
+   "arclength_m": 19.83,
+   "mass_kg": 0.122,
+   "volume_m3": 8e-05,
+   "diameter_m": 0.0823,
+   "Cd_t": 1.17,
+   "area_t_m2": 0.00532,
+   "Cd_n": 0.0,
+   "area_n_m2": 0.0,
+   "added_mass_n_kg": 0.1858,
+   "added_mass_t_kg": 0.0
+  }
+ ]
+}

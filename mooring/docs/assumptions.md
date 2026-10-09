@@ -130,3 +130,6 @@
     stiffness 20 N/m^2 per length is Ks*D1 = 20; damping 0.1 Ns/m^2 gives zeta = 0.0426; "structural damping 0.1 %" is not implemented (c_int = 0); v_lim = 0.01 m/s and the friction law (weight-based, tangential only) are
     this code's, not the paper's. Dynamic tensions of the paper exist only as figures: the comparison values were read by eye (+-0.5 N).
 40. New runner option `motion.type = "harmonic"` (sinusoidal top-end motion along `direction_vec`, cosine ramp).
+
+41. **Anisotropic point elements.** Point elements may carry separate tangential/normal drag (`Cd_t`, `area_t_m2`, `Cd_n`, `area_n_m2`) and added mass (`added_mass_t_kg`, `added_mass_n_kg`); the tangent is taken from the neighbouring nodes. If these keys are absent the earlier isotropic behaviour is unchanged.
+42. **Lopez-Olocco clump.** The clump tangential drag coefficient 1.17 is assumed (not in the source); static CW2 pretension rise is +6.9 % vs the paper's ≈ +10 % (docs/lopezolocco_validation.md).
