@@ -1020,3 +1020,36 @@ methodology, tables, and figures are in the paper (Section 7,
     natural next step after a more encouraging first look. Regression-
     confirmed bit-for-bit identical `step()` behaviour throughout with
     the option off.
+22. **Done: a multi-resolution curriculum fit -- sharpens the overfitting
+    diagnosis rather than fixing it.** See README.md, "A multi-resolution
+    curriculum fit: a sharper diagnosis of the same overfitting, not a
+    fix for it" for the full account. `validate_quantitative` gained an
+    optional mesh-resolution (`N`) argument (default 60, bit-for-bit with
+    every prior invocation) to adapt Garnier, Viquerat & Hachem's
+    coarse-to-fine curriculum-learning methodology (arXiv:2509.13138,
+    originally for training mesh-based neural networks) to this
+    project's scalar line-search fitting: `interfacialSlopeCoefficient`
+    was fit against the mean MAE across the 223 training cases run at
+    FOUR mesh resolutions (N=60,100,150,200; cell widths 1.0-0.3 pipe
+    diameters) rather than one. On training, this produced exactly the
+    clean, resolution-consistent optimum (coefficient=200) the
+    curriculum-learning literature would predict -- unlike the earlier
+    single-resolution fit, whose train-optimal point reversed sharply on
+    held-out, this one improves MONOTONICALLY across all four training
+    resolutions. On the held-out set, the same coefficient fails in the
+    OPPOSITE direction: held-out MAE gets monotonically WORSE as
+    resolution increases (0.3065 at N=60 up to 0.3280 at N=200), and at
+    the standard N=60 resolution it is worse (0.3065) than both the
+    unmodified closure (0.3032) and the naive single-resolution sweep's
+    own best point (coefficient=100, MAE 0.2986). This is a genuine,
+    good-faith test of the methodology, not a strawman -- curriculum
+    fitting does exactly what it is supposed to (select for consistency
+    across the training curriculum), and the fact that this consistency
+    does not transfer to the held-out Mendeley campaigns rules out "the
+    single-resolution fit was just unlucky" as an explanation for items
+    13-15/21's failures, reinforcing from a third independent angle
+    (alongside the structural slug-intermittency diagnosis, item 15, and
+    the boundary-condition check, item 20) that this is not a
+    methodology-fixable problem with how these scalars are fit. No
+    solver code changed; `validate_quantitative`'s own regression
+    (bit-exact pred_holdup column at default N=60) confirmed before use.

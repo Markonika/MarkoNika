@@ -1892,6 +1892,85 @@ infrastructure (train/test split against synthetic manufactured-solution
 data, held-out generalization checks, etc.) that would be the next step
 if this had shown a larger, more consistent effect.
 
+#### A multi-resolution curriculum fit: a sharper diagnosis of the same overfitting, not a fix for it
+
+The interfacial-slope result above raised an obvious methodological
+question: every closure-tuning attempt in this investigation (items
+13-15, and the slope knob itself) fit its coefficient against a SINGLE
+mesh resolution (N=60) and a single, scarce real dataset (223 training
+cases) -- exactly the setup in which a fitted scalar is free to exploit
+resolution-specific numerical idiosyncrasies rather than a real physical
+relationship. Garnier, Viquerat & Hachem, "Curriculum Learning for
+Mesh-based Simulations" (arXiv:2509.13138), train mesh-based neural
+networks on a coarse-to-fine schedule across mesh fidelity specifically
+to build resolution-robust representations, rather than ones tuned to
+one discretization. `validate_quantitative` was extended with an
+optional mesh-resolution argument (`N`, default 60, bit-exact with every
+prior invocation that omits it) to adapt that idea to this project's
+actual fitting method -- a scalar line search, not gradient-based
+training -- as directly as possible: run the SAME 223 training cases at
+N = 60, 100, 150, 200 (cell widths of 1.0, 0.6, 0.4, and 0.3 pipe
+diameters respectively) for each candidate `interfacialSlopeCoefficient`,
+and select the coefficient minimizing the MEAN MAE across all 892
+(case, resolution) combinations -- a coefficient required to work
+across a resolution curriculum, not just the one resolution the earlier
+fit used.
+
+**On the training set, this worked exactly as the curriculum-learning
+literature would predict: a clear, resolution-consistent optimum.**
+Unlike the earlier single-resolution sweep (where the train-optimal
+point reversed sharply on held-out), the curriculum score improves
+monotonically and consistently across ALL FOUR resolutions as the
+coefficient increases, with a well-defined optimum at coefficient=200
+(curriculum score 0.0902, vs. 0.0941 unmodified; coefficient=300 is
+very slightly worse at 0.0903, bracketing the optimum rather than
+leaving it open-ended the way the single-resolution sweep did).
+
+**On the held-out set, this "more robust-looking" fit is not just
+non-generalizing -- it fails in the OPPOSITE direction from training,
+making the overfitting diagnosis sharper rather than resolving it.**
+Evaluating the curriculum-selected coefficient (200) at the SAME four
+resolutions used to select it:
+
+| resolution | held-out MAE |
+|---|---|
+| N=60 | 0.3065 |
+| N=100 | 0.3154 |
+| N=150 | 0.3205 |
+| N=200 | 0.3280 |
+
+Held-out error gets MONOTONICALLY WORSE as resolution increases -- the
+exact opposite of the monotonically-improving trend the same coefficient
+showed on training across those same four resolutions. And at the
+standard N=60 validation resolution, the curriculum-selected coefficient
+(MAE 0.3065) is worse than both the unmodified closure (0.3032) and the
+best point the earlier, naive single-resolution sweep found on its own
+(coefficient=100, MAE 0.2986) -- the curriculum procedure, designed
+specifically to select AGAINST resolution-specific overfitting, instead
+selected a coefficient that overfits the training resolutions' shared
+idiosyncrasies even more confidently than the simpler single-resolution
+fit did, which is why it looked "more robust" on training in the first
+place (consistency ACROSS the training set's own resolutions is not the
+same thing as consistency with reality).
+
+**Conclusion: adapting Hachem's group's curriculum-learning methodology
+to this project's closure-fitting problem does not rescue the
+generalization failure found in every earlier closure-tuning attempt --
+it demonstrates, more starkly than any single-resolution test could,
+that the training and held-out sets do not share whatever regularity any
+of these fitted scalars are picking up on.** This is a genuine,
+good-faith test of the methodology (not a strawman): curriculum learning
+is doing exactly what it is supposed to do on the data it is given
+(finding a fit that is consistent across the training curriculum), and
+the fact that this consistency does not transfer to the held-out
+Mendeley campaigns is itself informative -- it rules out "the fit was
+just unlucky about which one resolution it saw" as an explanation for
+the earlier closure-tuning failures, and reinforces (now from a third,
+independent angle, alongside the structural slug-intermittency diagnosis
+and the boundary-condition check above) that this is not a numerics- or
+methodology-fixable problem with how any of these scalars are being
+fit.
+
 ## Validation against experimental data
 
 **[VALIDATION.md](VALIDATION.md)** compares the solver's predicted flow
