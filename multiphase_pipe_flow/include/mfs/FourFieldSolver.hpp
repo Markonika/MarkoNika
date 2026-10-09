@@ -476,6 +476,90 @@ struct SolverOptions {
     // updateLayerMomentum().
     bool enableWellBalancedGravity = false;
 
+    // Interfacial pressure-jump regularization (Stewart & Wendroff, 1984;
+    // Toumi & Kumbaro, 1996; adapted here to this solver's two-LAYER,
+    // not general multi-fluid, acceleration-form momentum equations), off
+    // by default so existing behaviour is unchanged unless opted into.
+    // Found via literature search specifically for mechanisms that give a
+    // continuous, area-averaged two-fluid model an actual slug/
+    // intermittency onset -- see README.md, "Interfacial pressure-jump
+    // regularization" for the full account of the search and the result.
+    //
+    // NOT the same mechanism as enableSurfaceTension's abandoned Young-
+    // Laplace attempt (see that option's own documentation), even though
+    // both are called "an interfacial pressure jump" in parts of the
+    // literature -- an easy mix-up this comment exists partly to head
+    // off. The Young-Laplace term is P2-P1 = sigma*d^2(h1)/dz^2, a SPATIAL
+    // CURVATURE term requiring a third-derivative stencil in the momentum
+    // equation, which was tried and abandoned because no one-sided
+    // discretization of a dispersive third derivative is unconditionally
+    // stable under this solver's explicit time-stepping. This option's
+    // term is a purely LOCAL, ALGEBRAIC closure (no new derivative order
+    // at all -- it only modifies what pressure value the EXISTING
+    // first-derivative pressure-gradient term in each layer's own
+    // momentum equation reads), derived from how the two layers' local
+    // relative motion past the interface gives them physically different
+    // local pressures (a Bernoulli/streamline-curvature effect), not from
+    // surface tension.
+    //
+    // Derivation: let Dp = Ci * rho1*rho2/(rho1*e2+rho2*e1) * (u1-u2)^2
+    // (u1, u2, e1, e2 all per-cell; rho1, rho2 the per-cell layer mixture
+    // densities already computed by rho1Of/rho2Of). Define per-layer
+    // pressures P1 = P - e2*Dp, P2 = P + e1*Dp (P the existing shared
+    // mixture pressure this solver already solves for via
+    // solvePressureCorrection(), Eq. 22 -- UNCHANGED by this option: since
+    // e1+e2=1 identically, e1*P1+e2*P2 = e1*P-e1*e2*Dp+e2*P+e1*e2*Dp = P,
+    // so the mixture/total pressure equation's own derivation is
+    // unaffected and does not need to change). Each layer's own momentum
+    // equation then reads its OWN layer's pressure gradient
+    // (dP1/dz/rho1, dP2/dz/rho2) instead of the shared dP/dz/rho1,
+    // dP/dz/rho2 both layers use when this is off -- see
+    // FourFieldSolver.cpp, updateLayerMomentum(). When Ci=0 (or this
+    // option is off), P1==P2==P exactly and every downstream use is
+    // bit-for-bit identical to the pre-existing shared-pressure code.
+    //
+    // Verified by re-deriving this solver's own linearized inviscid KH
+    // dispersion relation (the same analysis used throughout VALIDATION.md
+    // item 1 and the slug-capturing investigation) WITH this term
+    // included, via sympy, and confirming two things before writing any
+    // solver code: (1) at Ci=0 the extended derivation reproduces the
+    // pre-existing (no-term) dispersion relation EXACTLY (checked
+    // numerically, ratio 1.0 to machine precision, across several
+    // wavenumbers and base states) -- the re-derivation itself is sound,
+    // not just the Ci=0 special case being trivially right; (2) because
+    // e1+e2=1 identically, P2-P1 collapses to exactly Dp (no further
+    // algebra needed), and Dp's own linearization contributes to the
+    // dispersion relation's omega^1 and omega^0 coefficients but NOT its
+    // omega^2 coefficient -- meaning this term does NOT change the
+    // existing short-wave (k -> infinity) UNBOUNDED growth-rate scaling
+    // (still grows linearly in k, same role as items 1/38-47's surface
+    // tension and biharmonic terms, left untouched by this option) but
+    // DOES shift the discriminant's SIGN uniformly across all
+    // wavelengths, i.e. this is an ONSET-threshold mechanism (does
+    // instability exist at this base state at all), complementary to
+    // rather than competing with those short-wave-capping terms.
+    //
+    // Evaluated at this codebase's own three worst-under-predicted
+    // Mendeley cases (Brito 2012, Baba et al. 2017, Ekinci 2015 -- same
+    // cases as the slug-capturing investigation) across the literature's
+    // own recommended range (Evje & Flatten assume 1 < Ci <= 2 for
+    // guaranteed hyperbolicity in the general multi-fluid case): the
+    // linear KH onset holdup drops substantially as Ci increases from 0
+    // (where it reproduces the ~0.70-0.73 onset the slug_kh_check.cpp
+    // diagnostic already found) down to roughly 0.40-0.48 at Ci=1, but
+    // stays well ABOVE the solver's own predicted thin-film holdup for
+    // these cases (0.02-0.05) even at Ci=2 -- i.e. in its literature-
+    // motivated range, this term does NOT by itself linearly destabilize
+    // the thin-film branch the solver actually converges to; whatever
+    // effect it has on the documented holdup under-prediction gap is
+    // necessarily a NONLINEAR one (interacting with the fine-resolution/
+    // AMR/bistable-branch dynamics the slug-capturing investigation
+    // already found), to be checked empirically, not assumed from this
+    // linear result alone. See VALIDATION.md for the full numeric
+    // account and whatever empirical result follows.
+    bool enableInterfacialPressureJump = false;
+    double interfacialPressureJumpCoefficient = 1.5; // Ci, dimensionless; see above
+
     // Adaptive (non-uniform) mesh refinement, off by default so existing
     // behaviour at a fixed uniform resolution is unchanged unless opted
     // into. When enabled, every `adaptEveryNSteps` steps each cell's

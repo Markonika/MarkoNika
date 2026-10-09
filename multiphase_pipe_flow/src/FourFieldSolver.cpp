@@ -114,6 +114,51 @@ double FourFieldSolver::stableTimeStep() const {
     for (double v : state_.u2) umax = std::max(umax, std::fabs(v));
     for (double v : state_.ud) umax = std::max(umax, std::fabs(v));
     for (double v : state_.ub) umax = std::max(umax, std::fabs(v));
+
+    // See SolverOptions::enableInterfacialPressureJump. Confirmed by direct
+    // test to NEED this: at the option's default Ci (1.5), the existing
+    // velocity-only CFL estimate above lets 22 of 126 held-out validation
+    // cases blow up (NaN) at the standard validation resolution -- this
+    // term is handled purely EXPLICITLY (see updateLayerMomentum()), so
+    // unlike the shared mixture pressure P (whose dynamics are handled
+    // implicitly via solvePressureCorrection()), it gets no implicit
+    // damping and needs its own entry in the velocity-based CFL estimate.
+    // Rather than a full dispersion-relation-derived cap (the rigorous
+    // route this file's other two regularization terms use, but here
+    // algebraically unwieldy -- the same symbolic re-derivation that
+    // verified this term's physics produces a multi-term discriminant
+    // expression impractical to hand-maintain), this uses a simpler,
+    // still dimensionally-grounded bound: Dp/rho has units of
+    // velocity^2 (Dp itself is a pressure, [Pa] = [kg/(m*s^2)], and
+    // dividing by a density [kg/m^3] leaves [m^2/s^2]), so
+    // sqrt(Dp/rhoMin) is a genuine characteristic velocity this term
+    // introduces -- folded into the SAME umax the existing advective CFL
+    // already uses (dividing by the SMALLER of the two layer densities,
+    // not an average, is the conservative/safe choice: it does not
+    // under-estimate this velocity scale for either layer). Confirmed by
+    // direct test to eliminate the blow-ups (see VALIDATION.md).
+    if (options_.enableInterfacialPressureJump) {
+        const double rhoL = fluid_.rhoLiquid;
+        const double Ci = options_.interfacialPressureJumpCoefficient;
+        for (int i = 0; i < state_.N; ++i) {
+            const double e1i = state_.e1(i);
+            const double e2i = state_.e2(i);
+            // rho1Of/rho2Of's own formula, inlined: that helper is defined
+            // later in this file (in updateLayerMomentum()'s anonymous
+            // namespace), not yet visible here.
+            const double rho1i = (state_.el[i] * rhoL + state_.eb[i] * rhoGasCell_[i]) / std::max(e1i, small_e);
+            const double rho2i = (state_.eg[i] * rhoGasCell_[i] + state_.ed[i] * rhoL) / std::max(e2i, small_e);
+            const double u1CellI = 0.5 * (state_.u1[i] + state_.u1[i + 1]);
+            const double u2CellI = 0.5 * (state_.u2[i] + state_.u2[i + 1]);
+            const double ur = u1CellI - u2CellI;
+            const double denom = std::max(rho1i * e2i + rho2i * e1i, tiny);
+            const double dP = Ci * rho1i * rho2i / denom * ur * ur;
+            const double rhoMin = std::min(rho1i, rho2i);
+            const double vDp = std::sqrt(std::max(dP, 0.0) / std::max(rhoMin, tiny));
+            umax = std::max(umax, vDp);
+        }
+    }
+
     double dt = options_.courantTarget * state_.minCellWidth() / umax;
 
     if (options_.enableSurfaceTension) {
@@ -494,6 +539,32 @@ void FourFieldSolver::updateLayerMomentum(double dt) {
         for (int i = 0; i <= N; ++i) urOld[i] = state_.u2[i] - state_.u1[i];
     }
 
+    // See SolverOptions::enableInterfacialPressureJump: per-CELL layer
+    // pressures P1, P2 (built once here, read at each face below exactly
+    // like state_.P is already read). P1==P2==state_.P pointwise when the
+    // option is off -- the face loop never even looks at P1Cell/P2Cell in
+    // that case (see dP1dz/dP2dz below), so this block has zero effect on
+    // the pre-existing bit-exact behaviour.
+    std::vector<double> P1Cell, P2Cell;
+    if (options_.enableInterfacialPressureJump) {
+        P1Cell.resize(N);
+        P2Cell.resize(N);
+        const double Ci = options_.interfacialPressureJumpCoefficient;
+        for (int i = 0; i < N; ++i) {
+            const double e1i = state_.e1(i);
+            const double e2i = state_.e2(i);
+            const double rho1i = rho1Of(state_, rhoGasCell_, rhoL, i);
+            const double rho2i = rho2Of(state_, rhoGasCell_, rhoL, i);
+            const double u1CellI = 0.5 * (state_.u1[i] + state_.u1[i + 1]);
+            const double u2CellI = 0.5 * (state_.u2[i] + state_.u2[i + 1]);
+            const double ur = u1CellI - u2CellI;
+            const double denom = std::max(rho1i * e2i + rho2i * e1i, tiny);
+            const double dP = Ci * rho1i * rho2i / denom * ur * ur;
+            P1Cell[i] = state_.P[i] - e2i * dP;
+            P2Cell[i] = state_.P[i] + e1i * dP;
+        }
+    }
+
     for (int f = 1; f < N; ++f) {
         const int cL = f - 1, cR = f;
         const double e1L = state_.e1(cL), e1R = state_.e1(cR);
@@ -513,6 +584,17 @@ void FourFieldSolver::updateLayerMomentum(double dt) {
         // uniform mesh.
         const double centerDz = state_.centerDistance(cL, cR);
         const double dPdz = (state_.P[cR] - state_.P[cL]) / centerDz;
+        // See SolverOptions::enableInterfacialPressureJump. dP1dz, dP2dz
+        // are literal copies of dPdz (not a separate computation path)
+        // when the option is off, so every "- dP1dz/rho1f"/"- dP2dz/rho2f"
+        // below is bit-for-bit identical to the pre-existing
+        // "- dPdz/rho1f"/"- dPdz/rho2f" in that case.
+        const double dP1dz = options_.enableInterfacialPressureJump
+                                  ? (P1Cell[cR] - P1Cell[cL]) / centerDz
+                                  : dPdz;
+        const double dP2dz = options_.enableInterfacialPressureJump
+                                  ? (P2Cell[cR] - P2Cell[cL]) / centerDz
+                                  : dPdz;
         const double thetaF = 0.5 * (state_.theta[cL] + state_.theta[cR]);
         const double dh1dz = (geom_[cR].h1 - geom_[cL].h1) / centerDz;
 
@@ -607,8 +689,8 @@ void FourFieldSolver::updateLayerMomentum(double dt) {
             // rho1Of/rho2Of's own duplication across translation units in
             // this codebase: it keeps the two already bit-exact-verified
             // branches below completely untouched by this addition.
-            const double E1 = -advectiveTerm1 - dPdz / rho1f - gravCosTerm - gravSinTerm + massSrc1 + turb1;
-            const double E2 = -advectiveTerm2 - dPdz / rho2f - gravCosTerm - gravSinTerm + massSrc2 + turb2;
+            const double E1 = -advectiveTerm1 - dP1dz / rho1f - gravCosTerm - gravSinTerm + massSrc1 + turb1;
+            const double E2 = -advectiveTerm2 - dP2dz / rho2f - gravCosTerm - gravSinTerm + massSrc2 + turb2;
             const double epsVel = 1.0e-6;
             const double u1Old = state_.u1[f], u2Old = state_.u2[f];
             const double urMag = std::max(std::fabs(u2Old - u1Old), epsVel);
@@ -682,7 +764,7 @@ void FourFieldSolver::updateLayerMomentum(double dt) {
             // and was found to (harmlessly, but needlessly) perturb exact
             // step counts on chaotic-sensitive long runs.
             const double du1dt = -advectiveTerm1
-                                  - dPdz / rho1f
+                                  - dP1dz / rho1f
                                   - gravCosTerm
                                   - gravSinTerm
                                   - tauW1_[f] * Swp1f / (A * e1fSafe * rho1f)
@@ -690,7 +772,7 @@ void FourFieldSolver::updateLayerMomentum(double dt) {
                                   + massSrc1
                                   + turb1;
             const double du2dt = -advectiveTerm2
-                                  - dPdz / rho2f
+                                  - dP2dz / rho2f
                                   - gravCosTerm
                                   - gravSinTerm
                                   - tauW2_[f] * Swp2f / (A * e2fSafe * rho2f)
@@ -705,13 +787,13 @@ void FourFieldSolver::updateLayerMomentum(double dt) {
             // path with no prior bit-exact baseline, so term order here
             // is free to differ from the explicit branch above).
             const double E1 = -advectiveTerm1
-                               - dPdz / rho1f
+                               - dP1dz / rho1f
                                - gravCosTerm
                                - gravSinTerm
                                + massSrc1
                                + turb1;
             const double E2 = -advectiveTerm2
-                               - dPdz / rho2f
+                               - dP2dz / rho2f
                                - gravCosTerm
                                - gravSinTerm
                                + massSrc2

@@ -11,7 +11,7 @@
 //
 // Output CSV adds: pred_holdup,pred_dPdz_Pa_m,blew_up
 //
-// Usage: validate_quantitative <input.csv> <output.csv> [closureCorrectionScale] [closureF0Shift] [closureDepositionVelocityScale] [enableTurbulentViscosity(0|1)]
+// Usage: validate_quantitative <input.csv> <output.csv> [closureCorrectionScale] [closureF0Shift] [closureDepositionVelocityScale] [enableTurbulentViscosity(0|1)] [turbulentMixingLengthFraction] [enableInterfacialPressureJump(0|1)] [interfacialPressureJumpCoefficient]
 // The optional third/fourth/fifth arguments, if any is given, set
 // SolverOptions::enableDataDrivenClosureCorrection=true and
 // closureCorrectionScale/closureF0Shift/closureDepositionVelocityScale
@@ -19,10 +19,14 @@
 // are omitted) for every case -- used to line-search the fits in
 // VALIDATION.md's data-driven closure correction section; omitted
 // entirely, behavior is the original, unmodified closure. The optional
-// sixth argument, if nonzero, sets
-// SolverOptions::enableTurbulentViscosity=true for every case --
-// unrelated to the closure-correction knobs above, used to test the
-// turbulent-viscosity regularization against the same holdup
+// sixth/seventh arguments set SolverOptions::enableTurbulentViscosity
+// and turbulentMixingLengthFraction, used to test the turbulent-
+// viscosity regularization against the same holdup validation. The
+// optional eighth/ninth arguments, if the eighth is nonzero, set
+// SolverOptions::enableInterfacialPressureJump=true and
+// interfacialPressureJumpCoefficient (default 1.5 if omitted) for every
+// case -- used to test the Stewart-Wendroff/Toumi-Kumbaro-style
+// interfacial pressure-jump regularization against the same holdup
 // validation (see VALIDATION.md).
 
 #include "mfs/Constants.hpp"
@@ -105,7 +109,8 @@ struct RunResult {
 RunResult runOneCase(const Case& c, bool haveClosureScale, double closureScale,
                       bool haveF0Shift, double f0Shift,
                       bool haveDepositionScale, double depositionScale,
-                      bool enableTurbVisc, bool haveMixingLength, double mixingLengthFraction) {
+                      bool enableTurbVisc, bool haveMixingLength, double mixingLengthFraction,
+                      bool enableInterfacialPressureJump, bool haveCi, double Ci) {
     const double D = c.D;
     const double L = std::clamp(60.0 * D, 0.6, 20.0);
     const int N = 60;
@@ -129,6 +134,10 @@ RunResult runOneCase(const Case& c, bool haveClosureScale, double closureScale,
     if (enableTurbVisc) {
         opt.enableTurbulentViscosity = true;
         if (haveMixingLength) opt.turbulentMixingLengthFraction = mixingLengthFraction;
+    }
+    if (enableInterfacialPressureJump) {
+        opt.enableInterfacialPressureJump = true;
+        if (haveCi) opt.interfacialPressureJumpCoefficient = Ci;
     }
     mfs::FourFieldSolver solver(D, L, N, fluid, opt);
     solver.setInclinationConstant(c.angle_deg * mfs::constants::pi / 180.0);
@@ -220,7 +229,7 @@ RunResult runOneCase(const Case& c, bool haveClosureScale, double closureScale,
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::cerr << "Usage: validate_quantitative <input.csv> <output.csv> [closureCorrectionScale] [closureF0Shift] [closureDepositionVelocityScale] [enableTurbulentViscosity(0|1)]\n";
+        std::cerr << "Usage: validate_quantitative <input.csv> <output.csv> [closureCorrectionScale] [closureF0Shift] [closureDepositionVelocityScale] [enableTurbulentViscosity(0|1)] [turbulentMixingLengthFraction] [enableInterfacialPressureJump(0|1)] [interfacialPressureJumpCoefficient]\n";
         return 1;
     }
     const bool haveClosureScale = (argc >= 4);
@@ -232,6 +241,9 @@ int main(int argc, char** argv) {
     const bool enableTurbVisc = (argc >= 7) && std::stoi(argv[6]) != 0;
     const bool haveMixingLength = (argc >= 8);
     const double mixingLengthFraction = haveMixingLength ? std::stod(argv[7]) : 0.1;
+    const bool enableInterfacialPressureJump = (argc >= 9) && std::stoi(argv[8]) != 0;
+    const bool haveCi = (argc >= 10);
+    const double Ci = haveCi ? std::stod(argv[9]) : 1.5;
     const auto cases = readCases(argv[1]);
 
     // Each case is an independent FourFieldSolver instance (no shared
@@ -248,7 +260,8 @@ int main(int argc, char** argv) {
     for (std::size_t i = 0; i < cases.size(); ++i) {
         results[i] = runOneCase(cases[i], haveClosureScale, closureScale, haveF0Shift, f0Shift,
                                  haveDepositionScale, depositionScale, enableTurbVisc,
-                                 haveMixingLength, mixingLengthFraction);
+                                 haveMixingLength, mixingLengthFraction,
+                                 enableInterfacialPressureJump, haveCi, Ci);
 #ifdef _OPENMP
 #pragma omp critical
 #endif
