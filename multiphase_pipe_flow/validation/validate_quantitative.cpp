@@ -11,7 +11,7 @@
 //
 // Output CSV adds: pred_holdup,pred_dPdz_Pa_m,blew_up
 //
-// Usage: validate_quantitative <input.csv> <output.csv> [closureCorrectionScale] [closureF0Shift] [closureDepositionVelocityScale] [enableTurbulentViscosity(0|1)] [turbulentMixingLengthFraction] [enableInterfacialPressureJump(0|1)] [interfacialPressureJumpCoefficient]
+// Usage: validate_quantitative <input.csv> <output.csv> [closureCorrectionScale] [closureF0Shift] [closureDepositionVelocityScale] [enableTurbulentViscosity(0|1)] [turbulentMixingLengthFraction] [enableInterfacialPressureJump(0|1)] [interfacialPressureJumpCoefficient] [enableInterfacialSlopeClosure(0|1)] [interfacialSlopeCoefficient] [N]
 // The optional third/fourth/fifth arguments, if any is given, set
 // SolverOptions::enableDataDrivenClosureCorrection=true and
 // closureCorrectionScale/closureF0Shift/closureDepositionVelocityScale
@@ -27,7 +27,20 @@
 // interfacialPressureJumpCoefficient (default 1.5 if omitted) for every
 // case -- used to test the Stewart-Wendroff/Toumi-Kumbaro-style
 // interfacial pressure-jump regularization against the same holdup
-// validation (see VALIDATION.md).
+// validation. The optional tenth/eleventh arguments, if the tenth is
+// nonzero, set SolverOptions::enableInterfacialSlopeClosure=true and
+// interfacialSlopeCoefficient (default 1.0 if omitted) -- used to test
+// the Buist & Sanderse-motivated interfacial-slope closure input. The
+// optional twelfth argument overrides the mesh resolution N (default
+// 60, the value every prior invocation of this driver implicitly used);
+// added specifically to run the SAME 223/126-case train/test split at
+// multiple resolutions for the multi-resolution curriculum fit of
+// interfacialSlopeCoefficient (see VALIDATION.md), adapting the coarse-
+// to-fine curriculum-learning idea of Garnier, Viquerat & Hachem,
+// "Curriculum Learning for Mesh-based Simulations" (arXiv:2509.13138),
+// to this driver's scalar line-search methodology rather than a trained
+// network (see VALIDATION.md for the full account and the honest
+// distinction between the two).
 
 #include "mfs/Constants.hpp"
 #include "mfs/FourFieldSolver.hpp"
@@ -111,10 +124,10 @@ RunResult runOneCase(const Case& c, bool haveClosureScale, double closureScale,
                       bool haveDepositionScale, double depositionScale,
                       bool enableTurbVisc, bool haveMixingLength, double mixingLengthFraction,
                       bool enableInterfacialPressureJump, bool haveCi, double Ci,
-                      bool enableInterfacialSlopeClosure, bool haveSlopeCoeff, double slopeCoeff) {
+                      bool enableInterfacialSlopeClosure, bool haveSlopeCoeff, double slopeCoeff,
+                      int N) {
     const double D = c.D;
     const double L = std::clamp(60.0 * D, 0.6, 20.0);
-    const int N = 60;
 
     mfs::FluidProperties fluid;
     fluid.rhoLiquid = c.rhoL;
@@ -234,7 +247,7 @@ RunResult runOneCase(const Case& c, bool haveClosureScale, double closureScale,
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::cerr << "Usage: validate_quantitative <input.csv> <output.csv> [closureCorrectionScale] [closureF0Shift] [closureDepositionVelocityScale] [enableTurbulentViscosity(0|1)] [turbulentMixingLengthFraction] [enableInterfacialPressureJump(0|1)] [interfacialPressureJumpCoefficient] [enableInterfacialSlopeClosure(0|1)] [interfacialSlopeCoefficient]\n";
+        std::cerr << "Usage: validate_quantitative <input.csv> <output.csv> [closureCorrectionScale] [closureF0Shift] [closureDepositionVelocityScale] [enableTurbulentViscosity(0|1)] [turbulentMixingLengthFraction] [enableInterfacialPressureJump(0|1)] [interfacialPressureJumpCoefficient] [enableInterfacialSlopeClosure(0|1)] [interfacialSlopeCoefficient] [N]\n";
         return 1;
     }
     const bool haveClosureScale = (argc >= 4);
@@ -252,6 +265,13 @@ int main(int argc, char** argv) {
     const bool enableInterfacialSlopeClosure = (argc >= 11) && std::stoi(argv[10]) != 0;
     const bool haveSlopeCoeff = (argc >= 12);
     const double slopeCoeff = haveSlopeCoeff ? std::stod(argv[11]) : 1.0;
+    // Mesh resolution N, default 60 (exactly the prior hardcoded value --
+    // bit-exact with every earlier invocation that omits this argument).
+    // Added to let a single driver be reused across mesh resolutions
+    // instead of a one-off scratch program per resolution -- see
+    // VALIDATION.md's multi-resolution curriculum fit for why this
+    // mattered in practice.
+    const int N = (argc >= 13) ? std::stoi(argv[12]) : 60;
     const auto cases = readCases(argv[1]);
 
     // Each case is an independent FourFieldSolver instance (no shared
@@ -270,7 +290,7 @@ int main(int argc, char** argv) {
                                  haveDepositionScale, depositionScale, enableTurbVisc,
                                  haveMixingLength, mixingLengthFraction,
                                  enableInterfacialPressureJump, haveCi, Ci,
-                                 enableInterfacialSlopeClosure, haveSlopeCoeff, slopeCoeff);
+                                 enableInterfacialSlopeClosure, haveSlopeCoeff, slopeCoeff, N);
 #ifdef _OPENMP
 #pragma omp critical
 #endif
