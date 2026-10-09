@@ -1730,20 +1730,45 @@ two independent reasons found by direct testing, not assumed:**
    1 above: the cases this term could plausibly help are disproportionately
    the ones it cannot finish computing.
 
-**Conclusion, now reached by two independent lines of evidence rather than
-assumed from either alone: a clean negative result, despite (not because
-of) a correct derivation.** This is a case where "verified against the
-literature and against this solver's own linearized theory" was
-NECESSARY but not SUFFICIENT -- the mechanism does exactly what three
-separate checks (symbolic re-derivation, direct growth-rate measurement,
-and the onset-threshold scan) said it would do, and still does not
-improve, and demonstrably worsens, the actual outcome this project cares
-about. `enableInterfacialPressureJump` defaults to (and stays at) `false`
-for this reason; the stability cap this investigation added to
+**The obvious next question -- does a smaller `Ci` fix the practicality
+problem without sacrificing accuracy -- was tested directly, not left
+open, and the answer is no: tractability and accuracy move in OPPOSITE
+directions, with no sweet spot found.** `Ci=0.25` genuinely fixes the
+computational problem: the same representative stiff case that needed
+3.89 million steps at `Ci=1.5` now completes in 213,096 (an 18x
+reduction, comfortably inside the 300k-step validation budget), and only
+6 of 126 held-out cases (4.8%, down from 72) fail to finish. But held-out
+MAE on the cases that DO complete is 0.4976 -- WORSE than `Ci=1.5`'s
+already-bad 0.4754, and far worse than the unmodified closure's 0.3143
+on the same subset, with 96 of 120 completed cases worsening against
+only 21 improving. Critically, the cases it wrecks are not the hard
+slug-flow cases this investigation is trying to fix -- they are cases
+the UNMODIFIED model already gets right: e.g.
+`Abdul-Majeed_2000_0.305_0.671` (measured 0.910) goes from a
+near-perfect 0.915 at `Ci=0` to 0.164 at `Ci=0.25`; `Kim_2020_0.2_0.6`
+(measured 0.913) goes from 0.964 to 0.100. Even a `Ci` small enough to
+be computationally cheap is large enough to knock already-correct
+high-holdup equilibria down toward the wrong (low) branch -- this is not
+a tuning problem solvable by picking a better `Ci`, it is the mechanism
+itself being a poor fit for a model that, at `Ci=0`, already gets most
+non-slug cases right by other means (friction/geometry alone, without
+any interfacial-pressure correction).
+
+**Conclusion, now reached by three independent lines of evidence rather
+than assumed from any one alone: a clean negative result, despite (not
+because of) a correct derivation.** This is a case where "verified
+against the literature and against this solver's own linearized theory"
+was NECESSARY but not SUFFICIENT -- the mechanism does exactly what
+three separate checks (symbolic re-derivation, direct growth-rate
+measurement, and the onset-threshold scan) said it would do, and still
+does not improve, and demonstrably worsens, the actual outcome this
+project cares about, at every `Ci` tried from 0.25 to 1.5.
+`enableInterfacialPressureJump` defaults to (and stays at) `false` for
+this reason; the stability cap this investigation added to
 `stableTimeStep()` is kept regardless, since it is correct and necessary
-whenever the option IS enabled (e.g. for further research into smaller
-`Ci` values, or a genuinely implicit treatment of this term -- neither
-attempted here), not merely a response to this specific negative result.
+whenever the option IS enabled (e.g. a genuinely implicit treatment of
+this term, not attempted here), not merely a response to this specific
+negative result.
 
 ## Validation against experimental data
 

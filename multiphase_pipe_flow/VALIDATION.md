@@ -943,7 +943,21 @@ methodology, tables, and figures are in the paper (Section 7,
     `Ci=1.5` (a biased subset -- precisely the cases with the smallest
     relative velocity, hence the least potential benefit) show MAE 0.4754
     versus 0.3032 unmodified -- worse, not better, on exactly the subset
-    where a fair comparison is even possible. `enableInterfacialPressureJump`
+    where a fair comparison is even possible. The obvious follow-up --
+    does a smaller `Ci` fix the practicality problem without giving up
+    accuracy -- was tested directly (`Ci=0.25`), not left open: it DOES
+    fix practicality (the same representative stiff case drops from 3.89M
+    steps to 213k, comfortably within budget; only 6 of 126 held-out
+    cases now fail to complete, down from 72) but makes accuracy WORSE
+    still (MAE 0.4976 on the 120 completing cases, 96 worsened vs 21
+    improved), because it destabilizes cases the UNMODIFIED model already
+    predicts correctly (e.g. `Abdul-Majeed_2000_0.305_0.671`, measured
+    0.910: 0.915 at `Ci=0` -> 0.164 at `Ci=0.25`) rather than fixing the
+    hard slug-flow cases this investigation targets. Tractability and
+    accuracy move in OPPOSITE directions as `Ci` varies, with no sweet
+    spot found between 0.25 and 1.5 -- not a tuning problem, but the
+    mechanism itself being a poor fit for a model that already gets most
+    non-slug cases right without it. `enableInterfacialPressureJump`
     defaults to `false` for this reason; the `stableTimeStep()` cap this
     investigation added is kept regardless (correct and necessary
     whenever the option IS enabled), independent of this negative
