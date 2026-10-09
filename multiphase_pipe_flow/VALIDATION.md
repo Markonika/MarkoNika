@@ -912,3 +912,40 @@ methodology, tables, and figures are in the paper (Section 7,
     remains untested. No solver code changed for this test; only a new
     scratch validation driver reusing `validate_quantitative`'s own
     proven-correct CSV reading and per-case fluid-property handling.
+19. **Done: interfacial pressure-jump regularization -- correctly
+    derived, empirically confirmed, and still a clean negative result.**
+    Implemented `SolverOptions::enableInterfacialPressureJump` (Stewart &
+    Wendroff 1984 / Toumi & Kumbaro 1996), found via a deeper numerical-
+    methods literature search and reported in detail in README.md,
+    "Interfacial pressure-jump regularization" -- see that section for
+    the full derivation, the symbolic re-derivation of this solver's own
+    KH dispersion relation (confirmed to reproduce the existing no-term
+    formula EXACTLY at `Ci=0`), and the direct growth-rate measurement
+    confirming the predicted onset-threshold shift in the real solver
+    (10-40x growth-rate increase above the shifted threshold, negligible
+    change below it). Despite all three verification steps confirming
+    the mechanism works exactly as the literature describes, it fails
+    this project's actual goal for two independent, directly-tested
+    reasons: (1) it monotonically WORSENS the one previously-positive
+    finding (items 17-18's fine-resolution bistability result) as `Ci`
+    increases from 0 -- `Ci=0` (the option OFF) was the best setting
+    found for that mechanism; (2) it is computationally impractical at
+    the conditions where it would matter, for a reason inherent to the
+    mechanism rather than a fixable bug -- confirmed by direct test that
+    a representative case does NOT diverge (no NaN) but needs 3.89
+    million explicit steps (`dt` down to ~1.5e-6 s) to cover the same 8s
+    window the baseline covers in a few thousand, because the same large
+    relative velocity that makes the term's effect meaningful also makes
+    its own characteristic velocity scale (`sqrt(Dp/rho)`, now folded
+    into `stableTimeStep()`'s CFL estimate alongside the existing
+    advective terms) too large for a tractable `dt`. The 54 of 126
+    held-out cases that DO complete within the existing step budget at
+    `Ci=1.5` (a biased subset -- precisely the cases with the smallest
+    relative velocity, hence the least potential benefit) show MAE 0.4754
+    versus 0.3032 unmodified -- worse, not better, on exactly the subset
+    where a fair comparison is even possible. `enableInterfacialPressureJump`
+    defaults to `false` for this reason; the `stableTimeStep()` cap this
+    investigation added is kept regardless (correct and necessary
+    whenever the option IS enabled), independent of this negative
+    accuracy result. Regression-confirmed bit-for-bit identical `step()`
+    behaviour throughout with the option off.

@@ -1633,6 +1633,118 @@ substantial, scale-confirmed effect with a real, scale-confirmed cost,
 and the cost is predictable in advance from the same cheap baseline run
 this validation already performs.
 
+#### Interfacial pressure-jump regularization: correctly derived, empirically confirmed, and not usable here
+
+A follow-up literature search (prompted directly by a user question asking
+whether deeper numerical-methods literature had more to offer this
+investigation) turned up a specific, different-sounding-but-actually-new
+lead: the Stewart & Wendroff (1984) / Toumi & Kumbaro (1996) **interfacial
+pressure-jump** term, which gives the two-fluid model's short-wave
+ill-posedness (the same defect this codebase's own KH case study, item 1,
+and the abandoned Young-Laplace attempt under `enableSurfaceTension`
+above both already found) a different, non-dissipative fix: instead of
+damping growth at short wavelength, it gives each layer its own local
+pressure (`P1 = P - e2*Dp`, `P2 = P + e1*Dp`, with
+`Dp = Ci*rho1*rho2/(rho1*e2+rho2*e1)*(u1-u2)^2`), shifting the Kelvin-
+Helmholtz onset threshold itself. Carneiro, Ortega & Nieckele (2005)
+specifically report using this mechanism to predict SLUG FLOW onset in a
+1D two-fluid model -- directly on point for this project's own documented
+gap. Implemented as `SolverOptions::enableInterfacialPressureJump` /
+`interfacialPressureJumpCoefficient` (off by default); see that option's
+own extensive documentation in `FourFieldSolver.hpp` for the full
+derivation and the distinction from the earlier, unrelated Young-Laplace
+attempt (a dispersive third-derivative curvature term; this is a purely
+local, algebraic closure riding on the existing first-derivative pressure
+gradient -- no new stencil at all).
+
+**Verification before trusting any result, in the same order this whole
+investigation has used throughout:** (1) a fresh symbolic (sympy)
+re-derivation of this solver's own linearized inviscid KH dispersion
+relation WITH the new term included, confirmed to reproduce the existing
+(no-term) formula EXACTLY at `Ci=0` (ratio 1.0 to machine precision,
+checked numerically across several wavenumbers and base states, not just
+asserted) before trusting the extension; (2) the extended derivation
+predicts this term shifts the KH onset threshold DOWNWARD (toward
+lower holdup, the direction needed) as `Ci` increases through the
+literature's own recommended range (`1 < Ci <= 2`), while leaving the
+solver's own actual thin-film holdup for the three worst Mendeley cases
+(0.02-0.05) safely below even the lowered threshold (~0.40-0.48 at
+`Ci=1`) -- predicting little effect on the STANDARD low-initial-condition
+validation, while potentially mattering for the fine-resolution
+bistability branch (item above) which sits at 0.5, now above the lowered
+threshold; (3) a direct growth-rate measurement in the ACTUAL solver (not
+just the linear theory), comparing `Ci=0` vs `Ci=1.5` at several holdups,
+confirmed the predicted shift empirically: growth rate is essentially
+unchanged below the new threshold, but 10-40x LARGER above it (e.g.
+Brito 2012 at holdup 0.7: growth 22 -> 881) -- the mechanism genuinely
+works as derived, in the real nonlinear, friction-included solver, not
+just in the idealized linear analysis.
+
+**Despite being correctly derived and empirically confirmed to do exactly
+what the literature says, it does not help this project's holdup gap, for
+two independent reasons found by direct testing, not assumed:**
+
+1. **It actively worsens the one mechanism that previously helped.**
+   Re-running the fine-resolution + AMR + fixed-IC=0.5 bistability test
+   (the section above) with this term enabled, sweeping `Ci` from 0 to
+   1.5 on the same three worst cases, shows the achieved sustained holdup
+   DECREASING monotonically (or near-monotonically) as `Ci` increases --
+   Brito 2012: 0.5116 (Ci=0) -> 0.0447 (Ci=1.5); Baba 2017: 0.5118 ->
+   0.3147; Ekinci 2015: 0.3641 -> 0.0505 (one non-monotonic point at
+   Ci=0.25). `Ci=0` (i.e. this option OFF) was the best setting of
+   everything tried for that specific mechanism -- adding this
+   regularization moves the bistable branch further FROM the measured
+   values (0.86-0.92), not closer.
+
+2. **It is computationally impractical at the conditions where it would
+   matter most, for a reason inherent to the mechanism, not a fixable
+   implementation detail.** At the standard validation resolution (N=60),
+   enabling it at the literature's own `Ci=1.5` causes a majority of the
+   126-case held-out set to need FAR more explicit steps than the
+   existing 300k-step validation budget allows -- confirmed by direct
+   test to be genuine numerical STIFFNESS, not divergence: one
+   representative case (`Baba 2017, D=0.0254, Vsl=0.22, Vsg=0.21`),
+   given an unlimited step budget, completes cleanly with no NaN at all,
+   but needs **3.89 million** steps (`dt` shrinking to ~1.5e-6 s) to
+   finish the same 8s simulated window the baseline covers in a few
+   thousand. `stableTimeStep()` was extended with a dimensionally-
+   grounded cap for this (`Dp/rho` has units of velocity-squared, folded
+   into the existing velocity-based CFL estimate as an extra
+   characteristic speed -- see `FourFieldSolver.cpp`) specifically
+   because the option's FIRST (uncapped) version let 22 of 126 cases
+   diverge to NaN outright; adding the cap turns those 22 genuine
+   divergences into ~72 cases that instead run out of step budget
+   without ever reaching the sampling window -- worse by that count, but
+   for a qualitatively different and more informative reason: the same
+   large relative velocity that makes `Dp` large enough to meaningfully
+   shift the KH threshold (the whole point of enabling this) ALSO makes
+   `sqrt(Dp/rho)` large enough to demand a correspondingly tiny `dt`.
+   These are the same physics, not two separate bugs -- there is no
+   tunable fix that keeps the beneficial shift without the cost, because
+   the cost scales with exactly the quantity that drives the benefit.
+   Among the 54 of 126 cases that DO complete within the existing budget
+   at `Ci=1.5` (necessarily a biased subset -- precisely the cases where
+   the relative velocity, and hence any effect from this term, is
+   smallest), held-out MAE is 0.4754 versus the unmodified closure's
+   0.3032 on the same cases -- WORSE, not better, consistent with finding
+   1 above: the cases this term could plausibly help are disproportionately
+   the ones it cannot finish computing.
+
+**Conclusion, now reached by two independent lines of evidence rather than
+assumed from either alone: a clean negative result, despite (not because
+of) a correct derivation.** This is a case where "verified against the
+literature and against this solver's own linearized theory" was
+NECESSARY but not SUFFICIENT -- the mechanism does exactly what three
+separate checks (symbolic re-derivation, direct growth-rate measurement,
+and the onset-threshold scan) said it would do, and still does not
+improve, and demonstrably worsens, the actual outcome this project cares
+about. `enableInterfacialPressureJump` defaults to (and stays at) `false`
+for this reason; the stability cap this investigation added to
+`stableTimeStep()` is kept regardless, since it is correct and necessary
+whenever the option IS enabled (e.g. for further research into smaller
+`Ci` values, or a genuinely implicit treatment of this term -- neither
+attempted here), not merely a response to this specific negative result.
+
 ## Validation against experimental data
 
 **[VALIDATION.md](VALIDATION.md)** compares the solver's predicted flow
