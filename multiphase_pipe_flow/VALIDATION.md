@@ -1053,3 +1053,43 @@ methodology, tables, and figures are in the paper (Section 7,
     methodology-fixable problem with how these scalars are fit. No
     solver code changed; `validate_quantitative`'s own regression
     (bit-exact pred_holdup column at default N=60) confirmed before use.
+23. **Done: a Roe/characteristic-method scheme for the layer-1 holdup/
+    momentum coupling -- a small, consistent, parameter-free
+    improvement, not large enough to change the default.** See
+    README.md, "The Roe/characteristic-method scheme for the layer-1
+    holdup/momentum coupling" for the full derivation and account.
+    Implemented `SolverOptions::enableRoeScheme`, motivated by Akselsen
+    (2017, Int. J. Multiphase Flow 89:81-91), who found Roe/
+    characteristic-method schemes predict linear (KH) instability onset
+    somewhat better than plain upwind for this same incompressible
+    two-fluid stratified-flow model. Unlike items 13-15/21/22, this is
+    not a fitted scalar -- it is a scheme change with no free
+    coefficient to overfit, so there is no train/held-out divergence to
+    watch for. Direct growth-rate measurement against the project's own
+    analytical KH dispersion relation (same three Mendeley case studies
+    and four holdups as the interfacial-pressure-jump check) found Roe
+    and upwind agree to within 1-3% at every holdup tested, including
+    the one genuinely unstable point (e10=0.85), where both still
+    underpredict the analytical peak growth rate by roughly 70x -- the
+    same measurement-contamination issue noted in that earlier check,
+    and evidence that smooth, well-resolved profiles leave little room
+    for Roe's upwind-biased dissipation to differ from plain upwind's.
+    Run through the same train (223 cases)/held-out test (126 cases)
+    methodology as items 13-15/21: train MAE improves from 0.0960 to
+    0.0948 (-1.3% relative) and held-out MAE improves from 0.3032 to
+    0.3009 (-0.8% relative) -- both sets move in the SAME direction,
+    with no coefficient to push to a train-optimal point that fails on
+    held-out. At the case level on the held-out set, 58/126 cases
+    improve, 31/126 get worse, and 37/126 are unchanged; the single
+    largest regression (Farsetti et al. 2014, absolute error +0.18) is
+    comparable in size to the single largest improvement (Archibong-Eso
+    et al. 2019, absolute error -0.29), so the net gain is a genuine
+    aggregate effect, not one outlier case. `enableRoeScheme` defaults
+    to `false` because the effect, while real and free of the
+    overfitting risk the closure knobs carry, is too small to justify
+    changing default behaviour for every existing demo and validation
+    baseline; it remains available as an opt-in option for anyone
+    wanting the extra fidelity at sharp fronts (per Akselsen's original
+    motivation) without touching anything else. Regression-confirmed
+    bit-for-bit identical `step()` behaviour throughout with the option
+    off.

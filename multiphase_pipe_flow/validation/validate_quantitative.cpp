@@ -11,7 +11,7 @@
 //
 // Output CSV adds: pred_holdup,pred_dPdz_Pa_m,blew_up
 //
-// Usage: validate_quantitative <input.csv> <output.csv> [closureCorrectionScale] [closureF0Shift] [closureDepositionVelocityScale] [enableTurbulentViscosity(0|1)] [turbulentMixingLengthFraction] [enableInterfacialPressureJump(0|1)] [interfacialPressureJumpCoefficient] [enableInterfacialSlopeClosure(0|1)] [interfacialSlopeCoefficient] [N]
+// Usage: validate_quantitative <input.csv> <output.csv> [closureCorrectionScale] [closureF0Shift] [closureDepositionVelocityScale] [enableTurbulentViscosity(0|1)] [turbulentMixingLengthFraction] [enableInterfacialPressureJump(0|1)] [interfacialPressureJumpCoefficient] [enableInterfacialSlopeClosure(0|1)] [interfacialSlopeCoefficient] [N] [enableRoeScheme(0|1)]
 // The optional third/fourth/fifth arguments, if any is given, set
 // SolverOptions::enableDataDrivenClosureCorrection=true and
 // closureCorrectionScale/closureF0Shift/closureDepositionVelocityScale
@@ -125,7 +125,7 @@ RunResult runOneCase(const Case& c, bool haveClosureScale, double closureScale,
                       bool enableTurbVisc, bool haveMixingLength, double mixingLengthFraction,
                       bool enableInterfacialPressureJump, bool haveCi, double Ci,
                       bool enableInterfacialSlopeClosure, bool haveSlopeCoeff, double slopeCoeff,
-                      int N) {
+                      int N, bool enableRoeScheme) {
     const double D = c.D;
     const double L = std::clamp(60.0 * D, 0.6, 20.0);
 
@@ -157,6 +157,7 @@ RunResult runOneCase(const Case& c, bool haveClosureScale, double closureScale,
         opt.enableInterfacialSlopeClosure = true;
         if (haveSlopeCoeff) opt.interfacialSlopeCoefficient = slopeCoeff;
     }
+    opt.enableRoeScheme = enableRoeScheme;
     mfs::FourFieldSolver solver(D, L, N, fluid, opt);
     solver.setInclinationConstant(c.angle_deg * mfs::constants::pi / 180.0);
 
@@ -247,7 +248,7 @@ RunResult runOneCase(const Case& c, bool haveClosureScale, double closureScale,
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::cerr << "Usage: validate_quantitative <input.csv> <output.csv> [closureCorrectionScale] [closureF0Shift] [closureDepositionVelocityScale] [enableTurbulentViscosity(0|1)] [turbulentMixingLengthFraction] [enableInterfacialPressureJump(0|1)] [interfacialPressureJumpCoefficient] [enableInterfacialSlopeClosure(0|1)] [interfacialSlopeCoefficient] [N]\n";
+        std::cerr << "Usage: validate_quantitative <input.csv> <output.csv> [closureCorrectionScale] [closureF0Shift] [closureDepositionVelocityScale] [enableTurbulentViscosity(0|1)] [turbulentMixingLengthFraction] [enableInterfacialPressureJump(0|1)] [interfacialPressureJumpCoefficient] [enableInterfacialSlopeClosure(0|1)] [interfacialSlopeCoefficient] [N] [enableRoeScheme(0|1)]\n";
         return 1;
     }
     const bool haveClosureScale = (argc >= 4);
@@ -272,6 +273,9 @@ int main(int argc, char** argv) {
     // VALIDATION.md's multi-resolution curriculum fit for why this
     // mattered in practice.
     const int N = (argc >= 13) ? std::stoi(argv[12]) : 60;
+    // See SolverOptions::enableRoeScheme; no extra coefficient needed
+    // (a scheme choice, not a tunable).
+    const bool enableRoeScheme = (argc >= 14) && std::stoi(argv[13]) != 0;
     const auto cases = readCases(argv[1]);
 
     // Each case is an independent FourFieldSolver instance (no shared
@@ -290,7 +294,8 @@ int main(int argc, char** argv) {
                                  haveDepositionScale, depositionScale, enableTurbVisc,
                                  haveMixingLength, mixingLengthFraction,
                                  enableInterfacialPressureJump, haveCi, Ci,
-                                 enableInterfacialSlopeClosure, haveSlopeCoeff, slopeCoeff, N);
+                                 enableInterfacialSlopeClosure, haveSlopeCoeff, slopeCoeff, N,
+                                 enableRoeScheme);
 #ifdef _OPENMP
 #pragma omp critical
 #endif

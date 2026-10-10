@@ -1971,6 +1971,108 @@ and the boundary-condition check above) that this is not a numerics- or
 methodology-fixable problem with how any of these scalars are being
 fit.
 
+#### The Roe/characteristic-method scheme for the layer-1 holdup/momentum coupling
+
+Akselsen (2017, Int. J. Multiphase Flow 89:81-91) studies the SAME
+incompressible two-fluid stratified-flow model this project implements
+and compares plain upwind/Lax-Friedrichs discretizations against Roe
+and characteristic-method schemes, finding the latter predict the onset
+of linear (Kelvin-Helmholtz) instability somewhat better and handle
+roll-wave shock fronts more sharply. `SolverOptions::enableRoeScheme`
+implements a Roe-type approximate Riemann flux for the hyperbolic pair
+this model actually exposes at the layer-1/layer-2 interface: holdup
+`e1 = el+eb` advected by its own momentum field `u1`. Writing the
+continuity and (linearized, inviscid) momentum equations for this pair
+as a genuinely conservative system via the standard shallow-water-type
+"extended flux" trick --
+`F = (e1 u1, u1^2/2 + g cos(theta) h1(e1), u2^2/2 + g cos(theta) h1(e1))`
+-- gives a block-triangular flux Jacobian with eigenvalues `u2` and
+`u1 +/- c`, `c = sqrt(e1 g cos(theta) dh1/de1)`, i.e. the same gravity
+wave speed that makes this model's continuum problem well-posed in the
+first place (see the interfacial-pressure-jump section above). Before
+writing any C++, the eigenstructure, the exact Roe property
+`F(U_R)-F(U_L) = J_roe (U_R-U_L)` (using the SECANT slope
+`(h1_R-h1_L)/(e1_R-e1_L)`, not a face-averaged geometric quantity, since
+`h1(e1)` is genuinely nonlinear for a circular pipe), the wave-strength
+decomposition reconstructing `U_R-U_L` exactly, and the reduction of the
+simplified dissipation formula to the textbook sum-of-waves Roe flux
+were all verified numerically to machine precision (sympy symbolic
+eigenstructure + numpy cross-checks, ~1e-15 to 1e-17 residuals).
+
+Three things scope this honestly to what this codebase's actual
+four-field bookkeeping supports (it tracks `el` and `eb` SEPARATELY, not
+one `e1` field with one velocity): the implementation uses `u1` as
+`e1`'s advecting velocity -- the same `ul ~ u1` approximation this
+project's own KH-dispersion diagnostic already relies on -- then splits
+the resulting Roe flux between `el` and `eb` by their local composition
+(`elHat/e1Hat`, `ebHat/e1Hat`); `eg`/`ed` transport, entrainment/
+deposition source terms, and `u2`'s own advection are untouched; and
+`u1`'s own self-advection/gravity term in `updateLayerMomentum` is left
+as-is, since it already discretizes the SPATIAL slope `dh1/dz` rather
+than the COMPOSITION slope `dh1/de1` the Roe flux's wave speed uses, and
+does not need the same fix. Mutually exclusive with `advectionLimiter`
+for the fields it touches. Confirmed bit-for-bit identical `step()`
+behaviour across every demo case with the option off, and stable (no
+blow-up, plausible mean holdup) in a 101-step smoke test with it on.
+
+**Direct growth-rate measurement**, same methodology as the
+interfacial-pressure-jump check above (Brito 2012, Baba 2017, Ekinci
+2015, at holdups 0.3/0.5/0.7/0.85, N=60):
+
+| case | e10 | analytical peak | upwind | Roe |
+|---|---|---|---|---|
+| Brito 2012 | 0.85 | 835.6 | 11.87 | 11.75 |
+| Baba 2017 | 0.85 | 886.6 | 33.34 | 32.98 |
+| Ekinci 2015 | 0.85 | 949.4 | 11.84 | 11.75 |
+
+(the other nine (case, holdup) combinations are analytically stable --
+peak growth rate 0 -- yet still show nonzero measured growth from
+non-KH dynamics, the same measurement contamination noted in the
+interfacial-pressure-jump check; Roe and upwind agree to within 1-3%
+there too.) Roe and upwind differ by only 1-3% at every holdup tested,
+including the one genuinely unstable point, where both still
+underpredict the analytical peak by roughly 70x. This is consistent
+with Roe's own theoretical consistency property: the correction's
+magnitude scales with the local cell-to-cell jump in `e1`, which is
+small for smooth, well-resolved profiles, so Roe and plain upwind
+converge to the same answer away from sharp fronts. A smooth-
+perturbation growth-rate test is therefore not the most sensitive test
+of this scheme's value; the full holdup validation below, which
+accumulates the difference over many steps, is more decisive.
+
+**Holdup validation**, same train (Kokal 1987 + Newton 1997, 223 cases)/
+held-out test (Mendeley, 126 cases) methodology as the closure-tuning
+section above:
+
+| | upwind (off) | Roe (on) | change |
+|---|---|---|---|
+| train MAE | 0.0960 | 0.0948 | -1.3% |
+| held-out MAE | 0.3032 | 0.3009 | -0.8% |
+
+Unlike every closure-tuning attempt above, this is not a fitted scalar
+-- it is a scheme change with no free coefficient, so there is nothing
+to push to a train-optimal point that then fails on held-out: train and
+held-out both improve, in the same direction, by comparable relative
+amounts. At the case level on the held-out set, 58/126 cases improve,
+31/126 get worse, and 37/126 are exactly unchanged (cases where `e1`'s
+face-to-face jump stays small throughout the run, consistent with the
+growth-rate finding above). The single largest regression
+(Farsetti et al. 2014, `Vsl=1.05`, `Vsg=0.15`: absolute error +0.18) is
+comparable in size to the single largest improvement (Archibong-Eso et
+al. 2019, `Vsl=0.27`, `Vsg=0.11`: absolute error -0.29), so the net gain
+is a genuine aggregate effect across many cases, not one outlier
+dominating the mean.
+
+**Verdict: a real, consistent, parameter-free improvement, genuinely
+different in character from every closure-tuning attempt above (no
+coefficient to overfit, no train/held-out divergence) -- but still too
+small (under 1.5% relative on either set) to justify changing default
+behaviour for every existing demo and validation baseline.**
+`enableRoeScheme` defaults to `false` for this reason and remains
+available as an opt-in option for the extra fidelity at sharp fronts
+Akselsen's original comparison was motivated by, without touching
+anything else in this codebase's behaviour.
+
 ## Validation against experimental data
 
 **[VALIDATION.md](VALIDATION.md)** compares the solver's predicted flow
