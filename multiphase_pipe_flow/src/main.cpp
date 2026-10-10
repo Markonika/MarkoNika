@@ -14,16 +14,23 @@
 //                         along z), the scenario the paper's introduction
 //                         cites as its core motivation.
 //   mfs_demo horizontal_amr
-//                         The same horizontal case, once at a fixed
-//                         resolution and once with adaptive mesh
-//                         refinement (SolverOptions::amr) enabled, timed
-//                         side by side. AMR refines using the same
-//                         Kelvin-Helmholtz F parameter already computed for
+//                         The same horizontal case, at a fixed resolution
+//                         and with adaptive mesh refinement
+//                         (SolverOptions::amr) enabled under each of its
+//                         two refine/coarsen indicators, timed side by
+//                         side. The default, `KelvinHelmholtz`, refines
+//                         using the same F parameter already computed for
 //                         the interfacial friction closure (Closures.hpp)
-//                         as its indicator, coarsening cells where the
-//                         interface is quiescent and never refining finer
-//                         than the baseline resolution by default -- see
-//                         FourFieldSolver.hpp, SolverOptions::amr.
+//                         -- a PHYSICAL instability criterion, coarsening
+//                         cells where the interface is quiescent and never
+//                         refining finer than the baseline resolution by
+//                         default. `WaveletDetail` instead refines/
+//                         coarsens on a purely NUMERICAL representability
+//                         criterion in the adaptive-multiresolution/
+//                         wavelet-threshold tradition (Harten, 1994; Cohen,
+//                         Kaber, Müller & Postel, 2003) -- see
+//                         FourFieldSolver.hpp, SolverOptions::amr, and
+//                         FourFieldSolver.cpp's computeWaveletDetail().
 //   mfs_demo horizontal_movingmesh
 //                         The same horizontal case, fixed grid vs. a moving
 //                         (r-adaptive) mesh that keeps the cell count fixed
@@ -130,7 +137,9 @@ struct HorizontalRunStats { int finalN; int steps; double maxHoldupGradient; };
 
 HorizontalRunStats runHorizontalCase(bool useAmr, bool useMovingMesh, const std::string& outputPath,
                                       bool quiet = false,
-                                      mfs::FluxLimiterType limiter = mfs::FluxLimiterType::None) {
+                                      mfs::FluxLimiterType limiter = mfs::FluxLimiterType::None,
+                                      mfs::SolverOptions::AdaptiveMeshOptions::RefinementIndicator amrIndicator =
+                                          mfs::SolverOptions::AdaptiveMeshOptions::RefinementIndicator::KelvinHelmholtz) {
     if (!quiet) {
         std::cout << "=== Horizontal stratified -> slug transient (cf. Section 4/5.2)"
                    << (useAmr ? ", with AMR ===\n" : useMovingMesh ? ", with moving mesh ===\n" : " ===\n");
@@ -140,6 +149,7 @@ HorizontalRunStats runHorizontalCase(bool useAmr, bool useMovingMesh, const std:
 
     mfs::SolverOptions opt;
     opt.amr.enabled = useAmr;
+    opt.amr.indicator = amrIndicator;
     opt.movingMesh.enabled = useMovingMesh;
     opt.advectionLimiter = limiter;
     mfs::FourFieldSolver solver(D, L, N, airWater(), opt);
@@ -199,25 +209,47 @@ HorizontalRunStats runHorizontalCase(bool useAmr, bool useMovingMesh, const std:
 }
 
 void runHorizontalAmrComparison() {
-    std::cout << "=== AMR vs. fixed-grid comparison on the horizontal slug-formation case ===\n";
+    using Indicator = mfs::SolverOptions::AdaptiveMeshOptions::RefinementIndicator;
+    std::cout << "=== AMR vs. fixed-grid comparison on the horizontal slug-formation case:\n"
+                 "    the default Kelvin-Helmholtz indicator (a PHYSICAL instability\n"
+                 "    criterion) against the WaveletDetail one (a NUMERICAL\n"
+                 "    representability criterion, adaptive-multiresolution-style -- see\n"
+                 "    SolverOptions::amr and FourFieldSolver.cpp's computeWaveletDetail()).\n"
+                 "    ===\n";
     std::cout << "Running fixed grid (N=300)...\n";
     auto t0 = std::chrono::steady_clock::now();
     const auto fixedStats = runHorizontalCase(false, false, "horizontal_fixed_output.csv", /*quiet=*/true);
     auto t1 = std::chrono::steady_clock::now();
 
-    std::cout << "Running with AMR enabled...\n";
-    const auto amrStats = runHorizontalCase(true, false, "horizontal_amr_output.csv", /*quiet=*/true);
+    std::cout << "Running with AMR enabled (Kelvin-Helmholtz indicator)...\n";
+    const auto khStats = runHorizontalCase(true, false, "horizontal_amr_output.csv", /*quiet=*/true,
+                                            mfs::FluxLimiterType::None, Indicator::KelvinHelmholtz);
     auto t2 = std::chrono::steady_clock::now();
 
+    std::cout << "Running with AMR enabled (WaveletDetail indicator)...\n";
+    const auto waveletStats = runHorizontalCase(true, false, "horizontal_amr_wavelet_output.csv", /*quiet=*/true,
+                                                 mfs::FluxLimiterType::None, Indicator::WaveletDetail);
+    auto t3 = std::chrono::steady_clock::now();
+
     const double fixedSec = std::chrono::duration<double>(t1 - t0).count();
-    const double amrSec = std::chrono::duration<double>(t2 - t1).count();
-    std::cout << "\nFixed grid : " << fixedStats.steps << " steps, N=" << fixedStats.finalN
-              << " cells throughout, " << fixedSec << " s\n";
-    std::cout << "AMR        : " << amrStats.steps << " steps, N=" << amrStats.finalN
-              << " cells at end, " << amrSec << " s (" << (fixedSec / amrSec) << "x)\n";
-    std::cout << "Wrote horizontal_fixed_output.csv and horizontal_amr_output.csv\n"
-                 "(the AMR file's per-cell rows are at whatever local resolution that\n"
-                 "snapshot's mesh had -- z spacing varies row to row within a snapshot).\n\n";
+    const double khSec = std::chrono::duration<double>(t2 - t1).count();
+    const double waveletSec = std::chrono::duration<double>(t3 - t2).count();
+    std::cout << "\nFixed grid     : " << fixedStats.steps << " steps, N=" << fixedStats.finalN
+              << " cells throughout, " << fixedSec << " s, steepest |d(eL)/dz| = "
+              << fixedStats.maxHoldupGradient << " /m\n";
+    std::cout << "AMR (KH)       : " << khStats.steps << " steps, N=" << khStats.finalN
+              << " cells at end, " << khSec << " s (" << (fixedSec / khSec)
+              << "x), steepest |d(eL)/dz| = " << khStats.maxHoldupGradient << " /m ("
+              << (khStats.maxHoldupGradient / fixedStats.maxHoldupGradient) << "x fixed)\n";
+    std::cout << "AMR (Wavelet)  : " << waveletStats.steps << " steps, N=" << waveletStats.finalN
+              << " cells at end, " << waveletSec << " s (" << (fixedSec / waveletSec)
+              << "x), steepest |d(eL)/dz| = " << waveletStats.maxHoldupGradient << " /m ("
+              << (waveletStats.maxHoldupGradient / fixedStats.maxHoldupGradient) << "x fixed, "
+              << (waveletStats.maxHoldupGradient / khStats.maxHoldupGradient) << "x KH)\n";
+    std::cout << "Wrote horizontal_fixed_output.csv, horizontal_amr_output.csv and\n"
+                 "horizontal_amr_wavelet_output.csv (each AMR file's per-cell rows are at\n"
+                 "whatever local resolution that snapshot's mesh had -- z spacing varies\n"
+                 "row to row within a snapshot).\n\n";
 }
 
 void runHorizontalMovingMeshComparison() {

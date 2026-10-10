@@ -1127,3 +1127,45 @@ methodology, tables, and figures are in the paper (Section 7,
     anyone already using the moving mesh. Regression-confirmed
     bit-for-bit identical `step()` behaviour throughout with the option
     off.
+25. **Done: a wavelet-threshold (adaptive-multiresolution-style)
+    refinement indicator for AMR -- a third, genuinely different
+    criterion, and the best-performing AMR result in this project so
+    far.** See README.md, "A wavelet-threshold refinement indicator: a
+    third, genuinely different criterion" for the full account. Added
+    `SolverOptions::amr.indicator` (`KelvinHelmholtz` default,
+    `WaveletDetail` new), motivated by the adaptive-multiresolution /
+    wavelet-threshold literature (Harten, 1994; Cohen, Kaber, Müller &
+    Postel, 2003), whose criterion ties refine/coarsen decisions to a
+    NUMERICAL representability estimate rather than the existing
+    indicator's PHYSICAL instability flag. The full dyadic-hierarchy
+    machinery those papers build was judged too large an undertaking
+    given this model's own known non-conservative, ill-posed-without-
+    regularization character (consistent with the caution flagged when
+    this option was first proposed) and was not attempted; implemented
+    instead as an honestly scoped-down surrogate, `computeWaveletDetail()`
+    -- a non-uniform 3-point second-difference curvature estimate scaled
+    by half the local cell width squared (the standard h^2/2*f''
+    truncation-error scaling) -- verified numerically before being
+    written into C++: shrinks like the square of the local cell width
+    for any smooth profile as the mesh refines (~4x per halving,
+    confirmed across a 40-to-320-cell sweep), stays at full magnitude
+    across a genuine kink regardless of resolution (confirmed on a step
+    profile). Reuses `adaptMesh()`'s existing split/merge mechanics
+    entirely; only the per-cell array and thresholds feeding the
+    refine/coarsen decision differ. Measured on the same horizontal
+    slug-formation demo used for every other mesh-adaptivity feature in
+    this project (`mfs_demo horizontal_amr`, now runs both indicators):
+    the new indicator ends with FEWER cells than the existing one (90
+    vs. 105) while capturing the front MORE sharply than even the fixed
+    grid itself (1.05x) and 1.38x sharper than the existing indicator's
+    run (0.76x), at a real if smaller speedup (4.1x vs. 7.0x). A
+    genuinely different point on the cost/accuracy trade-off, not a
+    strictly better or worse version of the existing one -- consistent
+    with its criterion being tied to representability rather than a
+    physical flag that can both over- and under-refine relative to what
+    the numerics actually need. `indicator` defaults to
+    `KelvinHelmholtz` regardless (one case/one snapshot, and it is the
+    literature-precedented choice for this exact model), with
+    `WaveletDetail` available as a principled alternative. Regression-
+    confirmed bit-for-bit identical `step()` behaviour throughout with
+    the default indicator.

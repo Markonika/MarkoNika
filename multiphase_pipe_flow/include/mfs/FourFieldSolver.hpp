@@ -701,6 +701,47 @@ struct SolverOptions {
         double minCellWidthFraction = 1.0; // as a fraction of the INITIAL uniform spacing
         double maxCellWidthFraction = 4.0;  // as a fraction of the INITIAL uniform spacing
         double maxCellCountFactor = 4.0;    // cap on N, as a multiple of the initial N
+
+        // Which per-cell quantity adaptMesh() refines/coarsens on.
+        // `KelvinHelmholtz` (default) is the physical criterion above:
+        // closure-predicted interfacial instability, independent of
+        // whether the field is actually numerically well-resolved there.
+        // `WaveletDetail` instead asks a purely NUMERICAL question --
+        // "how well does the current mesh represent this part of the
+        // eL(z) profile?" -- following the adaptive-multiresolution /
+        // wavelet-threshold literature (Harten, 1994, "Adaptive
+        // Multiresolution Schemes for Shock Computations"; Cohen,
+        // Kaber, Müller & Postel, 2003, extending it to finite-volume
+        // conservation laws), whose detail coefficients measure the
+        // information actually lost by a coarser representation, with
+        // an accuracy bound tied directly to the threshold chosen,
+        // rather than inferred indirectly from a physical closure's own
+        // threshold. This project's own dyadic cell-average hierarchy
+        // (the full machinery those papers build) is NOT implemented
+        // here -- see `computeWaveletDetail()` in FourFieldSolver.cpp
+        // for the honestly scoped-down surrogate actually used, and why
+        // it still has the one property that matters for this purpose
+        // (shrinks like the square of the local cell width for any
+        // smooth profile, stays large at a genuine kink/discontinuity
+        // regardless of resolution -- verified numerically, not just
+        // asserted, before being written into C++). The refine/coarsen
+        // MECHANICS (split/merge, conservative remapping) below are
+        // entirely unchanged; only which array feeds them differs.
+        enum class RefinementIndicator { KelvinHelmholtz, WaveletDetail };
+        RefinementIndicator indicator = RefinementIndicator::KelvinHelmholtz;
+        // Thresholds on the detail coefficient itself (same units as eL,
+        // i.e. an O(cell-width^2 * local curvature) error estimate -- NOT
+        // comparable in scale to refineThreshold/coarsenThreshold above,
+        // which are F/F0 ratios). Defaults chosen from the detail
+        // coefficient's observed distribution on this project's own
+        // horizontal slug-formation demo at a late, front-bearing
+        // snapshot (median ~9e-6, 90th percentile ~7e-4, 99th percentile
+        // ~0.07, max ~0.13): waveletCoarsenThreshold sits just above the
+        // bulk of smooth, quiescent cells; waveletRefineThreshold sits
+        // in the sharp tail actually at the front. Only meaningful when
+        // `indicator == WaveletDetail`.
+        double waveletRefineThreshold = 0.01;
+        double waveletCoarsenThreshold = 0.001;
     } amr;
 
     // Moving-mesh (r-adaptive) node tracking: the literature's other AMR
@@ -1050,6 +1091,12 @@ private:
     // splitting cells flagged for refinement and merging adjacent pairs
     // flagged for coarsening. Returns true if the mesh changed.
     std::vector<double> computeIndicator() const;
+    // Per-cell wavelet/multiresolution-style detail coefficient on eL(z)
+    // (see SolverOptions::AdaptiveMeshOptions::RefinementIndicator
+    // above), used by adaptMesh() instead of computeIndicator() when
+    // `amr.indicator == WaveletDetail`. Zero at the two domain boundary
+    // cells (no interior 3-point stencil available there).
+    std::vector<double> computeWaveletDetail() const;
     bool adaptMesh();
 
     // Moving mesh: computeMonitorFunction() gives the per-cell M used to

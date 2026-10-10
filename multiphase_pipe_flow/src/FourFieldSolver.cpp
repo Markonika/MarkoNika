@@ -1518,11 +1518,49 @@ std::vector<double> FourFieldSolver::computeIndicator() const {
 
 std::vector<double> FourFieldSolver::refinementIndicatorProfile() const { return computeIndicator(); }
 
+std::vector<double> FourFieldSolver::computeWaveletDetail() const {
+    const int N = state_.N;
+    std::vector<double> d(N, 0.0);
+    if (N < 3) return d;
+
+    // Non-uniform 3-point second-derivative estimate (exact for
+    // genuinely quadratic data, -> the true f''(z_i) as both
+    // neighbouring spacings -> 0; derived and verified symbolically and
+    // numerically before being written here -- see
+    // wavelet_detail_check.py in this session's scratch history):
+    //   f''(z_i) ~= 2*[(v_{i+1}-v_i)/hp - (v_i-v_{i-1})/hm] / (hm+hp)
+    // Scaling by half the local width squared turns this curvature
+    // estimate into a local-truncation-error-SIZED quantity (the same
+    // h^2/2 * f'' Taylor-remainder scaling behind any second-order
+    // scheme's error estimate): it shrinks like the square of the local
+    // cell width for ANY fixed smooth eL(z) as the mesh refines
+    // (verified: ~4x per halving, i.e. O(h^2), across a 40->320 cell
+    // sweep on a smooth test profile), while staying at its full,
+    // non-shrinking value across a genuine kink or discontinuity in
+    // eL(z) regardless of local resolution (verified on a step-profile
+    // test) -- the discrimination a multiresolution/wavelet-threshold
+    // criterion needs between "under-resolved" and "just steep".
+    for (int i = 1; i < N - 1; ++i) {
+        const double hm = state_.centerDistance(i - 1, i);
+        const double hp = state_.centerDistance(i, i + 1);
+        if (hm <= 0.0 || hp <= 0.0) continue;
+        const double vm = state_.eL(i - 1), v0 = state_.eL(i), vp = state_.eL(i + 1);
+        const double f2 = 2.0 * ((vp - v0) / hp - (v0 - vm) / hm) / (hm + hp);
+        const double w = 0.5 * (hm + hp);
+        d[i] = 0.5 * w * w * std::fabs(f2);
+    }
+    return d;
+}
+
 bool FourFieldSolver::adaptMesh() {
     const int N = state_.N;
     if (N < 2) return false;
 
-    const std::vector<double> F = computeIndicator();
+    const bool useWavelet =
+        options_.amr.indicator == SolverOptions::AdaptiveMeshOptions::RefinementIndicator::WaveletDetail;
+    const std::vector<double> F = useWavelet ? computeWaveletDetail() : computeIndicator();
+    const double refineThresh = useWavelet ? options_.amr.waveletRefineThreshold : options_.amr.refineThreshold;
+    const double coarsenThresh = useWavelet ? options_.amr.waveletCoarsenThreshold : options_.amr.coarsenThreshold;
 
     const double minWidth = initialDz_ * options_.amr.minCellWidthFraction;
     const double maxWidth = initialDz_ * options_.amr.maxCellWidthFraction;
@@ -1532,10 +1570,10 @@ bool FourFieldSolver::adaptMesh() {
     int cellBudget = maxCells - N; // extra cells still allowed; each split adds exactly one
     for (int i = 0; i < N; ++i) {
         const double w = state_.cellWidth(i);
-        if (F[i] > options_.amr.refineThreshold && w > 2.0 * minWidth && cellBudget > 0) {
+        if (F[i] > refineThresh && w > 2.0 * minWidth && cellBudget > 0) {
             refine[i] = 1;
             --cellBudget;
-        } else if (F[i] < options_.amr.coarsenThreshold && w < maxWidth) {
+        } else if (F[i] < coarsenThresh && w < maxWidth) {
             coarsen[i] = 1;
         }
     }

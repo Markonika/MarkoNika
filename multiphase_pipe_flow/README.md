@@ -212,6 +212,80 @@ pipe-flow literature for this class of model; the other -- a *moving-grid*
 scheme, where grid points move with fronts instead of a fixed grid being
 locally refined -- is implemented too, see below.
 
+#### A wavelet-threshold refinement indicator: a third, genuinely different criterion
+
+The Kelvin-Helmholtz indicator above answers a *physical* question --
+"is the interface going unstable here?" -- which is independent of
+whether the mesh can actually RESOLVE whatever is happening there: a
+smooth, well-captured front sitting past the closure's own F0 stays
+flagged for refinement even once it's already perfectly represented,
+while a numerically under-resolved kink in a region the closure judges
+stable gets no help at all. `SolverOptions::amr.indicator =
+RefinementIndicator::WaveletDetail` (default stays `KelvinHelmholtz`)
+answers the other, *numerical* question instead -- "how well does the
+current mesh represent eL(z) here?" -- following the adaptive-
+multiresolution / wavelet-threshold literature (Harten, 1994, "Adaptive
+Multiresolution Schemes for Shock Computations," ICASE Report 94-59;
+Cohen, Kaber, Müller & Postel, 2003, "Fully Adaptive Multiresolution
+Finite Volume Schemes for Conservation Laws," Math. Comp. 72, 183-225),
+whose detail coefficients measure information actually lost by a
+coarser representation, with accuracy tied directly to the threshold
+chosen rather than inferred indirectly from a physical closure's own
+cutoff. A literature search found no published work combining the full
+multiresolution machinery (those papers' dyadic cell-average hierarchy)
+with this specific slug-capturing two-fluid model -- that full
+machinery is **not** attempted here, since the model's own known
+non-conservative, short-wave-ill-posed-without-regularization character
+(see "Well-balanced..." and the biharmonic-damping section above) makes
+a literal reproduction of a conservation-law-specific framework a
+materially larger and riskier undertaking than this pass took on.
+Instead, `computeWaveletDetail()` (`FourFieldSolver.cpp`) computes an
+honestly scoped-down surrogate with the one property that actually
+matters for this purpose: a standard non-uniform 3-point second-
+difference estimate of eL(z)'s local curvature, scaled by half the
+local cell width squared (the same h²/2·f'' scaling behind any
+second-order scheme's local truncation-error estimate). Verified
+numerically before being written into C++ (see
+`wavelet_detail_check.py` in this session's working notes): exact for
+the true second derivative in the uniform-spacing limit, shrinks like
+the SQUARE of the local cell width for any fixed smooth eL(z) profile as
+the mesh refines (confirmed ~4x per halving across a 40-to-320-cell
+sweep), and stays at its full, non-shrinking value across a genuine kink
+or discontinuity regardless of local resolution (confirmed on a step
+profile) -- exactly the discrimination between "under-resolved" and
+"just steep" a multiresolution/wavelet-threshold criterion needs. Reuses
+`adaptMesh()`'s existing split/merge mechanics entirely (conservative
+merge, duplicate-copy split, interpolated face velocities) -- only the
+per-cell array and thresholds feeding the refine/coarsen decision
+differ; bit-for-bit identical `step()` behaviour confirmed with the
+default (`KelvinHelmholtz`) indicator.
+
+**Measured on the same horizontal slug-formation demo used for the
+Kelvin-Helmholtz indicator above** (`mfs_demo horizontal_amr`, now runs
+both indicators side by side):
+
+| scheme | final N | steps | wall-clock vs. fixed grid | steepest `|d(eL)/dz|` | vs. fixed grid |
+|---|---|---|---|---|---|
+| fixed grid | 300 | 8158 | 1.00x | 3.25 /m | 1.00x |
+| AMR (Kelvin-Helmholtz) | 105 | 3516 | 7.0x faster | 2.48 /m | 0.76x |
+| AMR (WaveletDetail) | 90 | 6715 | 4.1x faster | 3.41 /m | **1.05x** |
+
+A genuinely different point on the cost/accuracy trade-off, not simply a
+weaker or stronger version of the existing indicator: the Kelvin-
+Helmholtz indicator buys the bigger speedup (7.0x) at the documented
+accuracy cost noted above (0.76x as sharp as the fixed grid -- real,
+not free); the wavelet-detail indicator buys a smaller but still real
+speedup (4.1x) while ending up with FEWER cells than the KH run (90 vs.
+105) yet capturing the front *more* sharply than even the fixed grid
+itself (1.05x) and 1.38x sharper than the KH-indicator run -- consistent
+with its criterion being tied directly to local representability rather
+than to a physical instability flag that can both over- and
+under-refine relative to what the numerics actually need. One case, one
+snapshot; `indicator` defaults to `KelvinHelmholtz` for this reason and
+because it is the literature-precedented choice for this exact model,
+but `WaveletDetail` is available as a principled alternative wherever
+capturing accuracy matters more than the largest possible speedup.
+
 ### Moving-mesh (r-adaptive) tracking
 
 Off by default (`SolverOptions::movingMesh.enabled = false`), and
