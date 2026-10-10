@@ -522,6 +522,72 @@ struct SolverOptions {
     // updateLayerMomentum().
     bool enableWellBalancedGravity = false;
 
+    // Roe (1981)-type approximate Riemann flux for the (e1, u1) layer-1
+    // holdup/momentum pair, off by default so existing behaviour
+    // (plain upwind, or MUSCL/TVD via advectionLimiter) is unchanged
+    // unless opted into. Found via a literature search specifically for
+    // higher-order numerical STABILIZATION (as opposed to added physics
+    // terms, everything else in this run of experiments): Akselsen
+    // (2017), "Characteristic methods and Roe's method for the
+    // incompressible two-fluid model for stratified pipe flow", Int. J.
+    // Multiphase Flow 89:81-91, builds a Roe scheme and characteristic-
+    // method hybrids for THIS SAME model class and reports that
+    // characteristic-based methods "predict linear instability somewhat
+    // better" than plain upwind/Lax-Friedrichs, while Roe itself handles
+    // roll-wave shock fronts better -- both directly on point for this
+    // codebase's own documented gap (the solver's own KH-instability
+    // onset not matching real slug-flow conditions, see VALIDATION.md
+    // items 15-18).
+    //
+    // Derivation (full account in VALIDATION.md): the flux function
+    //   F = (e1*u1,  u1^2/2 + g*costh*h1(e1),  u2^2/2 + g*costh*h1(e1))
+    // (the standard shallow-water-type "extended flux" trick that folds
+    // the gravity/level-gradient term into a genuine flux divergence, so
+    // the combined advection+gravity terms become a SINGLE flux
+    // divergence a Riemann solver can be built for) has a block-
+    // triangular Jacobian with eigenvalues u2 (a pure "u2 advects
+    // itself" wave, eigenvector (0,0,1) -- already exactly what plain
+    // upwind of u2 computes, so this option changes nothing about u2's
+    // OWN advection) and u1 +- c, c = sqrt(e1*g*costh*dh1/de1) (the
+    // layer-1 "gravity wave" pair, eigenvectors (e1,+-c,c^2/(lambda-u2))).
+    // Verified before implementing, each to machine precision against
+    // randomized states (not assumed): the eigenstructure against a
+    // direct numerical eigendecomposition; the EXACT Roe property
+    // F(U_R)-F(U_L) == J_roe*(U_R-U_L) (achieving this for h1(e1)'s
+    // genuinely nonlinear circular-pipe chord-height relation requires
+    // the gravity-coupling coefficient to be the SECANT slope
+    // (h1R-h1L)/(e1R-e1L) between the two actual states, not a face-
+    // averaged geometric quantity the way this file averages other
+    // geometry terms); the wave-strength decomposition reconstructing
+    // (U_R-U_L) exactly; and the simplified closed-form dissipation
+    // formula this codebase actually implements against the textbook
+    // sum-of-waves construction. See FourFieldSolver.cpp's roeFlux()
+    // for the verified closed form.
+    //
+    // Scope, stated explicitly: this codebase's four-field bookkeeping
+    // tracks el (continuous liquid, advected by ul) and eb (entrained
+    // bubbles, advected by ub) SEPARATELY, not a single e1=el+eb field
+    // with one velocity -- so a LITERALLY exact four-field Roe scheme
+    // would need ul and ub as independent hyperbolic variables too, a
+    // substantially larger undertaking. This option targets the
+    // DOMINANT, KH-relevant coupling this whole investigation has
+    // centred on: it applies the Roe flux to the AGGREGATE e1 (using
+    // u1 as e1's advecting velocity, the SAME ul~=u1 approximation this
+    // codebase's own earlier KH-dispersion diagnostic already uses and
+    // has validated against this solver's own measured growth rate),
+    // then splits the resulting flux between el and eb in proportion to
+    // their LOCAL relative shares (el/e1, eb/e1) -- an explicit,
+    // documented approximation, not a hidden one. eg, ed's own
+    // transport, the entrainment/deposition source terms, and u2's own
+    // advection are UNCHANGED by this option (u2's advection already is
+    // the exact characteristic treatment for its own, decoupled
+    // eigenvalue). Mutually exclusive with advectionLimiter for the
+    // pieces this option touches (el/eb/u1) -- enabling both is
+    // untested and advectionLimiter's setting is ignored for those
+    // fields when this is on, documented at the point of use rather
+    // than silently.
+    bool enableRoeScheme = false;
+
     // Interfacial pressure-jump regularization (Stewart & Wendroff, 1984;
     // Toumi & Kumbaro, 1996; adapted here to this solver's two-LAYER,
     // not general multi-fluid, acceleration-form momentum equations), off

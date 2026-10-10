@@ -351,6 +351,72 @@ namespace {
         return donorVal + 0.5 * psi * denom;
     }
 
+    // Roe (1981)-type approximate Riemann flux for the (e1, u1, u2)
+    // hyperbolic subsystem -- see SolverOptions::enableRoeScheme for the
+    // literature motivation (Akselsen 2017) and the full derivation
+    // writeup in VALIDATION.md. Linearizes the "extended flux" (the
+    // standard shallow-water-type trick that folds the gravity/level-
+    // gradient term into a genuine flux divergence):
+    //   F = (e1*u1,  u1^2/2 + g*costh*h1(e1),  u2^2/2 + g*costh*h1(e1))
+    // Its Jacobian is block-triangular with eigenvalues u2 (eigenvector
+    // (0,0,1)) and u1 +- c, c = sqrt(e1*g*costh*dh1/de1) (eigenvectors
+    // (e1, +-c, c^2/(lambda-u2))) -- derived by hand, then verified before
+    // writing this function: the eigenstructure against a direct
+    // numerical eigendecomposition, the EXACT Roe property
+    // F(U_R)-F(U_L) == J_roe*(U_R-U_L), the wave-strength decomposition
+    // reconstructing (U_R-U_L) exactly, and this exact simplified
+    // dissipation formula against the textbook sum-of-waves construction
+    // -- each to machine precision across randomized states. Achieving
+    // the EXACT Roe property for this genuinely nonlinear h1(e1) (a
+    // circular-pipe chord-height relation) requires dh1/de1 to be the
+    // SECANT slope (h1R-h1L)/(e1R-e1L) between the two actual states, not
+    // a face-averaged geometric quantity the way this file averages
+    // other geometry terms (e.g. Sif below) -- confirmed to be the one
+    // place that distinction matters for exactness, not just a
+    // second-order detail.
+    struct RoeFlux13 { double F1, F2, F3; };
+    inline RoeFlux13 roeFlux(double e1L, double u1L, double u2L, double h1L,
+                              double e1R, double u1R, double u2R, double h1R,
+                              double g, double costh) {
+        const double e1Hat = 0.5 * (e1L + e1R);
+        const double u1Hat = 0.5 * (u1L + u1R);
+        const double u2Hat = 0.5 * (u2L + u2R);
+        const double de1 = e1R - e1L;
+        const double secant = (std::fabs(de1) > 1.0e-10) ? (h1R - h1L) / de1 : 0.0;
+        const double cSq = std::max(g * costh * secant * e1Hat, 0.0);
+        const double cHat = std::sqrt(cSq);
+
+        const double avgF1 = 0.5 * (e1L * u1L + e1R * u1R);
+        const double avgF2 = 0.5 * (0.5 * u1L * u1L + g * costh * h1L + 0.5 * u1R * u1R + g * costh * h1R);
+        const double avgF3 = 0.5 * (0.5 * u2L * u2L + g * costh * h1L + 0.5 * u2R * u2R + g * costh * h1R);
+
+        if (cHat < 1.0e-8) {
+            // Degenerate gravity-wave speed (e.g. e1L==e1R to within the
+            // secant guard above): fall back to plain upwind-by-sign for
+            // the dissipation term alone -- the exact-average flux above
+            // never divides by cHat, so this branch is only about how
+            // much upwind dissipation to add, not a different flux.
+            const double diss1 = std::fabs(u1Hat) * de1;
+            const double diss2 = std::fabs(u1Hat) * (u1R - u1L);
+            const double diss3 = std::fabs(u2Hat) * (u2R - u2L);
+            return { avgF1 - 0.5 * diss1, avgF2 - 0.5 * diss2, avgF3 - 0.5 * diss3 };
+        }
+
+        const double lamPlus = u1Hat + cHat, lamMinus = u1Hat - cHat, lam3 = u2Hat;
+        const double alphaPlus = 0.5 * (de1 / e1Hat + (u1R - u1L) / cHat);
+        const double alphaMinus = 0.5 * (de1 / e1Hat - (u1R - u1L) / cHat);
+        const double r3Plus = cSq / (lamPlus - lam3);
+        const double r3Minus = cSq / (lamMinus - lam3);
+        const double alpha3 = (u2R - u2L) - alphaPlus * r3Plus - alphaMinus * r3Minus;
+
+        const double diss1 = std::fabs(lamPlus) * alphaPlus * e1Hat + std::fabs(lamMinus) * alphaMinus * e1Hat;
+        const double diss2 = std::fabs(lamPlus) * alphaPlus * cHat - std::fabs(lamMinus) * alphaMinus * cHat;
+        const double diss3 = std::fabs(lamPlus) * alphaPlus * r3Plus + std::fabs(lamMinus) * alphaMinus * r3Minus
+                              + std::fabs(lam3) * alpha3;
+
+        return { avgF1 - 0.5 * diss1, avgF2 - 0.5 * diss2, avgF3 - 0.5 * diss3 };
+    }
+
     inline double rho1Of(const FlowState& s, const std::vector<double>& rhoGasCell, double rhoL, int i) {
         const double e1 = s.e1(i);
         return (s.el[i] * rhoL + s.eb[i] * rhoGasCell[i]) / std::max(e1, small_e);
@@ -1144,6 +1210,65 @@ void FourFieldSolver::updateContinuity(double dt) {
         }
     };
 
+    // See SolverOptions::enableRoeScheme. Roe-consistent flux for the
+    // AGGREGATE e1=el+eb at face f, split proportionally into el/eb by
+    // local composition -- the SAME physical bubble/liquid flux used
+    // both for el's/eb's own continuity below AND for the el/eb
+    // cross-terms already present inside eL's/eG's own bookkeeping
+    // (eL=el+ed, eG=eg+eb), not recomputed differently in each place.
+    // Boundary faces (f=0 inlet, f=N outlet) keep the existing plain
+    // upwind treatment -- one-directional in/outflow there already makes
+    // this formula reduce to plain upwind exactly (verified, not
+    // assumed; see VALIDATION.md), so the boundary special-case changes
+    // nothing, it just avoids needing an inlet/outlet h1 value.
+    auto roeElEb = [&](int f, double& fluxEl, double& fluxEb) {
+        if (f == 0) {
+            fluxEl = inletEl() * state_.u1[0];
+            fluxEb = inletEb() * state_.u1[0];
+            return;
+        }
+        if (f == N) {
+            fluxEl = state_.el[N - 1] * state_.u1[N];
+            fluxEb = state_.eb[N - 1] * state_.u1[N];
+            return;
+        }
+        const int cL = f - 1, cR = f;
+        const double elL = state_.el[cL], elR = state_.el[cR];
+        const double ebL = state_.eb[cL], ebR = state_.eb[cR];
+        const double e1L = elL + ebL, e1R = elR + ebR;
+        const double h1L = geom_[cL].h1, h1R = geom_[cR].h1;
+        const double u1Hat = state_.u1[f];
+        const double thetaF = 0.5 * (state_.theta[cL] + state_.theta[cR]);
+        const double de1 = e1R - e1L;
+        const double e1Hat = 0.5 * (e1L + e1R);
+        const double secant = (std::fabs(de1) > 1.0e-10) ? (h1R - h1L) / de1 : 0.0;
+        const double cSq = std::max(gravity * std::cos(thetaF) * secant * e1Hat, 0.0);
+        const double cHat = std::sqrt(cSq);
+        const double lamPlus = u1Hat + cHat, lamMinus = u1Hat - cHat;
+
+        double F1;
+        if (lamMinus >= 0.0) {
+            F1 = e1L * u1Hat;
+        } else if (lamPlus <= 0.0) {
+            F1 = e1R * u1Hat;
+        } else {
+            const double e1HatSafe = std::max(e1Hat, small_e);
+            // alphaPlus == alphaMinus here: u1 is already single-valued
+            // at this face (a staggered-grid quantity, not something
+            // with a left/right jump the way el/eb have), so the
+            // general Roe formula's (u1R-u1L)-dependent piece of each
+            // wave strength vanishes identically, leaving only the e1
+            // jump split evenly between the two gravity-wave families.
+            const double alpha = 0.5 * de1 / e1HatSafe;
+            const double diss = e1Hat * alpha * (std::fabs(lamPlus) + std::fabs(lamMinus));
+            F1 = e1Hat * u1Hat - 0.5 * diss;
+        }
+        const double elHat = 0.5 * (elL + elR), ebHat = 0.5 * (ebL + ebR);
+        const double e1HatSafe = std::max(e1Hat, small_e);
+        fluxEl = F1 * (elHat / e1HatSafe);
+        fluxEb = F1 * (ebHat / e1HatSafe);
+    };
+
     std::vector<double> edNew(N), ebNew(N), eLNew(N), eGNew(N);
 
     // Surface-tension-motivated regularization (SolverOptions::
@@ -1170,26 +1295,32 @@ void FourFieldSolver::updateContinuity(double dt) {
         const double fluxEdL = edL * state_.ud[fL];
         edNew[i] = state_.ed[i] + dt * (-(fluxEdR - fluxEdL) / dz + (Ue_[i] - Ud_[i]) / rhoL);
 
-        const double ebL = upwind(state_.eb, fL, state_.ub[fL], inletEb());
-        const double ebR = upwind(state_.eb, fR, state_.ub[fR], inletEb());
-        const double fluxEbR = ebR * state_.ub[fR];
-        const double fluxEbL = ebL * state_.ub[fL];
+        double fluxElL, fluxEbL, fluxElR, fluxEbR;
+        if (options_.enableRoeScheme) {
+            roeElEb(fL, fluxElL, fluxEbL);
+            roeElEb(fR, fluxElR, fluxEbR);
+        } else {
+            const double ebL = upwind(state_.eb, fL, state_.ub[fL], inletEb());
+            const double ebR = upwind(state_.eb, fR, state_.ub[fR], inletEb());
+            fluxEbR = ebR * state_.ub[fR];
+            fluxEbL = ebL * state_.ub[fL];
+            const double elL = upwind(state_.el, fL, state_.ul[fL], inletEl());
+            const double elR = upwind(state_.el, fR, state_.ul[fR], inletEl());
+            fluxElR = elR * state_.ul[fR];
+            fluxElL = elL * state_.ul[fL];
+        }
         ebNew[i] = state_.eb[i] + dt * (-(fluxEbR - fluxEbL) / dz + (phiE_[i] - phiDe_[i]) / std::max(rhoGasCell_[i], tiny));
 
-        const double elL = upwind(state_.el, fL, state_.ul[fL], inletEl());
-        const double elR = upwind(state_.el, fR, state_.ul[fR], inletEl());
         const double udAtL = upwind(state_.ed, fL, state_.ud[fL], inletEd()); // reuse ed upwind for the ed*ud term
         const double udAtR = upwind(state_.ed, fR, state_.ud[fR], inletEd());
-        const double fluxLR = elR * state_.ul[fR] + udAtR * state_.ud[fR];
-        const double fluxLL = elL * state_.ul[fL] + udAtL * state_.ud[fL];
+        const double fluxLR = fluxElR + udAtR * state_.ud[fR];
+        const double fluxLL = fluxElL + udAtL * state_.ud[fL];
         eLNew[i] = state_.eL(i) + dt * (-(fluxLR - fluxLL) / dz);
 
         const double egL = upwind(state_.eg, fL, state_.ug[fL], inletEg());
         const double egR = upwind(state_.eg, fR, state_.ug[fR], inletEg());
-        const double ubAtL = upwind(state_.eb, fL, state_.ub[fL], inletEb());
-        const double ubAtR = upwind(state_.eb, fR, state_.ub[fR], inletEb());
-        const double fluxGR = egR * state_.ug[fR] + ubAtR * state_.ub[fR];
-        const double fluxGL = egL * state_.ug[fL] + ubAtL * state_.ub[fL];
+        const double fluxGR = egR * state_.ug[fR] + fluxEbR;
+        const double fluxGL = egL * state_.ug[fL] + fluxEbL;
         eGNew[i] = state_.eG(i) + dt * (-(fluxGR - fluxGL) / dz);
 
         if (options_.enableSurfaceTension) {
