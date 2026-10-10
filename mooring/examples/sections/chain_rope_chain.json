@@ -1,0 +1,107 @@
+{
+ "_comment": "Lopez-Olocco et al. (2022) J. Mar. Sci. Eng. 10(5):676, 27 m studless chain at CEHIPAR (lambda = 1/30), without clumped weight. Tables 2-7. SI units. See docs/lopezolocco_validation.md",
+ "line": {
+  "EA_N": 341600.0,
+  "mass_per_length_kg_m": 0.0678,
+  "density_kg_m3": 7850.0,
+  "hydro_diameter_m": 0.0033,
+  "soil_diameter_m": 0.0033,
+  "Cm": 1.0,
+  "Cdt": 0.697,
+  "Cdn": 1.445,
+  "internal_damping_Ns": 239.12,
+  "sections": [
+   {
+    "length_m": 9.0,
+    "segments": 20
+   },
+   {
+    "length_m": 9.0,
+    "segments": 20,
+    "EA_N": 80000.0,
+    "mass_per_length_kg_m": 0.02,
+    "density_kg_m3": 1380.0,
+    "hydro_diameter_m": 0.006,
+    "soil_diameter_m": 0.006,
+    "Cm": 1.0,
+    "Cdt": 0.0,
+    "Cdn": 1.2,
+    "internal_damping_Ns": 20.0,
+    "tension_curve": [
+     [
+      0.01,
+      300.0
+     ],
+     [
+      0.04,
+      1500.0
+     ]
+    ],
+    "maxwell_branches": [
+     {
+      "K_N": 40000.0,
+      "tau_s": 0.8
+     }
+    ]
+   },
+   {
+    "length_m": 9.0,
+    "segments": 20
+   }
+  ]
+ },
+ "environment": {
+  "hydro": true,
+  "seabed": true,
+  "rho_w_kg_m3": 1000.0,
+  "water_surface_z_m": 6.5,
+  "seabed_z_m": 0.0
+ },
+ "soil": {
+  "stiffness_Pa_per_m": 6060.606,
+  "damping_factor": 0.04294,
+  "friction": 0.0,
+  "v_lim_m_s": 0.01
+ },
+ "anchor_m": [
+  0,
+  0,
+  0
+ ],
+ "fairlead_rest_m": [
+  25.0,
+  0,
+  6.5
+ ],
+ "initial": {
+  "shape": "touchdown"
+ },
+ "motion": {
+  "type": "harmonic",
+  "radius_m": 0.175,
+  "period_s": 3.5,
+  "direction_vec": [
+   1,
+   0,
+   0
+  ],
+  "ramp_cycles": 2.0,
+  "cycles": 6
+ },
+ "numerics": {
+  "scheme": "rk4",
+  "cfl": 0.5,
+  "dt_s": 0.0,
+  "relax_force_tol": 1e-06,
+  "implicit_damping": true
+ },
+ "statistics": {
+  "first_cycle": 6
+ },
+ "output": {
+  "directory": "out/lopezolocco",
+  "tag": "wocw",
+  "dt_out_s": 0.01,
+  "write": true
+ }
+}

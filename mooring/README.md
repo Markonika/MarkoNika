@@ -56,6 +56,7 @@ Milestones 1-9 done (static solver, dynamics, hydrodynamics + seabed, Chalmers v
 | Rope law: piecewise-linear curve, Maxwell branch (stress relaxation, complex modulus), cable dynamic stiffness | exact / 1e-9 / 2e-3 / E' 0.03 %, E'' 0.5 % (no rope data yet) |
 | Instantaneous free-surface submergence: equals surfaceZ+eta shift; static solve unaffected; Paredes RAO effect | exact; exact; <= 1.2 % (not the cause of the wave disagreements) |
 | Implicit internal damping: decay of a longitudinal mode; stability at 40x the explicit limit; Lopez-Olocco 35-case grid | exact rate to 3 % (mode energy); monotone, finite; same statistics as explicit, 2.6 min vs ~7 min |
+| Non-uniform lines (sections): hanging two-section line; two-medium string eigenfrequency; split uniform line | 1e-6; -0.001 %; identical to 1e-8 |
 | Support reactions, static line | vertical sum = weight (1e-6), horizontal sum = 0 |
 
 Details: `docs/chalmers_validation.md` (results, convergence, caveats), `docs/config.md` (configuration fields).
@@ -80,5 +81,5 @@ Platform: `build/mooring_platform examples/platform/three_leg_example.json` (con
 
 ## Limitations (so far)
 Rope law is optional and unvalidated against rope tests (no hysteresis, mean-load dependence or creep; `docs/config.md`, assumptions item 43).
-Perfectly flexible cable (no bending/torsion/VIV); small-angle rigid-body dynamics (no quaternion/Euler nonlinearity), constant A and B, still water only (no wave kinematics until milestone 9), flat seabed, no soil dynamics beyond the spring-damper; momentum conservation not tested (ends are held).
+Perfectly flexible cable (no bending/torsion/VIV); piecewise-uniform properties only (sections, no continuous taper); small-angle rigid-body dynamics (no quaternion/Euler nonlinearity), constant A and B, still water only (no wave kinematics until milestone 9), flat seabed, no soil dynamics beyond the spring-damper; momentum conservation not tested (ends are held).
 See `docs/assumptions.md`.

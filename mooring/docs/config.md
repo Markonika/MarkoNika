@@ -74,3 +74,6 @@ The relaxed (static) stiffness is the curve; the high-rate stiffness adds sum K.
 
 ### Implicit internal damping
 `numerics.implicit_damping` (single-line and platform runners, default false): treats the internal axial damping c_int implicitly (Strang splitting, see assumptions item 45). Removes the c_int time-step limit dt <= cfl m_l l0^2 / (2 c_int); only has an effect when `line.internal_damping_Ns` > 0.
+
+### Non-uniform lines (sections)
+`line.sections`: array of sections from the anchor to the fairlead, replacing `line.length_m` / `line.segments` (the line then has the sum of the sections' lengths and segments). Each section needs `length_m` and `segments` (segment length = length / segments) and may set `EA_N`, `mass_per_length_kg_m`, `density_kg_m3` or `weight_per_length_N_m`, `hydro_diameter_m`, `soil_diameter_m`, `nominal_area_m2`, `Cm`, `Cdt`, `Cdn`, `internal_damping_Ns`, `tension_curve`, `maxwell_branches`; keys that are omitted fall back to the line-level value (mass per length must be given somewhere). Gravity, soil (`soil.*`), the environment and the numerics stay global. Point elements can be placed by `arclength_m`, which now means the unstretched arc length from the anchor to the nearest node. Example: `examples/sections/chain_rope_chain.json`.

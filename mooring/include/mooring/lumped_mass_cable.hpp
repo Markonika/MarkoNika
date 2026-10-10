@@ -9,6 +9,20 @@
 
 namespace mooring {
 
+// One homogeneous section of a non-uniform line (e.g. chain - rope - chain). Sections run from the anchor to the fairlead; each has its own
+// segment length l0 = length / segments. Boundaries between sections are nodes.
+struct LineSection {
+    double length{0};   // unstretched length [m]
+    int segments{0};
+    double EA{0};       // axial stiffness [N] (used when no rope curve is given)
+    double m_l{0};      // dry mass per unit length [kg/m]
+    double w{0};        // submerged weight per unit length [N/m]
+    double c_int{0};    // internal damping [N s]
+    double D0{0}, D1{0}, A1{0};
+    double Cm{0}, Cdt{0}, Cdn{0};
+    RopeLaw rope;
+};
+
 struct CableParams {
     double L{0};         // unstretched length [m]
     int    N{0};         // number of segments (N+1 nodes)
@@ -16,6 +30,9 @@ struct CableParams {
     double m_l{0};       // mass per unit length [kg/m]
     double w{0};         // weight per unit length acting in -z [N/m] (submerged or dry, set by caller)
     double c_int{0};     // internal damping coefficient [N s], T = EA*eps + c_int*d(eps)/dt
+    // Non-uniform line: if non-empty, L, N and the per-length properties above are derived from the sections (length-weighted means for
+    // m_l and w, series stiffness for EA, for reporting only); soil, g and planar remain global.
+    std::vector<LineSection> sections;
     RopeLaw rope;        // optional nonlinear static curve and Maxwell branches (see rope.hpp); EA is used when no curve is given
     double g{9.81};
     // Hydrodynamics (Eqs. 3.27-3.29). A1 = 0 means pi/4 D0^2.
@@ -23,7 +40,7 @@ struct CableParams {
     double Cm{0}, Cdt{0}, Cdn{0};
     SoilParams soil;
     bool planar{false};   // 2D mode: motion confined to the plane y = y_anchor (forces and velocities in y are dropped)
-    double l0() const { return L / N; }
+    double l0() const { return L / N; }              // mean segment length
     double dryWeight() const { return m_l * g; }          // weight per length above the surface
     double nominalArea() const { return A1 > 0.0 ? A1 : 0.7853981633974483 * D0 * D0; }
     // Submerged weight per unit length, Eq. 3.26.
@@ -126,6 +143,9 @@ public:
 
     const CableParams& params() const { return p_; }
     const std::vector<Vec3>& nodes() const { return r_; }
+    // Node nearest to the unstretched arc length s from the anchor.
+    int nodeAtArclength(double s) const;
+    const std::vector<double>& arclength() const { return s_; }
     std::vector<Vec3>& nodes() { return r_; }
 
     // Net force on each node from segment tension and weight (end nodes included; ends are held
@@ -207,10 +227,17 @@ private:
     Environment env_;
     std::vector<PointElement> points_;
     StepObserver observer_;
+    struct SegProps { double l0, EA, ml, w, wd, D0, D1, A1, Cm, Cdt, Cdn, cint; int sec; size_t aoff; };
+    std::vector<SegProps> seg_;       // per-segment properties (uniform lines: N identical entries)
+    std::vector<RopeLaw> ropes_;      // one per section
+    std::vector<double> s_;           // unstretched arc length of each node [m]
+    std::vector<char> same_;          // same_[i]: segments i-1 and i have identical properties (interior node)
+    double nodeL0(int i) const;       // local unstretched spacing at node i
+    double nodeAddedMass(const std::vector<Vec3>& r, int i, double phi) const;
+    bool capSoil_{false};             // soil stiffness cap active (static relaxation)
     std::vector<double> alpha_;   // Maxwell internal strains, segment-major [seg * nBranches + k]
     bool staticMode_{false};      // ignore the Maxwell branches (relaxed state), used during the static relaxation
     double segTension(int seg, double eps, double epsDot) const;   // unclipped rope tension of a segment
-    double ksCap_{1e300};      // soil stiffness cap used only during static relaxation
     Vec3 fairPrevPos_, fairPrevVel_;
     double fairPrevT_{0.0};
     bool fairInit_{false};

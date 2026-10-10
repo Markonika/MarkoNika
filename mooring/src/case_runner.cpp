@@ -43,8 +43,10 @@ std::unique_ptr<LumpedMassCable> buildLine(const json& cfg, const Vec3& anchor, 
     const json jsoil = cfg.value("soil", json::object());
     const json jn = cfg.value("numerics", json::object());
     CableParams p;
-    p.L = jl.at("length_m"); p.N = jl.at("segments"); p.EA = jl.contains("EA_N") ? jl.at("EA_N").get<double>() : 0.0;
-    p.m_l = jl.at("mass_per_length_kg_m"); p.g = get(jl, "gravity_m_s2", 9.81);
+    const bool sectioned = jl.contains("sections");
+    p.L = sectioned ? 0.0 : jl.at("length_m").get<double>(); p.N = sectioned ? 0 : jl.at("segments").get<int>();
+    p.EA = jl.contains("EA_N") ? jl.at("EA_N").get<double>() : 0.0;
+    p.m_l = sectioned ? 0.0 : jl.at("mass_per_length_kg_m").get<double>(); p.g = get(jl, "gravity_m_s2", 9.81);
     p.c_int = get(jl, "internal_damping_Ns", 0.0);
     if (jl.contains("tension_curve"))                 // [[strain, tension_N], ...] piecewise-linear static curve through (0,0)
         for (const json& pt : jl["tension_curve"]) p.rope.curve.push_back({pt.at(0).get<double>(), pt.at(1).get<double>()});
@@ -60,6 +62,28 @@ std::unique_ptr<LumpedMassCable> buildLine(const json& cfg, const Vec3& anchor, 
     env.surfaceZ = get(jenv, "water_surface_z_m", 0.0); env.seabedZ = get(jenv, "seabed_z_m", 0.0);
     const double rho_c = get(jl, "density_kg_m3", 0.0);
     p.w = rho_c > 0.0 ? CableParams::submergedWeight(p.m_l, rho_c, env.rho_w, p.g) : get(jl, "weight_per_length_N_m", p.m_l * p.g);
+    if (sectioned) {
+        // Non-uniform line: each section overrides any of the line-level properties; omitted keys fall back to the line-level value.
+        for (const json& js : jl.at("sections")) {
+            auto sv = [&](const char* k, double def) { return js.contains(k) ? js[k].get<double>() : get(jl, k, def); };
+            LineSection q;
+            q.length = js.at("length_m"); q.segments = js.at("segments");
+            q.EA = sv("EA_N", 0.0);
+            q.m_l = js.contains("mass_per_length_kg_m") ? js["mass_per_length_kg_m"].get<double>() : jl.at("mass_per_length_kg_m").get<double>();
+            const double rc = sv("density_kg_m3", 0.0);
+            q.w = rc > 0.0 ? CableParams::submergedWeight(q.m_l, rc, env.rho_w, p.g)
+                           : (js.contains("weight_per_length_N_m") ? js["weight_per_length_N_m"].get<double>() : q.m_l * p.g);
+            q.c_int = sv("internal_damping_Ns", 0.0);
+            q.D0 = sv("hydro_diameter_m", 0.0); q.D1 = js.contains("soil_diameter_m") ? js["soil_diameter_m"].get<double>() : (js.contains("hydro_diameter_m") ? q.D0 : sv("soil_diameter_m", q.D0));
+            q.A1 = sv("nominal_area_m2", 0.0); q.Cm = sv("Cm", 0.0); q.Cdt = sv("Cdt", 0.0); q.Cdn = sv("Cdn", 0.0);
+            const json& jr = js.contains("tension_curve") || js.contains("maxwell_branches") ? js : jl;
+            if (jr.contains("tension_curve"))
+                for (const json& pt : jr["tension_curve"]) q.rope.curve.push_back({pt.at(0).get<double>(), pt.at(1).get<double>()});
+            if (jr.contains("maxwell_branches"))
+                for (const json& b : jr["maxwell_branches"]) q.rope.branches.push_back({b.at("K_N").get<double>(), b.at("tau_s").get<double>()});
+            p.sections.push_back(q);
+        }
+    }
     p.soil.Ks = get(jsoil, "stiffness_Pa_per_m", 0.0); p.soil.zeta = get(jsoil, "damping_factor", 1.0);
     p.soil.mu = get(jsoil, "friction", 0.0); p.soil.vlim = get(jsoil, "v_lim_m_s", 0.01);
 
@@ -73,8 +97,7 @@ std::unique_ptr<LumpedMassCable> buildLine(const json& cfg, const Vec3& anchor, 
 
     for (const json& jp : cfg.value("point_elements", json::array())) {
         // Node by index ("node") or by unstretched arc length from the anchor ("arclength_m", nearest node).
-        const int node = jp.contains("node") ? jp["node"].get<int>()
-                                             : static_cast<int>(std::lround(jp.at("arclength_m").get<double>() / p.l0()));
+        const int node = jp.contains("node") ? jp["node"].get<int>() : cable.nodeAtArclength(jp.at("arclength_m").get<double>());
         const std::string type = get<std::string>(jp, "type", "generic");
         const double D = get(jp, "diameter_m", 0.0), Cd = get(jp, "Cd", 0.0), Cm = get(jp, "Cm", 0.0);
         const double mass = get(jp, "mass_kg", 0.0);
