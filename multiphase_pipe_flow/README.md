@@ -294,6 +294,75 @@ coefficients and grid/time-step choices used in the original, proprietary
 code). Treat it as a solid, documented starting point for further
 calibration, not a certified reproduction of the paper's results.
 
+#### A balanced monitor function: a genuine, modest sharpening, after one rejected design
+
+The moving mesh's two monitor terms above (`holdupGradientWeight *
+gradEl*L` and `khIndicatorWeight * min(F/F0, cap)`) are combined with
+fixed, hand-picked weights -- exactly the kind of trial-and-error van Dam
+& Zegeling (2010, Commun. Comput. Phys. 7(1):138-170), "Balanced
+Monitoring of Flow Phenomena in Moving Mesh Methods," set out to replace
+with a "balanced" combination, whose stated design criterion is that
+each component's own max/average ratio (how sharply concentrated its
+spatial profile is, independent of its absolute scale) should be
+comparable across components, so a broad, mildly-elevated indicator
+isn't swamped by, or doesn't swamp, a sharply localized one purely from
+a shape mismatch a fixed scalar weight can't fix. Their paper's own
+literal formula wasn't reachable to verify directly from this project's
+network sandbox, so `SolverOptions::movingMesh.balancedMonitor`
+implements an independently derived closed-form construction satisfying
+the same stated criterion exactly (see `FourFieldSolver.hpp`'s
+`MovingMeshOptions::balancedMonitor` and `FourFieldSolver.cpp`'s
+`applyBalancedMonitorTransform()` for the full derivation): rescale each
+raw component affinely around its OWN mean, `w_balanced = avg +
+lambda*(w - avg)`, which leaves that mean exactly unchanged (only the
+spread around it changes) and gives a closed-form `lambda` hitting any
+target max/average ratio exactly, clamped to the largest change that
+keeps every value nonnegative. Verified numerically (exact target hit
+when feasible, mean exactly preserved, pointwise ordering preserved,
+nonnegativity enforced) before being written into C++, and confirmed
+bit-for-bit identical `step()` behaviour throughout with the option off
+(its default).
+
+**First design, rejected by its own test.** The obvious "evenhanded"
+target is the geometric mean of the two raw components' own ratios,
+favoring neither. Measured directly on the horizontal slug-formation
+demo (the same front-sharpness methodology the moving-mesh section above
+already uses): the holdup-gradient component is typically far peakier
+than the KH-indicator one once a front exists (ratios of roughly 20-55
+vs. 5-9 at ten sampled points through the run) -- so a compromise target
+sitting well below the gradient term's own ratio COMPRESSES exactly the
+signal doing almost all of the real work locating the front, in exchange
+for sharpening a blunter, more diffuse one. Measured result: the
+steepest captured `|d(eL)/dz|` collapsed from the unbalanced scheme's
+8.66x-sharper-than-fixed-grid (the number already in the section above)
+to only 1.20x -- a large, real regression, not noise, and not a subtle
+effect: the geometric-mean "balance" actively undid most of what made
+the existing ad hoc weights work.
+
+**Second design: target the SHARPER component's ratio, never the
+compromise.** Rather than discard the idea, the failure mode is specific
+enough to fix directly: never let the transform compress the dominant,
+already-informative signal. Targeting `max(rhoGrad, rhoF)` instead of
+their geometric mean means the sharper raw component passes through
+completely unchanged (its own ratio IS the target), and the flatter one
+is only ever expanded toward it, never the reverse. Re-measured on the
+identical case:
+
+| scheme | steepest `|d(eL)/dz|` | vs. fixed grid | vs. unbalanced | wall-clock vs. fixed grid |
+|---|---|---|---|---|
+| fixed grid | 3.25 /m | 1.00x | -- | 1.00x |
+| moving mesh (unbalanced) | 28.11 /m | 8.66x | 1.00x | 22.3x |
+| moving mesh + balanced (max target) | 30.31 /m | 9.33x | **1.08x** | 22.7x |
+
+A genuine, if modest, improvement (+7.8% sharper) at essentially no extra
+cost (+1.6% wall-clock) -- small enough, and resting on too thin a
+test (one case, one snapshot) to default on, but mechanistically
+understood (not a fluke of one run) and worth keeping as an opt-in
+refinement for anyone already using the moving mesh.
+`balancedMonitor` defaults to `false` for this reason, consistent with
+every other option in this project, and applies only to the two
+components already in use -- not a third monitor feature.
+
 ### Higher-order / flux-limited advection
 
 Off by default (`SolverOptions::advectionLimiter = FluxLimiterType::None`,

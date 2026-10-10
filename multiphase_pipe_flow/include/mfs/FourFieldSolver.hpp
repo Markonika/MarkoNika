@@ -742,6 +742,50 @@ struct SolverOptions {
         double khIndicatorCap = 5.0;      // caps the F/F0 contribution, as a multiple of F0
         double monitorCap = 50.0;         // hard cap on M itself, bounding max achievable clustering
         int monitorSmoothingPasses = 2;   // 3-point smoothing of M before equidistributing (standard practice, avoids noisy/oscillatory mesh motion)
+
+        // Balanced monitor combination, motivated by van Dam & Zegeling
+        // (2010, Commun. Comput. Phys. 7(1):138-170), "Balanced Monitoring
+        // of Flow Phenomena in Moving Mesh Methods": combining several
+        // monitor components with hand-picked fixed weights (as above,
+        // holdupGradientWeight/khIndicatorWeight) conflates two different
+        // jobs the weights can't both do well at once -- setting each
+        // component's overall IMPORTANCE, and compensating for how much
+        // more SHARPLY CONCENTRATED one component's spatial profile
+        // happens to be than the other's. Their paper's stated design
+        // criterion for a "balanced" combination is that each component's
+        // own max/average ratio (a scale-invariant measure of how peaked
+        // vs. broadly spread it is) should be comparable across
+        // components, so a mildly-elevated-but-broad indicator isn't
+        // either swamped by, or swamps, a sharply localized one purely
+        // because of a shape mismatch a fixed scalar weight cannot fix.
+        // Their paper's own primary-source formula for achieving this
+        // was not available to verify directly (outside this project's
+        // reachable network allowlist), so this implements an
+        // independently derived, numerically verified construction that
+        // satisfies the same stated criterion exactly in closed form,
+        // rather than approximating their literal equations:
+        //   w_balanced(z) = avg(w) + lambda*(w(z) - avg(w))
+        // an affine rescaling of each raw component around its OWN mean
+        // (which the transform leaves exactly unchanged -- only the
+        // SHAPE/peakedness changes), with lambda solved in closed form so
+        // that max(w_balanced)/avg(w_balanced) hits a common target ratio
+        // (the geometric mean of the components' own raw ratios -- a
+        // genuine compromise, not favoring either component), then
+        // clamped to the largest value that keeps w_balanced nonnegative
+        // everywhere (a real, inherent limit when a component's own
+        // minimum already sits close to its mean, e.g. an indicator that
+        // is exactly zero over most of a quiescent domain has little room
+        // to be sharpened further without going negative -- in that case
+        // the transform does as much balancing as is feasible and no
+        // more, never introducing instability). A component that is
+        // already flat (own max/average ratio indistinguishable from 1,
+        // e.g. at t=0 before any front exists) is left untouched rather
+        // than divided by a near-zero denominator. When neither raw
+        // component has meaningful shape to balance, this reduces to the
+        // unmodified weighted sum below, bit-for-bit. Off by default;
+        // applies only to the TWO components already used above, not a
+        // third feature.
+        bool balancedMonitor = false;
     } movingMesh;
 };
 

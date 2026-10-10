@@ -1093,3 +1093,37 @@ methodology, tables, and figures are in the paper (Section 7,
     motivation) without touching anything else. Regression-confirmed
     bit-for-bit identical `step()` behaviour throughout with the option
     off.
+24. **Done: a balanced monitor function for the moving mesh -- a
+    rejected first design, then a genuine small improvement from a
+    corrected one.** See README.md, "A balanced monitor function: a
+    genuine, modest sharpening, after one rejected design" for the full
+    account. Implemented `SolverOptions::movingMesh.balancedMonitor`,
+    motivated by van Dam & Zegeling (2010, Commun. Comput. Phys.
+    7(1):138-170), whose stated design criterion for combining several
+    monitor components is that each one's own max/average ratio (its
+    shape, not its scale) should be comparable across components rather
+    than left to a fixed hand-picked weight. Implemented as an
+    independently derived closed-form affine rescaling (their own
+    formula was outside this project's reachable network sandbox to
+    verify), satisfying that criterion exactly: `w_balanced = avg +
+    lambda*(w-avg)`, with `lambda` solved in closed form to hit a target
+    max/average ratio, clamped to stay nonnegative. The first, most
+    even-handed-looking target tried -- the geometric mean of the two
+    existing monitor components' own ratios -- was measured directly
+    (same front-sharpness methodology as item 17-19/21) and found to be a
+    real regression: it compressed the holdup-gradient component (which
+    is typically far peakier than the KH-indicator one once a front
+    exists) down toward the blunter indicator's shape, collapsing the
+    moving mesh's steepest captured gradient from 8.66x sharper than the
+    fixed grid to only 1.20x. Targeting the SHARPER of the two
+    components' ratios instead -- which leaves the dominant signal
+    completely untouched and only ever expands the weaker one toward it
+    -- fixed this and gave a genuine, mechanistically-understood
+    improvement: 9.33x sharper than the fixed grid (+7.8% over the
+    unbalanced moving mesh) at essentially no extra cost (+1.6%
+    wall-clock). `balancedMonitor` defaults to `false` regardless, since
+    the result rests on one case/one snapshot and the effect, while
+    real, is modest -- but it is available as an opt-in refinement for
+    anyone already using the moving mesh. Regression-confirmed
+    bit-for-bit identical `step()` behaviour throughout with the option
+    off.

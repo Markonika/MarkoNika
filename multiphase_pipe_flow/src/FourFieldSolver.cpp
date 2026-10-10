@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 #include <string>
 
 namespace mfs {
@@ -1692,6 +1693,49 @@ namespace {
         }
         return out;
     }
+
+    // max(w)/average(w) over a nonnegative array: always >= 1, with
+    // equality iff w is exactly constant. Used both to decide whether a
+    // monitor component has any shape worth balancing and as the
+    // quantity SolverOptions::MovingMeshOptions::balancedMonitor's
+    // transform below equalizes across components.
+    double peakednessRatio(const std::vector<double>& w) {
+        double sum = 0.0, mx = 0.0;
+        for (double v : w) { sum += v; mx = std::max(mx, v); }
+        const double avg = sum / std::max<std::size_t>(w.size(), 1);
+        return (avg > tiny) ? mx / avg : 1.0;
+    }
+
+    // Affine rescaling of a nonnegative array around its own mean so that
+    // max/average hits `targetRatio` exactly, when feasible, clamped to
+    // the largest change that keeps every entry nonnegative otherwise.
+    // Derivation: for w_balanced = avg + lambda*(w - avg), averaging is
+    // linear so average(w_balanced) == avg EXACTLY regardless of lambda
+    // (the mean of w - avg is zero by construction) -- only the spread
+    // around that fixed mean changes. That makes
+    // max(w_balanced)/avg == 1 + lambda*(peakednessRatio(w) - 1), a
+    // direct linear equation in lambda with a closed-form solution,
+    // rather than the nonlinear equation a power-law reshaping (the
+    // other standard way to adjust peakedness) would require solving
+    // iteratively. Leaves w untouched (lambda irrelevant) when it is
+    // already flat -- nothing to rescale, and avoiding a division by a
+    // near-zero (peakednessRatio - 1). Verified numerically (exact target
+    // hit when feasible, mean exactly preserved, pointwise ordering
+    // preserved, nonnegativity enforced) before being written here.
+    void applyBalancedMonitorTransform(std::vector<double>& w, double targetRatio) {
+        double sum = 0.0, mx = 0.0, mn = std::numeric_limits<double>::infinity();
+        for (double v : w) { sum += v; mx = std::max(mx, v); mn = std::min(mn, v); }
+        const double n = static_cast<double>(std::max<std::size_t>(w.size(), 1));
+        const double avg = sum / n;
+        const double rho = (avg > tiny) ? mx / avg : 1.0;
+        if (rho <= 1.0 + 1.0e-9 || avg <= tiny) return; // flat/degenerate: nothing to balance
+        const double lambdaTarget = (targetRatio - 1.0) / (rho - 1.0);
+        // Nonnegativity: avg + lambda*(min-avg) >= 0 => lambda <= avg/(avg-min).
+        const double lambdaMax = (avg - mn > tiny) ? avg / (avg - mn)
+                                                     : std::numeric_limits<double>::infinity();
+        const double lambda = std::clamp(lambdaTarget, 0.0, lambdaMax);
+        for (double& v : w) v = avg + lambda * (v - avg);
+    }
 }
 
 std::vector<double> FourFieldSolver::computeMonitorFunction() const {
@@ -1706,13 +1750,49 @@ std::vector<double> FourFieldSolver::computeMonitorFunction() const {
     // F0), independent of whether h-refinement AMR is itself enabled.
     const double F0 = options_.amr.refineThreshold;
 
+    std::vector<double> gradTerm(N), fTerm(N);
     for (int i = 0; i < N; ++i) {
         const int iL = std::max(i - 1, 0);
         const int iR = std::min(i + 1, N - 1);
         const double dz = state_.centerDistance(iL, iR);
-        const double gradEl = (dz > 0.0) ? std::fabs(state_.eL(iR) - state_.eL(iL)) / dz : 0.0;
-        const double fTerm = std::min(F[i] / F0, opt.khIndicatorCap);
-        M[i] = 1.0 + opt.holdupGradientWeight * gradEl * L + opt.khIndicatorWeight * fTerm;
+        gradTerm[i] = (dz > 0.0) ? std::fabs(state_.eL(iR) - state_.eL(iL)) / dz * L : 0.0;
+        fTerm[i] = std::min(F[i] / F0, opt.khIndicatorCap);
+    }
+
+    if (opt.balancedMonitor) {
+        const double rhoGrad = peakednessRatio(gradTerm);
+        const double rhoF = peakednessRatio(fTerm);
+        // Target = the SHARPER of the two components' own raw ratios, not
+        // their geometric mean. A numerical experiment (see
+        // VALIDATION.md/README) tried the geometric mean first, as the
+        // more even-handed-looking "compromise" target, and found it
+        // actively harmful: on this model, the holdup-gradient component
+        // is typically far peakier than the KH-indicator one once a front
+        // exists (ratios of ~20-55 vs. ~5-9 in that experiment), so a
+        // compromise target sitting well below the gradient term's own
+        // ratio COMPRESSES exactly the signal doing almost all of the
+        // real work locating the front, in exchange for amplifying a
+        // blunter, more diffuse one -- a large, measured regression in
+        // front-sharpness. Targeting the max instead only ever EXPANDS
+        // the weaker component toward the sharper one's existing
+        // peakedness and never compresses anything, which both matches
+        // the balancing literature's actual intent (reinforcing an
+        // under-weighted indicator, not diluting an already-informative
+        // one) and is unconditionally safe here: the sharpest raw
+        // component passes through this step completely unchanged
+        // (targetRatio == its own ratio is a no-op in
+        // applyBalancedMonitorTransform).
+        if (rhoGrad > 1.0 + 1.0e-9 && rhoF > 1.0 + 1.0e-9) {
+            const double target = std::max(rhoGrad, rhoF);
+            applyBalancedMonitorTransform(gradTerm, target);
+            applyBalancedMonitorTransform(fTerm, target);
+        }
+        // If only one (or neither) component has shape to balance, there
+        // is nothing to equalize against -- leave both as computed above.
+    }
+
+    for (int i = 0; i < N; ++i) {
+        M[i] = 1.0 + opt.holdupGradientWeight * gradTerm[i] + opt.khIndicatorWeight * fTerm[i];
     }
 
     for (int pass = 0; pass < opt.monitorSmoothingPasses; ++pass) {
