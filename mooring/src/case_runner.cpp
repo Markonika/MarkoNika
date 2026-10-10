@@ -125,6 +125,7 @@ CaseResult runCase(const json& cfg) {
     double maxY = 0.0;
     DynOptions dyn;
     dyn.scheme = get<std::string>(jn, "scheme", "rk4") == "verlet" ? Scheme::Verlet : Scheme::RK4;
+    dyn.implicitDamping = get(jn, "implicit_damping", false);
     dyn.cfl = get(jn, "cfl", 0.5); dyn.dt = get(jn, "dt_s", 0.0);
     cable.setDynOptions(dyn);
     res.dt = cable.stableDt();

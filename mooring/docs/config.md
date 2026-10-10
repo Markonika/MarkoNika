@@ -71,3 +71,6 @@ The relaxed (static) stiffness is the curve; the high-rate stiffness adds sum K.
 
 ### Instantaneous free-surface submergence
 `waves.instantaneous_surface` (platform runner, default false): the submergence of line nodes and point elements (weight/buoyancy blend, drag, added mass) follows the instantaneous surface z = surface_z + eta(x, y, t) of the wave field instead of the still-water level. The static solve always uses the still-water level. In code: `Environment::elevation` (`WaveField::asElevation()`).
+
+### Implicit internal damping
+`numerics.implicit_damping` (single-line and platform runners, default false): treats the internal axial damping c_int implicitly (Strang splitting, see assumptions item 45). Removes the c_int time-step limit dt <= cfl m_l l0^2 / (2 c_int); only has an effect when `line.internal_damping_Ns` > 0.

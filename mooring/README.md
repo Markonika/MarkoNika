@@ -55,6 +55,7 @@ Milestones 1-9 done (static solver, dynamics, hydrodynamics + seabed, Chalmers v
 | Same, maximum fairlead tension, 6 dynamic cases (figure readings, +-0.5 N) | 5 of 6 within 1.6-6.7 %; snap case (conf. 2, 1.58 s) +29 % at 60 segments, 48-67 N across discretisations (not converged to better than ~+10-25 %) |
 | Rope law: piecewise-linear curve, Maxwell branch (stress relaxation, complex modulus), cable dynamic stiffness | exact / 1e-9 / 2e-3 / E' 0.03 %, E'' 0.5 % (no rope data yet) |
 | Instantaneous free-surface submergence: equals surfaceZ+eta shift; static solve unaffected; Paredes RAO effect | exact; exact; <= 1.2 % (not the cause of the wave disagreements) |
+| Implicit internal damping: decay of a longitudinal mode; stability at 40x the explicit limit; Lopez-Olocco 35-case grid | exact rate to 3 % (mode energy); monotone, finite; same statistics as explicit, 2.6 min vs ~7 min |
 | Support reactions, static line | vertical sum = weight (1e-6), horizontal sum = 0 |
 
 Details: `docs/chalmers_validation.md` (results, convergence, caveats), `docs/config.md` (configuration fields).

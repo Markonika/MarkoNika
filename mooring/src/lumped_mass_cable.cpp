@@ -95,7 +95,7 @@ void LumpedMassCable::computeForces(const std::vector<Vec3>& r, const std::vecto
         len[i] = norm(d);
         const double eps = len[i] / p_.l0() - 1.0;
         if (eps <= 0.0 || len[i] <= 0.0) { ++stats_.slackSegmentEvals; continue; }   // Eq. 3.25: T = 0
-        const double epsDot = p_.c_int != 0.0 ? dot(d, v[i + 1] - v[i]) / (len[i] * p_.l0()) : 0.0;
+        const double epsDot = (p_.c_int != 0.0 && !skipDamping_) ? dot(d, v[i + 1] - v[i]) / (len[i] * p_.l0()) : 0.0;
         double T = segTension(i, eps, epsDot);
         if (T < 0.0) { T = 0.0; ++stats_.clippedTensionEvals; }
         const Vec3 F = d * (T / len[i]);
@@ -263,7 +263,7 @@ double LumpedMassCable::stableDt() const {
     if (dyn_.dt > 0.0) return dyn_.dt;
     double dt = dyn_.cfl * p_.l0() / p_.waveSpeed();                      // axial wave CFL
     // Explicit internal damping (c_int/l0 per segment, up to 4 c_int/(m_l l0^2) per node) adds its own limit.
-    if (p_.c_int > 0.0) dt = std::min(dt, dyn_.cfl * p_.m_l * p_.l0() * p_.l0() / (2.0 * p_.c_int));
+    if (p_.c_int > 0.0 && !dyn_.implicitDamping) dt = std::min(dt, dyn_.cfl * p_.m_l * p_.l0() * p_.l0() / (2.0 * p_.c_int));
     if (env_.seabed && p_.soil.Ks > 0.0 && p_.D1 > 0.0) {
         // Contact oscillator: omega^2 = Ks D1 / m_l (independent of l0); largest eigenvalue magnitude
         // of the damped spring is omega (zeta + sqrt(zeta^2 - 1)) for zeta >= 1, omega otherwise.
@@ -289,7 +289,9 @@ void LumpedMassCable::acceleration(std::vector<Vec3>& r, std::vector<Vec3>& v, d
     std::vector<double> ca;
     std::vector<Vec3> aw;
     std::vector<Vec3>& f = a;
+    skipDamping_ = dyn_.implicitDamping;
     computeForces(r, v, t, f, &ca, &aw);
+    skipDamping_ = false;
     std::vector<double> mPt(N + 1, 0.0), caPt(N + 1, 0.0), maT(N + 1, 0.0), maN(N + 1, 0.0);   // point-element inertia and added masses
     for (const PointElement& pe : points_) {
         mPt[pe.node] += pe.mass;
@@ -315,6 +317,101 @@ void LumpedMassCable::acceleration(std::vector<Vec3>& r, std::vector<Vec3>& v, d
     f[0] = Vec3(); f[N] = Vec3();
 }
 
+// Inertia of an interior node in the form M = mt t t^T + mn (I - t t^T), identical to the one solved in acceleration().
+void LumpedMassCable::nodeInertia(const std::vector<Vec3>& r, double t, int i, double& mt, double& mn, Vec3& tg) const {
+    const int N = p_.N;
+    double m = nodeMass(i), caPt = 0.0, maT = 0.0, maN = 0.0, ca = 0.0;
+    for (const PointElement& pe : points_) {
+        if (pe.node != i) continue;
+        m += pe.mass;
+        if (!env_.hydro) continue;
+        const double phi = submergedFraction(r, i, t);
+        if (pe.Cm > 0.0) caPt += phi * pe.Cm * env_.rho_w * pe.volume;
+        maT += phi * pe.maTan; maN += phi * pe.maNorm;
+    }
+    m += caPt;
+    if (env_.hydro) {
+        const double phi = submergedFraction(r, i, t);
+        if (phi > 0.0) {
+            const double Ls = 0.5 * (norm(r[i] - r[i - 1]) + (i < N ? norm(r[i + 1] - r[i]) : 0.0));
+            ca = phi * p_.Cm * env_.rho_w * p_.nominalArea() * Ls;
+        }
+    }
+    const Vec3 dtv = r[i + 1] - r[i - 1];
+    const double ndt = norm(dtv);
+    tg = ndt > 0.0 ? dtv / ndt : Vec3(1, 0, 0);
+    mt = m + maT; mn = m + maN + ca;
+}
+
+namespace {
+struct Mat3 {
+    double a[9]{};
+    static Mat3 outer(const Vec3& u, double s) {
+        Mat3 m; const double x[3] = {u.x, u.y, u.z};
+        for (int i = 0; i < 3; ++i) for (int j = 0; j < 3; ++j) m.a[3 * i + j] = s * x[i] * x[j];
+        return m;
+    }
+    Mat3& operator+=(const Mat3& o) { for (int i = 0; i < 9; ++i) a[i] += o.a[i]; return *this; }
+    Mat3& operator-=(const Mat3& o) { for (int i = 0; i < 9; ++i) a[i] -= o.a[i]; return *this; }
+    Vec3 operator*(const Vec3& v) const {
+        return Vec3(a[0] * v.x + a[1] * v.y + a[2] * v.z, a[3] * v.x + a[4] * v.y + a[5] * v.z, a[6] * v.x + a[7] * v.y + a[8] * v.z);
+    }
+    Mat3 operator*(const Mat3& o) const {
+        Mat3 m;
+        for (int i = 0; i < 3; ++i) for (int j = 0; j < 3; ++j) for (int k = 0; k < 3; ++k) m.a[3 * i + j] += a[3 * i + k] * o.a[3 * k + j];
+        return m;
+    }
+    Mat3 inverse() const {
+        const double c00 = a[4] * a[8] - a[5] * a[7], c01 = a[5] * a[6] - a[3] * a[8], c02 = a[3] * a[7] - a[4] * a[6];
+        const double det = a[0] * c00 + a[1] * c01 + a[2] * c02;
+        Mat3 m;
+        m.a[0] = c00 / det; m.a[1] = (a[2] * a[7] - a[1] * a[8]) / det; m.a[2] = (a[1] * a[5] - a[2] * a[4]) / det;
+        m.a[3] = c01 / det; m.a[4] = (a[0] * a[8] - a[2] * a[6]) / det; m.a[5] = (a[2] * a[3] - a[0] * a[5]) / det;
+        m.a[6] = c02 / det; m.a[7] = (a[1] * a[6] - a[0] * a[7]) / det; m.a[8] = (a[0] * a[4] - a[1] * a[3]) / det;
+        return m;
+    }
+};
+}  // namespace
+
+// Backward Euler for M dv/dt = -D(r) v, where the segment dashpots D = sum k P_j couple neighbouring nodes (block-tridiagonal 3x3 system,
+// solved by block Thomas). k = c_int / l0 [N s/m] acts along the segment direction (T_damp = c_int d eps/dt); slack segments carry no damping.
+// The anchor is fixed and the top end velocity is prescribed (taken from v_[N]).
+void LumpedMassCable::implicitDamp(double h) {
+    const int N = p_.N;
+    const double kh = p_.c_int / p_.l0() * h;
+    std::vector<Mat3> P(N);
+    for (int j = 0; j < N; ++j) {
+        const Vec3 d = r_[j + 1] - r_[j];
+        const double len = norm(d), eps = len / p_.l0() - 1.0;
+        if (eps > 0.0 && len > 0.0) P[j] = Mat3::outer(d / len, kh);
+    }
+    const int n = N - 1;                               // interior nodes 1..N-1
+    std::vector<Mat3> Cp(n);                           // A_i^{-1} U_i
+    std::vector<Vec3> gp(n);                           // A_i^{-1} rhs_i (modified)
+    for (int i = 1; i <= n; ++i) {
+        double mt, mn; Vec3 tg;
+        nodeInertia(r_, t_, i, mt, mn, tg);
+        Mat3 M = Mat3::outer(tg, mt - mn);
+        M.a[0] += mn; M.a[4] += mn; M.a[8] += mn;
+        Mat3 A = M; A += P[i - 1]; A += P[i];
+        Vec3 b = M * v_[i];
+        if (i == n) b += P[i] * v_[N];                 // prescribed top velocity
+        if (i > 1) {                                   // eliminate the sub-diagonal block L_i = -P[i-1]
+            const Mat3 LC = P[i - 1] * Cp[i - 2];      // L_i * C_{i-1} = -P * C  =>  A -= L C  is  A += P C
+            A += LC;
+            b += P[i - 1] * gp[i - 2];
+        }
+        const Mat3 Ai = A.inverse();
+        gp[i - 1] = Ai * b;
+        if (i < n) { Mat3 U = P[i]; for (double& x : U.a) x = -x; Cp[i - 1] = Ai * U; }
+    }
+    Vec3 vnext;
+    for (int i = n; i >= 1; --i) {
+        vnext = i == n ? gp[i - 1] : gp[i - 1] - Cp[i - 1] * vnext;
+        v_[i] = vnext;
+    }
+}
+
 void LumpedMassCable::step(double dt) {
     const int n = p_.N + 1, N = p_.N;
     if (v_.size() != r_.size()) v_.assign(n, Vec3());
@@ -328,6 +425,8 @@ void LumpedMassCable::step(double dt) {
         eps0.resize(N);
         for (int s = 0; s < N; ++s) eps0[s] = norm(r_[s + 1] - r_[s]) / p_.l0() - 1.0;
     }
+    const bool impl = dyn_.implicitDamping && p_.c_int > 0.0;
+    if (impl) implicitDamp(0.5 * dt);
     if (dyn_.scheme == Scheme::Verlet) {
         acceleration(r_, v_, t_, a);
         std::vector<Vec3> vh = v_;
@@ -357,6 +456,7 @@ void LumpedMassCable::step(double dt) {
     }
     t_ += dt;
     if (top_) top_(t_, r_[N], v_[N]);
+    if (impl) implicitDamp(0.5 * dt);
     for (int s = 0; s < N && nb > 0; ++s) {
         const double eps1 = norm(r_[s + 1] - r_[s]) / p_.l0() - 1.0;
         for (size_t k = 0; k < nb; ++k)

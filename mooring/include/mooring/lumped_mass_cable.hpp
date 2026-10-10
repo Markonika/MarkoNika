@@ -93,6 +93,9 @@ struct DynOptions {
     Scheme scheme{Scheme::RK4};
     double cfl{0.5};     // dt = cfl * l0 / c, c = sqrt(EA/m_l)
     double dt{0.0};      // if > 0, overrides the CFL value
+    // Treat the internal axial damping c_int implicitly (Strang splitting: backward-Euler half step of the dashpot forces, the explicit scheme for
+    // everything else, a second half step). Removes the c_int time-step limit; only active when c_int > 0.
+    bool implicitDamping{false};
 };
 
 // Counters for the slack-state regularisation (never hidden, see docs/assumptions.md).
@@ -191,6 +194,9 @@ public:
 private:
     void acceleration(std::vector<Vec3>& r, std::vector<Vec3>& v, double t, std::vector<Vec3>& a) const;
     void step(double dt);
+    void implicitDamp(double h);                                  // backward-Euler solve of the axial dashpot forces over h
+    void nodeInertia(const std::vector<Vec3>& r, double t, int i, double& mt, double& mn, Vec3& tg) const;   // M_i = mt t t^T + mn (I - t t^T)
+    mutable bool skipDamping_{false};   // true only inside the explicit stages of the implicit-damping scheme
 
     CableParams p_;
     std::vector<Vec3> r_, v_;

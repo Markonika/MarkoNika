@@ -27,6 +27,6 @@ chain axial stiffness, the soil/touchdown location).
 - Clump added mass rho·D³/3 is applied in the direction normal to the chain as in the paper's Eq. 25 (new anisotropic point element).
 - The clump arclength is Ls/3 and Ls/2 with Ls = 14.33 m from the static solution, rounded to a node (81 segments); not converged in segment count for the clump cases.
 - One paper value looks like a typo (A = 0.150, CW2, T = 5.0, max 15.72 N) and was not used in the subset runs.
-- Only 53 of the 105 cases were run. Each takes about 1-2 min because the damping stability limit forces dt ~ 1e-5 s.
+- Only 53 of the 105 cases were run. Each took about 1-2 min with the explicit damping because the stability limit forces dt ~ 1e-5 s; with `numerics.implicit_damping` (assumptions item 45) the same results are obtained about 4-5 times faster (the validation test uses it).
 
 Run: `ctest -R lopezolocco_validation` (four dynamic cases, skipped from the default suite); the default suite has a static test.

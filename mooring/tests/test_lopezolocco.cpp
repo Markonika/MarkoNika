@@ -16,6 +16,7 @@ json load(const char* name) {
     REQUIRE(in.good());
     json c = json::parse(in);
     c["output"]["write"] = false;
+    c["numerics"]["implicit_damping"] = true;   // same results as the explicit scheme (docs/lopezolocco_validation.md), several times faster
     return c;
 }
 double lastCyclesMax(const CaseResult& r) {
