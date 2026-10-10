@@ -54,6 +54,7 @@ Milestones 1-9 done (static solver, dynamics, hydrodynamics + seabed, Chalmers v
 | Lopez-Olocco et al. 2022 clump-weight chain, max fairlead tension (Table 8) | clump-free 35 cases +2.0 % mean (worst +4.8 %); CW1 +0.8 %, CW2 -1.8 % (9 cases each); CW2 static rise +6.9 % vs paper ≈ +10 % |
 | Same, maximum fairlead tension, 6 dynamic cases (figure readings, +-0.5 N) | 5 of 6 within 1.6-6.7 %; snap case (conf. 2, 1.58 s) +29 % at 60 segments, 48-67 N across discretisations (not converged to better than ~+10-25 %) |
 | Rope law: piecewise-linear curve, Maxwell branch (stress relaxation, complex modulus), cable dynamic stiffness | exact / 1e-9 / 2e-3 / E' 0.03 %, E'' 0.5 % (no rope data yet) |
+| Instantaneous free-surface submergence: equals surfaceZ+eta shift; static solve unaffected; Paredes RAO effect | exact; exact; <= 1.2 % (not the cause of the wave disagreements) |
 | Support reactions, static line | vertical sum = weight (1e-6), horizontal sum = 0 |
 
 Details: `docs/chalmers_validation.md` (results, convergence, caveats), `docs/config.md` (configuration fields).

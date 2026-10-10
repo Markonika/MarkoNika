@@ -43,6 +43,9 @@ struct Environment {
     double surfaceZ{0.0};       // still-water level: nodes above carry dry weight and no hydrodynamics
     double seabedZ{0.0};
     WaterField water;           // empty = still water
+    // Optional free-surface elevation above surfaceZ at (x, y, t) [m]. If set, the submergence of nodes and point elements (weight/buoyancy
+    // blend, drag, added mass) follows the instantaneous surface; empty = still-water level (the static solve always uses the still-water level).
+    std::function<double(const Vec3&, double)> elevation;
 };
 
 struct RelaxOptions {
@@ -134,12 +137,12 @@ public:
     void addPointElement(const PointElement& pe);
     const std::vector<PointElement>& pointElements() const { return points_; }
     // Net vertical force of the point elements on node i in the current configuration (weight - buoyancy), N, down positive.
-    double pointNetWeight(const std::vector<Vec3>& r, int i) const;
+    double pointNetWeight(const std::vector<Vec3>& r, int i, double t = 0.0) const;
     const Environment& environment() const { return env_; }
     // Weight [N] on node i for the given configuration (submergence-blended dry / submerged weight).
-    double nodeWeight(const std::vector<Vec3>& r, int i) const;
+    double nodeWeight(const std::vector<Vec3>& r, int i, double t = 0.0) const;
     // Fraction of node i below the still-water level (0 = air, 1 = fully submerged).
-    double submergedFraction(const std::vector<Vec3>& r, int i) const;
+    double submergedFraction(const std::vector<Vec3>& r, int i, double t = 0.0) const;
     double segmentTension(const std::vector<Vec3>& r, int seg) const;
     double nodeMass(int i) const;
     // Tension force vector the end segment exerts on the end node (points into the line); this is the

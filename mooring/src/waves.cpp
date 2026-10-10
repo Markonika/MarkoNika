@@ -72,4 +72,9 @@ WaterField WaveField::asWaterField() const {
     return [copy](const Vec3& pos, double t, Vec3& vw, Vec3& aw) { copy.kinematics(pos, t, vw, aw); };
 }
 
+std::function<double(const Vec3&, double)> WaveField::asElevation() const {
+    WaveField copy = *this;
+    return [copy](const Vec3& pos, double t) { return copy.elevation(pos.x, pos.y, t); };
+}
+
 }  // namespace mooring

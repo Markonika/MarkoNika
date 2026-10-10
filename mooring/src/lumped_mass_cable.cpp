@@ -53,10 +53,12 @@ void LumpedMassCable::resetInternalState() {
     }
 }
 
-double LumpedMassCable::submergedFraction(const std::vector<Vec3>& r, int i) const {
+double LumpedMassCable::submergedFraction(const std::vector<Vec3>& r, int i, double t) const {
     if (!env_.hydro) return 1.0;
+    double zs = env_.surfaceZ;
+    if (env_.elevation && !staticMode_) zs += env_.elevation(r[i], t);
     // Linear blend over one segment length around the still-water level (avoids a force step).
-    return std::min(1.0, std::max(0.0, 0.5 + (env_.surfaceZ - r[i].z) / p_.l0()));
+    return std::min(1.0, std::max(0.0, 0.5 + (zs - r[i].z) / p_.l0()));
 }
 
 void LumpedMassCable::addPointElement(const PointElement& pe) {
@@ -65,19 +67,19 @@ void LumpedMassCable::addPointElement(const PointElement& pe) {
     points_.push_back(pe);
 }
 
-double LumpedMassCable::pointNetWeight(const std::vector<Vec3>& r, int i) const {
+double LumpedMassCable::pointNetWeight(const std::vector<Vec3>& r, int i, double t) const {
     double w = 0.0;
     for (const PointElement& pe : points_) {
         if (pe.node != i) continue;
         w += pe.mass * p_.g;
-        if (env_.hydro) w -= submergedFraction(r, i) * env_.rho_w * p_.g * pe.volume;
+        if (env_.hydro) w -= submergedFraction(r, i, t) * env_.rho_w * p_.g * pe.volume;
     }
     return w;
 }
 
-double LumpedMassCable::nodeWeight(const std::vector<Vec3>& r, int i) const {
+double LumpedMassCable::nodeWeight(const std::vector<Vec3>& r, int i, double t) const {
     const double half = (i == 0 || i == p_.N) ? 0.5 : 1.0;
-    const double phi = submergedFraction(r, i);
+    const double phi = submergedFraction(r, i, t);
     const double wl = env_.hydro ? phi * p_.w + (1.0 - phi) * p_.dryWeight() : p_.w;
     return wl * p_.l0() * half;
 }
@@ -105,9 +107,9 @@ void LumpedMassCable::computeForces(const std::vector<Vec3>& r, const std::vecto
     const double wSub = p_.w;
     for (int i = 0; i <= N; ++i) {
         const bool end = (i == 0 || i == N);
-        f[i].z -= nodeWeight(r, i);
+        f[i].z -= nodeWeight(r, i, t);
         if (env_.hydro) {
-            const double phi = submergedFraction(r, i);
+            const double phi = submergedFraction(r, i, t);
             if (phi > 0.0) {
                 // Tangent from neighbours; stretched tributary length carries the (1+eps) of Eqs. 3.27-3.29.
                 const Vec3 dt = i == 0 ? r[1] - r[0] : (i == N ? r[N] - r[N - 1] : r[i + 1] - r[i - 1]);
@@ -135,7 +137,7 @@ void LumpedMassCable::computeForces(const std::vector<Vec3>& r, const std::vecto
         const int i = pe.node;
         f[i].z -= pe.mass * p_.g;
         if (!env_.hydro) continue;
-        const double phi = submergedFraction(r, i);
+        const double phi = submergedFraction(r, i, t);
         if (phi <= 0.0) continue;
         f[i].z += phi * env_.rho_w * p_.g * pe.volume;
         const bool aniso = pe.CdT >= 0.0 || pe.CdN >= 0.0;
@@ -292,7 +294,7 @@ void LumpedMassCable::acceleration(std::vector<Vec3>& r, std::vector<Vec3>& v, d
     for (const PointElement& pe : points_) {
         mPt[pe.node] += pe.mass;
         if (!env_.hydro) continue;
-        const double phi = submergedFraction(r, pe.node);
+        const double phi = submergedFraction(r, pe.node, t);
         if (pe.Cm > 0.0) caPt[pe.node] += phi * pe.Cm * env_.rho_w * pe.volume;
         maT[pe.node] += phi * pe.maTan; maN[pe.node] += phi * pe.maNorm;
     }

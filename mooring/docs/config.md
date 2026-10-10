@@ -68,3 +68,6 @@ Elevation of a component is `A sin(omega t - k s + phase)` (s along the directio
 `line.tension_curve`: `[[strain, tension_N], ...]`, strictly increasing and positive, piecewise linear through (0, 0), last slope extrapolated; replaces `EA_N` (if both are given `EA_N` is only the reference stiffness).
 `line.maxwell_branches`: `[{"K_N": ..., "tau_s": ...}, ...]`, each a spring K in series with a dashpot (relaxation time tau) in parallel with the curve: tension = curve(eps) + sum K (eps - alpha), d alpha/dt = (eps - alpha)/tau.
 The relaxed (static) stiffness is the curve; the high-rate stiffness adds sum K. The static solve uses the relaxed state. Complex modulus of a branch: storage K w^2 tau^2 / (1 + w^2 tau^2), loss K w tau / (1 + w^2 tau^2).
+
+### Instantaneous free-surface submergence
+`waves.instantaneous_surface` (platform runner, default false): the submergence of line nodes and point elements (weight/buoyancy blend, drag, added mass) follows the instantaneous surface z = surface_z + eta(x, y, t) of the wave field instead of the still-water level. The static solve always uses the still-water level. In code: `Environment::elevation` (`WaveField::asElevation()`).

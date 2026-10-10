@@ -1,5 +1,5 @@
 // Copyright (c) Marko Nika. All rights reserved. Proprietary and confidential.
-// Usage: paredes_report [dir_with_configs] [statics|stiffness|free|decay|waves|all] [con1|con2|cat]
+// Usage: paredes_report [dir_with_configs] [statics|stiffness|free|decay|waves|all] [con1|con2|cat] [inst]
 #include <cstdio>
 #include <fstream>
 #include <string>
@@ -41,7 +41,7 @@ int main(int argc, char** argv) {
         }
         if (what == "waves") {
             for (double T : {1.30, 1.40}) {
-                const ParedesRAO r = paredesWaveRAO(cfg, T, 0.08, 30.0, 15);
+                const ParedesRAO r = paredesWaveRAO(cfg, T, 0.08, 30.0, 15, 2e-3, true, argc > 4 && std::string(argv[4]) == "inst");
                 std::printf("== %s regular waves H = 0.08 m, T = %.2f s: RAO surge %.3f, heave %.3f, pitch/(ka) %.3f (mean surge offset %.4f m)\n", n, T, r.surge, r.heave, r.pitch, r.meanSurge);
                 std::fflush(stdout);
             }

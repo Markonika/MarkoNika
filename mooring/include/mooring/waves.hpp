@@ -36,7 +36,8 @@ public:
     double elevation(double x, double y, double t) const;
     // Water velocity and acceleration at 'pos' (absolute z), zero above the instantaneous surface.
     void kinematics(const Vec3& pos, double t, Vec3& u, Vec3& a) const;
-    WaterField asWaterField() const;       // for Environment::water (the field is copied)
+    WaterField asWaterField() const;
+    std::function<double(const Vec3&, double)> asElevation() const;   // surface elevation above surfaceZ for Environment::elevation (copied)       // for Environment::water (the field is copied)
     const std::vector<WaveComponent>& components() const { return c_; }
     double depth() const { return h_; }
     double surfaceZ() const { return z0_; }

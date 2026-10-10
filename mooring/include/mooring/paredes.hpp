@@ -38,6 +38,6 @@ double paredesDecayPeriod(nlohmann::json cfg, int dof, double offset, double tEn
 // Body coefficients A, B, wave force w, delta are those of Table 3.4 for T = 1.30 or 1.40 s (including the surge-pitch coupling).
 struct ParedesRAO { double surge{0}, heave{0}, pitch{0}; double a{0}, k{0}; bool finite{true}; double meanSurge{0}; };
 // steadyStart: initialise pose and velocity with the steady response of the free body (closed form) instead of starting from rest with a ramp.
-ParedesRAO paredesWaveRAO(nlohmann::json cfg, double period, double height, double tEnd, int fitCycles, double dtBody = 2e-3, bool steadyStart = true);
+ParedesRAO paredesWaveRAO(nlohmann::json cfg, double period, double height, double tEnd, int fitCycles, double dtBody = 2e-3, bool steadyStart = true, bool instantaneousSurface = false);
 
 }  // namespace mooring

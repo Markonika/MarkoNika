@@ -147,7 +147,7 @@ const Tab34 kTab[] = {{1.30, 24.55, 31.73, 1057.8, 1.475, 26.23, 37.94, 817.9, 0
                       {1.50, 23.17, 14.05, 880.2, 1.519, 27.83, 37.47, 1016.4, 0.168, 0.2564, 0.01213, 25.86, -1.623, 1.1004, 0.4129}};
 }  // namespace
 
-ParedesRAO paredesWaveRAO(json cfg, double period, double height, double tEnd, int fitCycles, double dtBody, bool steadyStart) {
+ParedesRAO paredesWaveRAO(json cfg, double period, double height, double tEnd, int fitCycles, double dtBody, bool steadyStart, bool instantaneousSurface) {
     const Tab34* c = nullptr;
     for (const Tab34& e : kTab) if (std::fabs(e.T - period) < 1e-9) c = &e;
     if (!c) throw std::invalid_argument("Table 3.4 has coefficients only for T = 1.30, 1.40, 1.50 s");
@@ -160,7 +160,7 @@ ParedesRAO paredesWaveRAO(json cfg, double period, double height, double tEnd, i
     cfg["body"]["wave_force"] = {{"w", {c->w1, 0.0, c->w3, 0.0, c->w5, 0.0}}, {"delta", {c->d1, 0.0, c->d3, 0.0, c->d5, 0.0}}};
     const double depth = 0.9;
     const double ramp = steadyStart ? 0.0 : 5.0 * period;
-    cfg["waves"] = {{"depth_m", depth}, {"surface_z_m", cfg["environment"].value("water_surface_z_m", depth)}, {"ramp_time_s", ramp},
+    cfg["waves"] = {{"depth_m", depth}, {"surface_z_m", cfg["environment"].value("water_surface_z_m", depth)}, {"ramp_time_s", ramp}, {"instantaneous_surface", instantaneousSurface},
                     {"components", json::array({ {{"height_m", height}, {"period_s", period}} })}};
     if (steadyStart) {
         // Start from the steady-state response of the FREE body (closed form of the 6-DOF model without lines), so that only the small

@@ -57,9 +57,23 @@ coupling 1.24 / 0.92.
 
 ## Limitations of the wave implementation (also in README)
 * Linear (first-order) waves only; no second-order drift (the thesis attributes the experimental surge offset to it), no wave-induced mean loads on the body.
-* Submergence of the line nodes (weight/buoyancy blend and hydrodynamic forces) uses the **still-water** level, not the instantaneous elevation; Wheeler stretching is applied
+* Submergence of the line nodes (weight/buoyancy blend and hydrodynamic forces) uses the **still-water** level by default (optional `waves.instantaneous_surface`, tested below: negligible effect here); Wheeler stretching is applied
   to the kinematics of the submerged part only. Floater and clump forces share that approximation.
 * Wheeler accelerations are the stretched linear values (about 4 % of A w^2 off the exact derivative near the surface).
 * The body excitation is a constant-coefficient force at the mean position (no dependence on the instantaneous position, no frequency-domain memory); irregular waves
   would need w(omega) from BEM output (not implemented; the component list supports irregular kinematics for the lines).
 * Only T = 1.30, 1.40, 1.50 s have body coefficients (Table 3.4). The measured RAO figures contain 1.3 and 1.4 s (and not 1.5 s).
+
+## Sensitivity: instantaneous free-surface submergence (hypothesis tested and not supported)
+Hypothesis (listed above as a limitation): using the still-water level for the submergence of line nodes and point elements causes some of the RAO disagreements. `waves.instantaneous_surface = true` (assumptions item 44) makes the blend follow the instantaneous surface. Same runs as the table above (steady start, H = 0.08 m), surge / heave / pitch RAO, still-water level -> instantaneous surface:
+
+| config, T | surge | heave | pitch/(ka) |
+|---|---|---|---|
+| CON1, 1.3 | 0.691 -> 0.691 | 1.287 -> 1.287 | 1.631 -> 1.630 |
+| CON2, 1.3 | 0.693 -> 0.693 | 1.287 -> 1.287 | 2.201 -> 2.201 |
+| CAT, 1.3 | 0.749 -> 0.750 | 1.223 -> 1.226 | 1.376 -> 1.392 |
+| CON1, 1.4 | 0.771 -> 0.771 | 1.141 -> 1.141 | 1.262 -> 1.261 |
+| CON2, 1.4 | 0.775 -> 0.775 | 1.169 -> 1.169 | 1.639 -> 1.637 |
+| CAT, 1.4 | 0.815 -> 0.815 | 1.092 -> 1.094 | 1.020 -> 1.032 |
+
+The largest change is 1.2 % (CAT pitch), far below the 10-50 % disagreements, so the still-water-level approximation is not their cause (the lines are nearly fully submerged in these set-ups; the effect could matter for lines crossing the surface). The default stays off.
