@@ -19,6 +19,7 @@ struct LineSection {
     double m_l{0};      // dry mass per unit length [kg/m]
     double w{0};        // submerged weight per unit length [N/m]
     double c_int{0};    // internal damping [N s]
+    double EI{0};       // bending stiffness [N m^2] (0 = perfectly flexible)
     double D0{0}, D1{0}, A1{0};
     double Cm{0}, Cdt{0}, Cdn{0};
     RopeLaw rope;
@@ -34,6 +35,12 @@ struct CableParams {
     // Non-uniform line: if non-empty, L, N and the per-length properties above are derived from the sections (length-weighted means for
     // m_l and w, series stiffness for EA, for reporting only); soil, g and planar remain global.
     std::vector<LineSection> sections;
+    // Bending stiffness (uniform line; sections carry their own): discrete curvature energy U = sum_i EI_i |t_i - t_{i-1}|^2 / (2 lbar_i) over the
+    // interior nodes (t = unit segment tangents, lbar = mean unstretched length of the two segments), i.e. a pinned-end beam; the optional clamp
+    // directions add a ghost segment with a prescribed direction at the anchor and/or the fairlead (built-in end, bend stiffener, hang-off angle).
+    double EI{0};
+    bool clampAnchor{false}, clampFairlead{false};
+    Vec3 clampAnchorDir, clampFairleadDir;
     RopeLaw rope;        // optional nonlinear static curve and Maxwell branches (see rope.hpp); EA is used when no curve is given
     double g{9.81};
     // Hydrodynamics (Eqs. 3.27-3.29). A1 = 0 means pi/4 D0^2.
@@ -255,7 +262,7 @@ private:
     double dtScale_{1.0};                         // adaptive sub-step factor (<= 1): halved when Newton fails, grown back after successes
     int okCount_{0};
     void buildJacobian(const std::vector<Vec3>& rf, const std::vector<Vec3>& vf, double t);
-    struct Blk { double a[3][9]; };       // lower / diagonal / upper 3x3 blocks, row-major
+    struct Blk { double a[5][9]; };       // 3x3 blocks, row-major, index (column node - row node) + bw_: 0..2 (tridiagonal) or 0..4 (bending)
     std::vector<Blk> dAdr_, dAdv_;       // finite-difference blocks of the acceleration function (nodes 1..N-1)
     bool jacValid_{false};
     int jacAge_{0};
@@ -277,7 +284,11 @@ private:
     Environment env_;
     std::vector<PointElement> points_;
     StepObserver observer_;
-    struct SegProps { double l0, EA, ml, w, wd, D0, D1, A1, Cm, Cdt, Cdn, cint; int sec; size_t aoff; };
+    struct SegProps { double l0, EA, ml, w, wd, D0, D1, A1, Cm, Cdt, Cdn, cint, EI; int sec; size_t aoff; };
+    int bw_{1};                       // Jacobian half bandwidth in nodes: 1 (tension, drag, ...) or 2 (bending adds a five-node stencil)
+    bool bending_{false};
+    void addBendingForces(const std::vector<Vec3>& r, std::vector<Vec3>& f) const;
+    double bendingEnergy(const std::vector<Vec3>& r) const;
     std::vector<SegProps> seg_;       // per-segment properties (uniform lines: N identical entries)
     std::vector<RopeLaw> ropes_;      // one per section
     std::vector<double> s_;           // unstretched arc length of each node [m]

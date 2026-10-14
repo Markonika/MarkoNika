@@ -71,9 +71,9 @@ LineModes LumpedMassCable::naturalModes(int nModes) {
             Mm[i][3 * a + b] = mt * tt + mn * (id - tt);
             Mh[i][3 * a + b] = tt / std::sqrt(mt) + (id - tt) / std::sqrt(mn);
         }
-        for (int j = std::max(1, i - 1); j <= std::min(N - 1, i + 1); ++j) {
-            const double* br = dAdr_[i].a[j - i + 1];
-            const double* bv = dAdv_[i].a[j - i + 1];
+        for (int j = std::max(1, i - bw_); j <= std::min(N - 1, i + bw_); ++j) {
+            const double* br = dAdr_[i].a[j - i + bw_];
+            const double* bv = dAdv_[i].a[j - i + bw_];
             for (int ra = 0; ra < nc; ++ra) for (int cb = 0; cb < nc; ++cb) {
                 double kr = 0.0, kv = 0.0;
                 for (int c3 = 0; c3 < 3; ++c3) { kr += Mm[i][3 * comps[ra] + c3] * br[3 * c3 + comps[cb]]; kv += Mm[i][3 * comps[ra] + c3] * bv[3 * c3 + comps[cb]]; }

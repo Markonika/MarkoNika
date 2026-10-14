@@ -61,6 +61,9 @@ std::unique_ptr<LumpedMassCable> buildLine(const json& cfg, const Vec3& anchor, 
     p.EA = jl.contains("EA_N") ? jl.at("EA_N").get<double>() : 0.0;
     p.m_l = sectioned ? 0.0 : jl.at("mass_per_length_kg_m").get<double>(); p.g = get(jl, "gravity_m_s2", 9.81);
     p.c_int = get(jl, "internal_damping_Ns", 0.0);
+    p.EI = get(jl, "bending_stiffness_Nm2", 0.0);
+    if (jl.contains("bending_anchor_direction")) { p.clampAnchor = true; p.clampAnchorDir = vec(jl["bending_anchor_direction"]); }
+    if (jl.contains("bending_fairlead_direction")) { p.clampFairlead = true; p.clampFairleadDir = vec(jl["bending_fairlead_direction"]); }
     if (jl.contains("tension_curve"))                 // [[strain, tension_N], ...] piecewise-linear static curve through (0,0)
         for (const json& pt : jl["tension_curve"]) p.rope.curve.push_back({pt.at(0).get<double>(), pt.at(1).get<double>()});
     if (jl.contains("maxwell_branches"))              // [{"K_N": ..., "tau_s": ...}, ...] viscoelastic branches
@@ -87,6 +90,7 @@ std::unique_ptr<LumpedMassCable> buildLine(const json& cfg, const Vec3& anchor, 
             q.w = rc > 0.0 ? CableParams::submergedWeight(q.m_l, rc, env.rho_w, p.g)
                            : (js.contains("weight_per_length_N_m") ? js["weight_per_length_N_m"].get<double>() : q.m_l * p.g);
             q.c_int = sv("internal_damping_Ns", 0.0);
+            q.EI = sv("bending_stiffness_Nm2", 0.0);
             q.D0 = sv("hydro_diameter_m", 0.0); q.D1 = js.contains("soil_diameter_m") ? js["soil_diameter_m"].get<double>() : (js.contains("hydro_diameter_m") ? q.D0 : sv("soil_diameter_m", q.D0));
             q.A1 = sv("nominal_area_m2", 0.0); q.Cm = sv("Cm", 0.0); q.Cdt = sv("Cdt", 0.0); q.Cdn = sv("Cdn", 0.0);
             const json& jr = js.contains("tension_curve") || js.contains("maxwell_branches") ? js : jl;

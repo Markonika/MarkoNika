@@ -89,3 +89,6 @@ The relaxed (static) stiffness is the curve; the high-rate stiffness adds sum K.
 
 ### Implicit body integration (platform runner)
 `numerics.coupling` = `"implicit"` (default `"explicit"`), `newmark_gamma` (0.5), `coupling_tol` (1e-9), `coupling_max_iter` (20). See `docs/implicit_coupling.md`.
+
+### Bending stiffness
+`line.bending_stiffness_Nm2` (EI, default 0; also per section and in `line_defaults`), `line.bending_anchor_direction` / `line.bending_fairlead_direction` (clamp the end along this direction; default pinned). See `docs/bending.md`.

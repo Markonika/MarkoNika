@@ -19,7 +19,7 @@ LumpedMassCable::LumpedMassCable(const CableParams& p, const Vec3& anchor, const
         if (p.rope.nonlinear() && p_.EA <= 0) p_.EA = p.rope.curve[0][1] / p.rope.curve[0][0];   // initial slope as reference EA
         if (p_.N < 2 || p_.L <= 0 || p_.EA <= 0 || p_.m_l <= 0) throw std::invalid_argument("invalid CableParams");
         LineSection q; q.length = p_.L; q.segments = p_.N; q.EA = p_.EA; q.m_l = p_.m_l; q.w = p_.w; q.c_int = p_.c_int;
-        q.D0 = p_.D0; q.D1 = p_.D1; q.A1 = p_.A1; q.Cm = p_.Cm; q.Cdt = p_.Cdt; q.Cdn = p_.Cdn; q.rope = p_.rope;
+        q.D0 = p_.D0; q.D1 = p_.D1; q.A1 = p_.A1; q.Cm = p_.Cm; q.Cdt = p_.Cdt; q.Cdn = p_.Cdn; q.rope = p_.rope; q.EI = p_.EI;
         secs.push_back(q);
     } else {
         double L = 0, mass = 0, wsum = 0, comp = 0; int N = 0;
@@ -38,11 +38,16 @@ LumpedMassCable::LumpedMassCable(const CableParams& p, const Vec3& anchor, const
         const LineSection& q = secs[k];
         for (int j = 0; j < q.segments; ++j)
             seg_.push_back({q.length / q.segments, q.EA, q.m_l, q.w, q.m_l * p_.g, q.D0, q.D1, q.A1 > 0.0 ? q.A1 : 0.7853981633974483 * q.D0 * q.D0,
-                            q.Cm, q.Cdt, q.Cdn, q.c_int, int(k), 0});
+                            q.Cm, q.Cdt, q.Cdn, q.c_int, q.EI, int(k), 0});
     }
     size_t off = 0;
     for (SegProps& g : seg_) { g.aoff = off; off += ropes_[g.sec].branches.size(); }
     alpha_.assign(off, 0.0);
+    for (const SegProps& g : seg_) bending_ = bending_ || g.EI > 0.0;
+    bending_ = bending_ || p_.clampAnchor || p_.clampFairlead;
+    for (const SegProps& g : seg_) if (g.EI < 0.0) throw std::invalid_argument("bending stiffness must be >= 0");
+    bw_ = bending_ ? 2 : 1;
+    if (bending_) { if (p_.clampAnchor) p_.clampAnchorDir = p_.clampAnchorDir / norm(p_.clampAnchorDir); if (p_.clampFairlead) p_.clampFairleadDir = p_.clampFairleadDir / norm(p_.clampFairleadDir); }
     s_.assign(N + 1, 0.0);
     {   // arc length = start of section + k l0 (identical to i l0 for a uniform line)
         int node = 0; double start = 0.0;
@@ -56,7 +61,7 @@ LumpedMassCable::LumpedMassCable(const CableParams& p, const Vec3& anchor, const
     for (int i = 1; i < N; ++i) {
         const SegProps &a = seg_[i - 1], &b = seg_[i];
         same_[i] = a.l0 == b.l0 && a.EA == b.EA && a.ml == b.ml && a.w == b.w && a.D0 == b.D0 && a.D1 == b.D1 && a.A1 == b.A1 &&
-                   a.Cm == b.Cm && a.Cdt == b.Cdt && a.Cdn == b.Cdn && a.cint == b.cint && a.sec == b.sec;
+                   a.Cm == b.Cm && a.Cdt == b.Cdt && a.Cdn == b.Cdn && a.cint == b.cint && a.EI == b.EI && a.sec == b.sec;
     }
     r_.resize(N + 1);
     // Initial shape: straight chord with a parabolic sag matching the slack length.
@@ -166,6 +171,7 @@ void LumpedMassCable::computeForces(const std::vector<Vec3>& r, const std::vecto
         f[i] += F;
         f[i + 1] -= F;
     }
+    if (bending_) addBendingForces(r, f);
     if (ca) ca->assign(r.size(), 0.0);
     if (aw) aw->assign(r.size(), Vec3());
     for (int i = 0; i <= N; ++i) {
@@ -235,6 +241,52 @@ void LumpedMassCable::computeForces(const std::vector<Vec3>& r, const std::vecto
     if (p_.planar) for (Vec3& q : f) q.y = 0.0;      // 2D mode: no out-of-plane force
 }
 
+// Bending: U = sum_i EI_i |t_i - t_{i-1}|^2 / (2 lbar_i) over the interior nodes, t_j = (r_{j+1} - r_j)/|.|. A clamped end (direction c) adds
+// EI (1 - (c.t)^2) / l0 for the end segment: the support node sees the mirror image of the first segment (curvature 2 phi / l0 over a half cell).
+// With g = EI (t_i - t_{i-1}) / lbar: dU/dd_i = P_i g / |d_i|, dU/dd_{i-1} = -P_{i-1} g / |d_{i-1}|, P = I - t t^T; the force is minus the gradient.
+void LumpedMassCable::addBendingForces(const std::vector<Vec3>& r, std::vector<Vec3>& f) const {
+    const int N = p_.N;
+    std::vector<Vec3> t(N);
+    std::vector<double> len(N, 0.0);
+    for (int j = 0; j < N; ++j) { const Vec3 d = r[j + 1] - r[j]; len[j] = norm(d); t[j] = len[j] > 0.0 ? d / len[j] : Vec3(1, 0, 0); }
+    auto proj = [](const Vec3& tt, const Vec3& g) { return g - tt * dot(tt, g); };
+    for (int i = 1; i < N; ++i) {
+        const double EI = 0.5 * (seg_[i - 1].EI + seg_[i].EI);
+        if (EI <= 0.0 || len[i - 1] <= 0.0 || len[i] <= 0.0) continue;
+        const double lbar = 0.5 * (seg_[i - 1].l0 + seg_[i].l0);
+        const Vec3 g = (t[i] - t[i - 1]) * (EI / lbar);
+        const Vec3 up = proj(t[i], g) / len[i], dn = proj(t[i - 1], g) / len[i - 1];
+        f[i + 1] -= up;
+        f[i] += up + dn;
+        f[i - 1] -= dn;
+    }
+    if (p_.clampAnchor && seg_[0].EI > 0.0 && len[0] > 0.0) {                 // ghost segment before the anchor with fixed direction
+        const Vec3 g = p_.clampAnchorDir * (-2.0 * seg_[0].EI / seg_[0].l0 * dot(p_.clampAnchorDir, t[0]));      // dU/dt_0 of U = EI (1 - (c.t_0)^2) / l0
+        const Vec3 up = proj(t[0], g) / len[0];
+        f[1] -= up; f[0] += up;
+    }
+    if (p_.clampFairlead && seg_[N - 1].EI > 0.0 && len[N - 1] > 0.0) {       // ghost segment after the fairlead
+        const Vec3 g = p_.clampFairleadDir * (-2.0 * seg_[N - 1].EI / seg_[N - 1].l0 * dot(p_.clampFairleadDir, t[N - 1]));
+        const Vec3 dn = proj(t[N - 1], g) / len[N - 1];
+        f[N] -= dn; f[N - 1] += dn;
+    }
+}
+
+double LumpedMassCable::bendingEnergy(const std::vector<Vec3>& r) const {
+    const int N = p_.N;
+    std::vector<Vec3> t(N);
+    for (int j = 0; j < N; ++j) { const Vec3 d = r[j + 1] - r[j]; const double l = norm(d); t[j] = l > 0.0 ? d / l : Vec3(1, 0, 0); }
+    double U = 0.0;
+    for (int i = 1; i < N; ++i) {
+        const double EI = 0.5 * (seg_[i - 1].EI + seg_[i].EI), lbar = 0.5 * (seg_[i - 1].l0 + seg_[i].l0);
+        const Vec3 d = t[i] - t[i - 1];
+        U += 0.5 * EI * dot(d, d) / lbar;
+    }
+    if (p_.clampAnchor) { const double c = dot(p_.clampAnchorDir, t[0]); U += seg_[0].EI * (1.0 - c * c) / seg_[0].l0; }
+    if (p_.clampFairlead) { const double c = dot(p_.clampFairleadDir, t[N - 1]); U += seg_[N - 1].EI * (1.0 - c * c) / seg_[N - 1].l0; }
+    return U;
+}
+
 Vec3 LumpedMassCable::endTension(bool top) const {
     const int seg = top ? p_.N - 1 : 0;
     const Vec3 d = top ? r_[p_.N - 1] - r_[p_.N] : r_[1] - r_[0];
@@ -296,13 +348,13 @@ RelaxResult LumpedMassCable::relaxStatic(const RelaxOptions& opt) {
     for (int j = 0; j < p_.N; ++j) {
         const SegProps& g = seg_[j];
         const double EAs = ropes_[g.sec].maxStaticStiffness(g.EA);
-        kseg[j] = EAs / g.l0; EAmax = std::max(EAmax, EAs);
+        kseg[j] = (EAs + (g.EI > 0.0 ? 16.0 * g.EI / (g.l0 * g.l0) : 0.0)) / g.l0; EAmax = std::max(EAmax, EAs);
         wl0 = std::max({wl0, g.w * g.l0, g.ml * p_.g * g.l0});
     }
     for (int i = 1; i < p_.N; ++i) {
         const int j = kseg[i - 1] >= kseg[i] ? i - 1 : i;
         const SegProps& g = seg_[j];
-        mFict[i] = opt.massFactor * res.dt * res.dt * ropes_[g.sec].maxStaticStiffness(g.EA) / g.l0;   // same operation order as the uniform-line code
+        mFict[i] = opt.massFactor * res.dt * res.dt * (ropes_[g.sec].maxStaticStiffness(g.EA) + (g.EI > 0.0 ? 16.0 * g.EI / (g.l0 * g.l0) : 0.0)) / g.l0;   // same operation order as the uniform-line code
     }
     staticMode_ = true;
     std::vector<Vec3> v(n), f(n);
@@ -359,6 +411,8 @@ double LumpedMassCable::stableDt() const {
         dt = std::min(dt, dyn_.cfl * g.l0 / c);                                  // axial wave CFL
         // Explicit internal damping (c_int/l0 per segment, up to 4 c_int/(m_l l0^2) per node) adds its own limit.
         if (g.cint > 0.0 && !dyn_.implicitDamping) dt = std::min(dt, dyn_.cfl * g.ml * g.l0 * g.l0 / (2.0 * g.cint));
+        // Bending: highest frequency omega = 4 sqrt(EI / (m_l l0^4)) of the five-point stencil -> dt = cfl * 2 / omega.
+        if (g.EI > 0.0) dt = std::min(dt, dyn_.cfl * 0.5 * g.l0 * g.l0 * std::sqrt(g.ml / g.EI));
         if (env_.seabed && p_.soil.Ks > 0.0 && g.D1 > 0.0) {
             // Contact oscillator: omega^2 = Ks D1 / m_l (independent of l0); largest eigenvalue magnitude
             // of the damped spring is omega (zeta + sqrt(zeta^2 - 1)) for zeta >= 1, omega otherwise.
@@ -526,6 +580,7 @@ inline Mat3 toMat(const double* a) { Mat3 m; for (int i = 0; i < 9; ++i) m.a[i] 
 void LumpedMassCable::buildJacobian(const std::vector<Vec3>& rf, const std::vector<Vec3>& vf, double t) {
     const int N = p_.N, n = N + 1;
     dAdr_.assign(n, Blk{}); dAdv_.assign(n, Blk{});
+    const int nColour = 2 * bw_ + 1;
     const DynStats saved = stats_;
     double l0min = 1e300;
     for (const SegProps& g : seg_) l0min = std::min(l0min, g.l0);
@@ -534,21 +589,21 @@ void LumpedMassCable::buildJacobian(const std::vector<Vec3>& rf, const std::vect
     acceleration(r, v, t, A0);
     for (int mode = 0; mode < 2; ++mode) {
         const double h = mode == 0 ? hr : hv;
-        for (int c = 0; c < 3; ++c) {
+        for (int c = 0; c < nColour; ++c) {
             for (int d = 0; d < 3; ++d) {
                 if (p_.planar && d == 1) continue;
                 rp = r; vp = v;
                 bool any = false;
                 for (int i = 1; i < N; ++i)
-                    if (i % 3 == c) { comp(mode == 0 ? rp[i] : vp[i], d) += h; any = true; }
+                    if (i % nColour == c) { comp(mode == 0 ? rp[i] : vp[i], d) += h; any = true; }
                 if (!any) continue;
                 acceleration(rp, vp, t, Ap);
                 for (int i = 1; i < N; ++i) {
-                    if (i % 3 != c) continue;
-                    for (int k = i - 1; k <= i + 1; ++k) {
+                    if (i % nColour != c) continue;
+                    for (int k = i - bw_; k <= i + bw_; ++k) {
                         if (k < 1 || k > N - 1) continue;
                         const Vec3 col = (Ap[k] - A0[k]) / h;
-                        double* b = (mode == 0 ? dAdr_ : dAdv_)[k].a[i - k + 1];   // 0: lower (node k-1), 1: diagonal, 2: upper (node k+1)
+                        double* b = (mode == 0 ? dAdr_ : dAdv_)[k].a[i - k + bw_];   // index (column node - row node) + bw_
                         b[0 + d] = col.x; b[3 + d] = col.y; b[6 + d] = col.z;
                     }
                 }
@@ -617,28 +672,68 @@ int LumpedMassCable::genAlphaStep(double dt, bool force, double* errOut) {
         const double gnorm0 = gnorm;
         for (int it = 0; it < dyn_.maxNewton; ++it) {
             if (it == 0 && (!jacValid_ || jacAge_ >= dyn_.jacInterval)) { residual(Dn, Gt); buildJacobian(rf, vf, tf); jacValid_ = true; jacAge_ = 0; }
-            // J dr = -G : block Thomas on the interior nodes
+            // J dr = -G : block Thomas on the interior nodes (tridiagonal Jacobian) or a banded LU (bending: five-node stencil)
             const int m = N - 1;
-            std::vector<Mat3> Cp(m); std::vector<Vec3> gp(m);
-            for (int k = 1; k <= m; ++k) {
-                Mat3 Lk, Dk, Uk;
-                for (int q = 0; q < 9; ++q) {
-                    const double rL = dAdr_[k].a[0][q], rD = dAdr_[k].a[1][q], rU = dAdr_[k].a[2][q];
-                    const double vL = dAdv_[k].a[0][q], vD = dAdv_[k].a[1][q], vU = dAdv_[k].a[2][q];
-                    Lk.a[q] = -c1 * (rL + cv * vL); Dk.a[q] = -c1 * (rD + cv * vD); Uk.a[q] = -c1 * (rU + cv * vU);
+            std::vector<Mat3> Cp; std::vector<Vec3> gp;
+            std::vector<double> xband;
+            bool singular = false;
+            if (bw_ == 1) {
+                Cp.resize(m); gp.resize(m);
+                for (int k = 1; k <= m; ++k) {
+                    Mat3 Lk, Dk, Uk;
+                    for (int q = 0; q < 9; ++q) {
+                        const double rL = dAdr_[k].a[0][q], rD = dAdr_[k].a[1][q], rU = dAdr_[k].a[2][q];
+                        const double vL = dAdv_[k].a[0][q], vD = dAdv_[k].a[1][q], vU = dAdv_[k].a[2][q];
+                        Lk.a[q] = -c1 * (rL + cv * vL); Dk.a[q] = -c1 * (rD + cv * vD); Uk.a[q] = -c1 * (rU + cv * vU);
+                    }
+                    Dk.a[0] += sa; Dk.a[4] += sa; Dk.a[8] += sa;
+                    Vec3 b = G[k] * (-1.0);
+                    if (k > 1) { Dk -= Lk * Cp[k - 2]; b -= Lk * gp[k - 2]; }
+                    const Mat3 Di = Dk.inverse();
+                    gp[k - 1] = Di * b;
+                    if (k < m) Cp[k - 1] = Di * Uk;
                 }
-                Dk.a[0] += sa; Dk.a[4] += sa; Dk.a[8] += sa;
-                Vec3 b = G[k] * (-1.0);
-                if (k > 1) { Dk -= Lk * Cp[k - 2]; b -= Lk * gp[k - 2]; }
-                const Mat3 Di = Dk.inverse();
-                gp[k - 1] = Di * b;
-                if (k < m) Cp[k - 1] = Di * Uk;
+            } else {
+                const int n3 = 3 * m, kd = 3 * bw_ + 2, wd = 2 * kd + 1;
+                std::vector<double> Ab(size_t(n3) * wd, 0.0), rhs(n3);
+                for (int k = 1; k <= m; ++k) {
+                    for (int jn = std::max(1, k - bw_); jn <= std::min(m, k + bw_); ++jn) {
+                        const int wch = jn - k + bw_;
+                        for (int ra = 0; ra < 3; ++ra) for (int cb = 0; cb < 3; ++cb) {
+                            const int row = 3 * (k - 1) + ra, col = 3 * (jn - 1) + cb;
+                            double v = -c1 * (dAdr_[k].a[wch][3 * ra + cb] + cv * dAdv_[k].a[wch][3 * ra + cb]);
+                            if (row == col) v += sa;
+                            Ab[size_t(row) * wd + (col - row + kd)] = v;
+                        }
+                    }
+                    rhs[3 * (k - 1) + 0] = -G[k].x; rhs[3 * (k - 1) + 1] = -G[k].y; rhs[3 * (k - 1) + 2] = -G[k].z;
+                }
+                for (int i0 = 0; i0 < n3 && !singular; ++i0) {                // banded LU without pivoting (J is diagonally dominant for small dt, SPD-like otherwise)
+                    const double piv = Ab[size_t(i0) * wd + kd];
+                    if (!(std::fabs(piv) > 1e-300)) { singular = true; break; }
+                    for (int r2 = i0 + 1; r2 <= std::min(n3 - 1, i0 + kd); ++r2) {
+                        const double fac = Ab[size_t(r2) * wd + (i0 - r2 + kd)] / piv;
+                        if (fac == 0.0) continue;
+                        for (int c2 = i0; c2 <= std::min(n3 - 1, i0 + kd); ++c2) Ab[size_t(r2) * wd + (c2 - r2 + kd)] -= fac * Ab[size_t(i0) * wd + (c2 - i0 + kd)];
+                        rhs[r2] -= fac * rhs[i0];
+                    }
+                }
+                xband.assign(n3, 0.0);
+                if (!singular) {
+                    for (int i0 = n3 - 1; i0 >= 0; --i0) {
+                        double sum = rhs[i0];
+                        for (int c2 = i0 + 1; c2 <= std::min(n3 - 1, i0 + kd); ++c2) sum -= Ab[size_t(i0) * wd + (c2 - i0 + kd)] * xband[c2];
+                        xband[i0] = sum / Ab[size_t(i0) * wd + kd];
+                    }
+                }
             }
             double dmax = 0.0;
             bool bad = false;
             Vec3 xnext;
+            if (singular) bad = true;
             for (int k = m; k >= 1; --k) {
-                xnext = k == m ? gp[k - 1] : gp[k - 1] - Cp[k - 1] * xnext;
+                if (bw_ == 1) xnext = k == m ? gp[k - 1] : gp[k - 1] - Cp[k - 1] * xnext;
+                else xnext = singular ? Vec3() : Vec3(xband[3 * (k - 1)], xband[3 * (k - 1) + 1], xband[3 * (k - 1) + 2]);
                 if (p_.planar) xnext.y = 0.0;
                 if (!std::isfinite(xnext.x + xnext.y + xnext.z)) bad = true;
                 dr[k] = xnext;
@@ -859,6 +954,7 @@ double LumpedMassCable::energy() const {
         const double eps = norm(r_[i + 1] - r_[i]) / seg_[i].l0 - 1.0;
         if (eps > 0.0) E += ropes_[seg_[i].sec].staticEnergy(seg_[i].EA, eps) * seg_[i].l0;
     }
+    if (bending_) E += bendingEnergy(r_);
     return E;
 }
 
