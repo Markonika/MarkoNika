@@ -59,6 +59,7 @@ Milestones 1-9 done (static solver, dynamics, hydrodynamics + seabed, Chalmers v
 | Non-uniform lines (sections): hanging two-section line; two-medium string eigenfrequency; split uniform line | 1e-6; -0.001 %; identical to 1e-8 |
 | Fully implicit generalised-alpha / Newmark line integration | 2nd order (ratios 4.0); damped mode within 2 % at 16x the explicit step; Lopez-Olocco max tension -0.07 % at 10x the CFL step; no gain on the Azcona snap case (docs/implicit_integration.md) |
 | Adaptive steps (implicit scheme): mode error vs tolerance; Lopez-Olocco; Azcona snap case convergence | x10 per decade; +0.018 % at 1e-4; snap max 48.5-49.4 N across tolerances (60 seg.), 48.5-52.3 N across 30-240 segments |
+| Concurrent line solves (`numerics.threads`) | bit-identical to serial; 2.25x on the 3-line Paredes CAT case (55.8 -> 24.8 s) |
 | Support reactions, static line | vertical sum = weight (1e-6), horizontal sum = 0 |
 
 Details: `docs/chalmers_validation.md` (results, convergence, caveats), `docs/config.md` (configuration fields).

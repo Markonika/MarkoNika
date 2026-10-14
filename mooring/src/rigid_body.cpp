@@ -83,9 +83,14 @@ Vec6 CoupledSystem::externalLoad(const Vec6& xi, const std::vector<Vec3>& lf) co
     return F;
 }
 
+void CoupledSystem::setThreads(int n) {
+    pool_.reset();
+    if (n > 1) pool_ = std::make_unique<WorkerPool>(std::min<int>(n, std::max<int>(1, int(lines_.size()))));
+}
+
 Vec6 CoupledSystem::staticResidual() {
     std::vector<Vec3> lf(lines_.size());
-    for (size_t i = 0; i < lines_.size(); ++i) lf[i] = lines_[i].line->staticForceOnBody(body_.pointPosition(lines_[i].a));
+    forLines([&](int i) { lf[i] = lines_[i].line->staticForceOnBody(body_.pointPosition(lines_[i].a)); });
     return externalLoad(body_.xi, lf);
 }
 
@@ -131,11 +136,11 @@ EquilibriumResult CoupledSystem::solveEquilibrium(double tol, int maxIter, const
 void CoupledSystem::begin(double t0) {
     t_ = t0;
     std::vector<Vec3> lf(lines_.size());
-    for (size_t i = 0; i < lines_.size(); ++i) {
+    forLines([&](int i) {
         Slot& s = lines_[i];
         s.force = s.line->forceOnBody(body_.pointPosition(s.a), body_.pointVelocity(s.a), t0);
         lf[i] = s.force;
-    }
+    });
     Fnow_ = externalLoad(body_.xi, lf);
     if (excitation_) { const Vec6 e = excitation_(t0); for (int k = 0; k < 6; ++k) Fnow_[k] += e[k]; }
     Vec6 F = Fnow_;
@@ -158,12 +163,12 @@ void CoupledSystem::step(double dt) {
     probe.xiDot = vh;
     std::vector<Vec3> lf(lines_.size());
     double dtLineMin = 1e300;
-    for (size_t i = 0; i < lines_.size(); ++i) {
+    forLines([&](int i) {
         Slot& s = lines_[i];
         s.force = s.line->forceOnBody(body_.pointPosition(s.a), probe.pointVelocity(s.a), tNew);
         lf[i] = s.force;
-        dtLineMin = std::min(dtLineMin, s.line->internalTimeStep());
-    }
+    });
+    for (Slot& s : lines_) dtLineMin = std::min(dtLineMin, s.line->internalTimeStep());
     Fnow_ = externalLoad(body_.xi, lf);
     if (excitation_) { const Vec6 e = excitation_(tNew); for (int k = 0; k < 6; ++k) Fnow_[k] += e[k]; }
 

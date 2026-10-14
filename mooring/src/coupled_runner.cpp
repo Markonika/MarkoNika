@@ -98,6 +98,7 @@ std::unique_ptr<CoupledSystem> buildCoupledSystem(const json& cfg, std::vector<s
         if (lineNames) lineNames->push_back(nm);
         sys.addLine(std::move(cab), a, nm);
     }
+    sys.setThreads(jn.value("threads", 1));
     return sysPtr;
 }
 

@@ -83,3 +83,6 @@ The relaxed (static) stiffness is the curve; the high-rate stiffness adds sum K.
 
 ### Adaptive time stepping (implicit scheme)
 `numerics.adaptive` (default false; only with `scheme` genalpha/newmark), `adapt_rtol` (1e-3, relative to the peak strain), `adapt_atol_strain` (1e-6), `adapt_min_factor` (1/1024); the step from `implicit_dt_factor` / `dt_s` is the maximum. The output reports rejected sub-steps and the smallest/largest accepted step. See `docs/implicit_integration.md`.
+
+### Concurrent line solves
+`numerics.threads` (platform runner, default 1 = serial): advance and solve the lines of a platform case on this many threads (capped at the number of lines). The lines share no state, so the results are identical to the serial run bit for bit. In the Paredes CAT case (3 lines, 40 segments, 77 line sub-steps per body step) 3 threads cut the wall time from 55.8 s to 24.8 s (2.25x), including the static equilibrium solves; single-line runs do not benefit.

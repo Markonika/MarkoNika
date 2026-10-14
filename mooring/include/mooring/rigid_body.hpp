@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include "mooring/cable_model.hpp"
+#include "mooring/parallel.hpp"
 #include "mooring/vec3.hpp"
 
 namespace mooring {
@@ -103,6 +104,10 @@ public:
     void step(double dt);
     void advanceTo(double tEnd, double dt);
     double time() const { return t_; }
+    // Advance / solve the lines concurrently on n threads (1 = serial, the default). The lines share no state, so the results are identical to the
+    // serial ones bit for bit; it pays for 2+ lines when the line work per body step is large (small time steps, fine discretisation, static solves).
+    void setThreads(int n);
+    int threads() const { return pool_ ? pool_->concurrency() : 1; }
     CouplingReport report() const { return report_; }
 
 private:
@@ -111,6 +116,12 @@ private:
     std::function<Vec6(double)> excitation_;
     RigidBody6DOF body_;
     std::vector<Slot> lines_;
+    std::unique_ptr<WorkerPool> pool_;
+    template <class F> void forLines(F&& f) {
+        const int n = int(lines_.size());
+        if (pool_ && n > 1) pool_->run(n, std::function<void(int)>(std::forward<F>(f)));
+        else for (int i = 0; i < n; ++i) f(i);
+    }
     double t_{0.0};
     Vec6 acc_{};
     Vec6 Fnow_{};          // line + constant + stiffness load at the current state (no damping terms)
