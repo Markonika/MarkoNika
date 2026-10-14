@@ -4,6 +4,7 @@
 #include <vector>
 #include "mooring/cable_model.hpp"
 #include "mooring/hydro.hpp"
+#include "mooring/linearize.hpp"
 #include "mooring/rope.hpp"
 #include "mooring/vec3.hpp"
 
@@ -201,6 +202,9 @@ public:
     Vec3 endForce(bool top) const;
 
     RelaxResult relaxStatic(const RelaxOptions& opt = {});
+    // Natural modes about the current shape (call after relaxStatic): the lowest 'nModes' with the dynamic (instantaneous) stiffness, i.e. including the
+    // Maxwell branches of the rope law. Uses the finite-difference Jacobian of the implicit scheme.
+    LineModes naturalModes(int nModes = 10);
     // Start shape for a line that lies on a flat seabed and rises to the fairlead: inextensible
     // catenary with horizontal touchdown tangent (suspended part) plus a straight lying part. Needs
     // the anchor on the seabed and Environment::seabed. Returns false (keeps the current shape) when the

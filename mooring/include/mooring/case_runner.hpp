@@ -1,6 +1,7 @@
 // Copyright (c) Marko Nika. All rights reserved. Proprietary and confidential.
 // JSON-configured single-line case: static relaxation, prescribed top-end motion, raw output.
 #pragma once
+#include <memory>
 #include <string>
 #include <vector>
 #include "mooring/lumped_mass_cable.hpp"
@@ -11,6 +12,9 @@ namespace mooring {
 // Reads the integration options common to the single-line and platform runners: scheme (rk4|verlet|genalpha|newmark), cfl, implicit_damping,
 // rho_inf, newton_tol, max_newton, jacobian_interval, implicit_dt_factor.
 void parseDynOptions(const nlohmann::json& jn, DynOptions& o);
+
+// Single-line config -> line at its static equilibrium (touchdown start + relaxation), for analyses such as natural modes.
+std::unique_ptr<LumpedMassCable> buildStaticLine(const nlohmann::json& cfg);
 
 struct CycleMax { int cycle; double topMax, anchorMax; };
 

@@ -1,0 +1,194 @@
+// Copyright (c) Marko Nika. All rights reserved. Proprietary and confidential.
+#include "mooring/linearize.hpp"
+#include <algorithm>
+#include <cmath>
+#include <numeric>
+#include <stdexcept>
+#include "mooring/lumped_mass_cable.hpp"
+#include "mooring/rigid_body.hpp"
+
+namespace mooring {
+
+SymEigen symmetricEigen(std::vector<double> a, int n) {
+    std::vector<double> v(size_t(n) * n, 0.0);
+    for (int i = 0; i < n; ++i) v[size_t(i) * n + i] = 1.0;       // v holds the eigenvectors as columns during the sweeps
+    auto A = [&](int i, int j) -> double& { return a[size_t(i) * n + j]; };
+    auto V = [&](int i, int j) -> double& { return v[size_t(i) * n + j]; };
+    for (int sweep = 0; sweep < 60; ++sweep) {
+        double off = 0.0, diag = 0.0;
+        for (int i = 0; i < n; ++i) { diag += A(i, i) * A(i, i); for (int j = i + 1; j < n; ++j) off += A(i, j) * A(i, j); }
+        if (off <= 1e-26 * (diag + off) || off == 0.0) break;
+        for (int p = 0; p < n - 1; ++p) {
+            for (int q = p + 1; q < n; ++q) {
+                const double apq = A(p, q);
+                if (std::fabs(apq) < 1e-300) continue;
+                const double theta = (A(q, q) - A(p, p)) / (2.0 * apq);
+                const double t = (theta >= 0.0 ? 1.0 : -1.0) / (std::fabs(theta) + std::sqrt(theta * theta + 1.0));
+                const double c = 1.0 / std::sqrt(t * t + 1.0), s = t * c;
+                for (int k = 0; k < n; ++k) {                       // rotate columns p, q
+                    const double akp = A(k, p), akq = A(k, q);
+                    A(k, p) = c * akp - s * akq; A(k, q) = s * akp + c * akq;
+                }
+                for (int k = 0; k < n; ++k) {                       // rotate rows p, q
+                    const double apk = A(p, k), aqk = A(q, k);
+                    A(p, k) = c * apk - s * aqk; A(q, k) = s * apk + c * aqk;
+                }
+                for (int k = 0; k < n; ++k) {
+                    const double vkp = V(k, p), vkq = V(k, q);
+                    V(k, p) = c * vkp - s * vkq; V(k, q) = s * vkp + c * vkq;
+                }
+            }
+        }
+    }
+    std::vector<int> idx(n);
+    std::iota(idx.begin(), idx.end(), 0);
+    std::sort(idx.begin(), idx.end(), [&](int x, int y) { return A(x, x) < A(y, y); });
+    SymEigen r; r.n = n; r.w.resize(n); r.v.resize(size_t(n) * n);
+    for (int k = 0; k < n; ++k) {
+        r.w[k] = A(idx[k], idx[k]);
+        for (int i = 0; i < n; ++i) r.v[size_t(k) * n + i] = V(i, idx[k]);
+    }
+    return r;
+}
+
+LineModes LumpedMassCable::naturalModes(int nModes) {
+    const int N = p_.N;
+    const std::vector<int> comps = p_.planar ? std::vector<int>{0, 2} : std::vector<int>{0, 1, 2};
+    const int nc = int(comps.size()), n = nc * (N - 1);
+    std::vector<Vec3> rf = r_, vf(r_.size());
+    buildJacobian(rf, vf, t_);
+    --stats_.jacobianBuilds;                                       // an analysis call, not a solver rebuild
+    jacValid_ = false;
+    std::vector<double> K(size_t(n) * n, 0.0), C(size_t(n) * n, 0.0);
+    std::vector<std::array<double, 9>> Mh(N + 1);                  // M^{-1/2} per node (3x3)
+    std::vector<std::array<double, 9>> Mm(N + 1);                  // M per node
+    for (int i = 1; i < N; ++i) {
+        double mt, mn; Vec3 tg;
+        nodeInertia(r_, t_, i, mt, mn, tg);
+        const double t3[3] = {tg.x, tg.y, tg.z};
+        for (int a = 0; a < 3; ++a) for (int b = 0; b < 3; ++b) {
+            const double tt = t3[a] * t3[b], id = a == b ? 1.0 : 0.0;
+            Mm[i][3 * a + b] = mt * tt + mn * (id - tt);
+            Mh[i][3 * a + b] = tt / std::sqrt(mt) + (id - tt) / std::sqrt(mn);
+        }
+        for (int j = std::max(1, i - 1); j <= std::min(N - 1, i + 1); ++j) {
+            const double* br = dAdr_[i].a[j - i + 1];
+            const double* bv = dAdv_[i].a[j - i + 1];
+            for (int ra = 0; ra < nc; ++ra) for (int cb = 0; cb < nc; ++cb) {
+                double kr = 0.0, kv = 0.0;
+                for (int c3 = 0; c3 < 3; ++c3) { kr += Mm[i][3 * comps[ra] + c3] * br[3 * c3 + comps[cb]]; kv += Mm[i][3 * comps[ra] + c3] * bv[3 * c3 + comps[cb]]; }
+                K[size_t(nc * (i - 1) + ra) * n + nc * (j - 1) + cb] = -kr;
+                C[size_t(nc * (i - 1) + ra) * n + nc * (j - 1) + cb] = -kv;
+            }
+        }
+    }
+    LineModes out; out.dof = n;
+    double asym = 0.0, nrm = 0.0;
+    for (int a = 0; a < n; ++a) for (int b = a + 1; b < n; ++b) {
+        const double d = K[size_t(a) * n + b] - K[size_t(b) * n + a];
+        asym += d * d;
+        const double m = 0.5 * (K[size_t(a) * n + b] + K[size_t(b) * n + a]);
+        K[size_t(a) * n + b] = K[size_t(b) * n + a] = m;
+        const double mc = 0.5 * (C[size_t(a) * n + b] + C[size_t(b) * n + a]);
+        C[size_t(a) * n + b] = C[size_t(b) * n + a] = mc;
+    }
+    for (double x : K) nrm += x * x;
+    out.asymmetry = std::sqrt(2.0 * asym / std::max(nrm, 1e-300));
+    // S = M^{-1/2} K M^{-1/2}: block rows / columns scaled by the 3x3 blocks restricted to the active components
+    auto scale = [&](std::vector<double>& A) {
+        std::vector<double> T(size_t(n) * n, 0.0);
+        for (int a = 0; a < n; ++a) for (int b = 0; b < n; ++b) {            // T = Mh A
+            const int ia = a / nc + 1, ra = a % nc;
+            double s = 0.0;
+            for (int rb = 0; rb < nc; ++rb) s += Mh[ia][3 * comps[ra] + comps[rb]] * A[size_t(nc * (ia - 1) + rb) * n + b];
+            T[size_t(a) * n + b] = s;
+        }
+        std::vector<double> R(size_t(n) * n, 0.0);
+        for (int a = 0; a < n; ++a) for (int b = 0; b < n; ++b) {            // R = T Mh
+            const int ib = b / nc + 1, cb = b % nc;
+            double s = 0.0;
+            for (int rb = 0; rb < nc; ++rb) s += T[size_t(a) * n + nc * (ib - 1) + rb] * Mh[ib][3 * comps[rb] + comps[cb]];
+            R[size_t(a) * n + b] = s;
+        }
+        A = R;
+    };
+    std::vector<double> S = K, Sc = C;
+    scale(S); scale(Sc);
+    for (int a = 0; a < n; ++a) for (int b = a + 1; b < n; ++b) { S[size_t(a) * n + b] = S[size_t(b) * n + a] = 0.5 * (S[size_t(a) * n + b] + S[size_t(b) * n + a]); }
+    const SymEigen eg = symmetricEigen(S, n);
+    const int m = std::min(nModes, n);
+    for (int k = 0; k < m; ++k) {
+        out.omega2.push_back(eg.w[k]);
+        const double om = eg.w[k] > 0.0 ? std::sqrt(eg.w[k]) : 0.0;
+        out.omega.push_back(om);
+        double yCy = 0.0;                                           // y^T (M^{-1/2} C M^{-1/2}) y
+        for (int a = 0; a < n; ++a) { double s = 0.0; for (int b = 0; b < n; ++b) s += Sc[size_t(a) * n + b] * eg.v[size_t(k) * n + b]; yCy += eg.v[size_t(k) * n + a] * s; }
+        out.zeta.push_back(om > 0.0 ? yCy / (2.0 * om) : 0.0);
+        std::vector<Vec3> shape(N + 1);
+        for (int i = 1; i < N; ++i) {
+            double y[3] = {0, 0, 0};
+            for (int r = 0; r < nc; ++r) y[comps[r]] = eg.v[size_t(k) * n + nc * (i - 1) + r];
+            Vec3 phi;
+            double* pv[3] = {&phi.x, &phi.y, &phi.z};
+            for (int a = 0; a < 3; ++a) { double s = 0.0; for (int b = 0; b < 3; ++b) s += Mh[i][3 * a + b] * y[b]; *pv[a] = s; }
+            shape[i] = phi;
+        }
+        out.shape.push_back(shape);
+    }
+    return out;
+}
+
+Mat6 CoupledSystem::stiffness(double h) {
+    const Vec6 x0 = body_.xi;
+    Mat6 K;
+    for (int j = 0; j < 6; ++j) {
+        body_.xi = x0; body_.xi[j] += h;
+        const Vec6 Gp = staticResidual();
+        body_.xi = x0; body_.xi[j] -= h;
+        const Vec6 Gm = staticResidual();
+        for (int i = 0; i < 6; ++i) K(i, j) = -(Gp[i] - Gm[i]) / (2.0 * h);
+    }
+    body_.xi = x0;
+    staticResidual();                                             // lines back at the original pose
+    return K;
+}
+
+Mat6 CoupledSystem::lineStiffness(double h) {
+    Mat6 K = stiffness(h);
+    for (int i = 0; i < 36; ++i) K.a[i] -= body_.params().C.a[i];
+    return K;
+}
+
+BodyModes bodyModes(const Mat6& M, const Mat6& Kin) {
+    // Cholesky M = L L^T, S = L^-1 K L^-T (symmetric), Jacobi, x = L^-T y.
+    double L[6][6] = {};
+    for (int i = 0; i < 6; ++i) for (int j = 0; j <= i; ++j) {
+        double s = 0.5 * (M(i, j) + M(j, i));
+        for (int k = 0; k < j; ++k) s -= L[i][k] * L[j][k];
+        if (i == j) { if (s <= 0.0) throw std::runtime_error("bodyModes: mass matrix not positive definite"); L[i][i] = std::sqrt(s); }
+        else L[i][j] = s / L[j][j];
+    }
+    BodyModes out;
+    double asym = 0.0, nrm = 0.0;
+    double K[6][6];
+    for (int i = 0; i < 6; ++i) for (int j = 0; j < 6; ++j) { K[i][j] = 0.5 * (Kin(i, j) + Kin(j, i)); asym += std::pow(Kin(i, j) - Kin(j, i), 2); nrm += Kin(i, j) * Kin(i, j); }
+    out.asymmetry = std::sqrt(asym / std::max(nrm, 1e-300));
+    double Y[6][6];                                              // Y = L^-1 K
+    for (int c = 0; c < 6; ++c) for (int i = 0; i < 6; ++i) { double s = K[i][c]; for (int k = 0; k < i; ++k) s -= L[i][k] * Y[k][c]; Y[i][c] = s / L[i][i]; }
+    double S[6][6];                                              // S = Y L^-T  (solve S L^T = Y, row by row)
+    for (int r = 0; r < 6; ++r) for (int j = 0; j < 6; ++j) { double s = Y[r][j]; for (int k = 0; k < j; ++k) s -= S[r][k] * L[j][k]; S[r][j] = s / L[j][j]; }
+    std::vector<double> a(36);
+    for (int i = 0; i < 6; ++i) for (int j = 0; j < 6; ++j) a[6 * i + j] = 0.5 * (S[i][j] + S[j][i]);
+    const SymEigen eg = symmetricEigen(a, 6);
+    for (int k = 0; k < 6; ++k) {
+        out.omega2[k] = eg.w[k];
+        out.omega[k] = eg.w[k] > 0.0 ? std::sqrt(eg.w[k]) : 0.0;
+        out.period[k] = out.omega[k] > 0.0 ? 6.283185307179586 / out.omega[k] : 0.0;
+        double x[6];                                             // x = L^-T y (back substitution)
+        for (int i = 5; i >= 0; --i) { double s = eg.v[size_t(k) * 6 + i]; for (int j = i + 1; j < 6; ++j) s -= L[j][i] * x[j]; x[i] = s / L[i][i]; }
+        for (int i = 0; i < 6; ++i) out.shape[k][i] = x[i];
+    }
+    return out;
+}
+
+}  // namespace mooring

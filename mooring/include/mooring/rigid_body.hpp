@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include "mooring/cable_model.hpp"
+#include "mooring/linearize.hpp"
 #include "mooring/parallel.hpp"
 #include "mooring/vec3.hpp"
 
@@ -73,6 +74,9 @@ struct CouplingReport {
 };
 
 // Explicit partitioned coupling: one body, any number of lines (conventional serial staggered scheme).
+// Natural frequencies of a body with total mass matrix M and stiffness K (see linearize.hpp).
+BodyModes bodyModes(const Mat6& M, const Mat6& K);
+
 class CoupledSystem {
 public:
     explicit CoupledSystem(const BodyParams& p) : body_(p) {}
@@ -93,6 +97,11 @@ public:
     EquilibriumResult solveEquilibrium(double tol = 1e-6, int maxIter = 40, const std::array<bool, 6>& fixed = {});
     // Residual generalised load at the current pose (lines solved statically), N and N m.
     Vec6 staticResidual();
+    // Total linearised stiffness K = -d(residual)/d(xi) at the current pose (hydrostatic C included), by central differences of the static line
+    // solutions with step h (rad / m); leaves the pose and the lines unchanged. 'lineStiffness' excludes the body's own C. Rows/columns: surge, sway,
+    // heave, rx, ry, rz.
+    Mat6 stiffness(double h = 1e-4);
+    Mat6 lineStiffness(double h = 1e-4);
 
     // Time-dependent generalised load on the body (e.g. wave excitation, Eq. 3.60); added to the loads at every step.
     void setExcitation(std::function<Vec6(double t)> f) { excitation_ = std::move(f); }

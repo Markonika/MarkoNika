@@ -129,6 +129,15 @@ std::unique_ptr<LumpedMassCable> buildLine(const json& cfg, const Vec3& anchor, 
     return cablePtr;
 }
 
+std::unique_ptr<LumpedMassCable> buildStaticLine(const json& cfg) {
+    const json jn = cfg.value("numerics", json::object());
+    auto cable = buildLine(cfg, vec(cfg.at("anchor_m")), vec(cfg.at("fairlead_rest_m")));
+    RelaxOptions ro;
+    ro.forceTol = get(jn, "relax_force_tol", 1e-6); ro.maxSteps = get<long>(jn, "relax_max_steps", 20000000L);
+    cable->relaxStatic(ro);
+    return cable;
+}
+
 CaseResult runCase(const json& cfg) {
     const auto wall0 = std::chrono::steady_clock::now();
     const json jenv = cfg.value("environment", json::object());
