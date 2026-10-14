@@ -86,3 +86,6 @@ The relaxed (static) stiffness is the curve; the high-rate stiffness adds sum K.
 
 ### Concurrent line solves
 `numerics.threads` (platform runner, default 1 = serial): advance and solve the lines of a platform case on this many threads (capped at the number of lines). The lines share no state, so the results are identical to the serial run bit for bit. In the Paredes CAT case (3 lines, 40 segments, 77 line sub-steps per body step) 3 threads cut the wall time from 55.8 s to 24.8 s (2.25x), including the static equilibrium solves; single-line runs do not benefit.
+
+### Implicit body integration (platform runner)
+`numerics.coupling` = `"implicit"` (default `"explicit"`), `newmark_gamma` (0.5), `coupling_tol` (1e-9), `coupling_max_iter` (20). See `docs/implicit_coupling.md`.

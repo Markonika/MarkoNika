@@ -66,11 +66,25 @@ private:
 
 struct EquilibriumResult { bool converged{false}; int iterations{0}; double forceResidual{0}, momentResidual{0}; };
 
+// Implicit (monolithic-in-time) body integration with iterated coupling: Newmark-beta for the body, Newton iterations on the pose with the
+// approximate Jacobian M/(beta dt^2) + gamma/(beta dt) B + K (K = static linearised stiffness incl. hydrostatics, refreshed when the iteration
+// is slow), every iteration re-advancing all lines from the saved state at the start of the step with the trial fairlead motion. Removes the
+// explicit stability limit dt_body < 2/omega_s of stiff lines on light bodies.
+struct ImplicitCoupling {
+    bool enabled{false};
+    double newmarkGamma{0.5};      // 0.5 = average acceleration (no numerical damping); > 0.5 damps high frequencies (beta = (gamma + 1/2)^2 / 4)
+    double tol{1e-9};              // converged when the Newton correction is below tol (m, rad) x (1 + |xi|)
+    int maxIter{20};
+};
+
 struct CouplingReport {
     double dtBody{0};
     double dtLineMin{0};       // smallest internal line time step [s]
     int subStepRatio{0};       // ceil(dtBody / dtLineMin): line steps per body step
     long bodySteps{0};
+    long couplingIterations{0};  // implicit coupling: line re-advances in total
+    long stiffnessBuilds{0};     // implicit coupling: static stiffness evaluations
+    long couplingFailures{0};    // implicit coupling: steps accepted without convergence
 };
 
 // Explicit partitioned coupling: one body, any number of lines (conventional serial staggered scheme).
@@ -110,7 +124,8 @@ public:
     void begin(double t0 = 0.0);
     // One body step of size dt: velocity-Verlet for the body with implicit linear damping, lines sub-stepped
     // inside forceOnBody with the fairlead motion linearly interpolated over the step.
-    void step(double dt);
+    void step(double dt);                                  // explicit or implicit coupling, see setImplicitCoupling
+    void setImplicitCoupling(const ImplicitCoupling& c) { ic_ = c; Kvalid_ = false; }
     void advanceTo(double tEnd, double dt);
     double time() const { return t_; }
     // Advance / solve the lines concurrently on n threads (1 = serial, the default). The lines share no state, so the results are identical to the
@@ -126,6 +141,10 @@ private:
     RigidBody6DOF body_;
     std::vector<Slot> lines_;
     std::unique_ptr<WorkerPool> pool_;
+    ImplicitCoupling ic_;
+    Mat6 Kapprox_;
+    bool Kvalid_{false};
+    void stepImplicit(double dt);
     template <class F> void forLines(F&& f) {
         const int n = int(lines_.size());
         if (pool_ && n > 1) pool_->run(n, std::function<void(int)>(std::forward<F>(f)));

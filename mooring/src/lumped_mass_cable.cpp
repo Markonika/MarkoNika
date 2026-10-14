@@ -881,6 +881,18 @@ Vec3 LumpedMassCable::forceOnBody(const Vec3& pos, const Vec3& vel, double t) {
     return endForce(true);
 }
 
+void LumpedMassCable::saveState() {
+    saved_.r = r_; saved_.v = v_; saved_.aNm = aNm_; saved_.t = t_; saved_.alpha = alpha_; saved_.aValid = aValid_;
+    saved_.fairInit = fairInit_; saved_.fairPrevPos = fairPrevPos_; saved_.fairPrevVel = fairPrevVel_; saved_.fairPrevT = fairPrevT_;
+    saved_.valid = true;
+}
+
+void LumpedMassCable::restoreState() {
+    if (!saved_.valid) throw std::logic_error("restoreState() without saveState()");
+    r_ = saved_.r; v_ = saved_.v; aNm_ = saved_.aNm; t_ = saved_.t; alpha_ = saved_.alpha; aValid_ = saved_.aValid;
+    fairInit_ = saved_.fairInit; fairPrevPos_ = saved_.fairPrevPos; fairPrevVel_ = saved_.fairPrevVel; fairPrevT_ = saved_.fairPrevT;
+}
+
 void LumpedMassCable::setFairlead(const Vec3& pos) {
     r_[p_.N] = pos;
     v_.assign(r_.size(), Vec3());

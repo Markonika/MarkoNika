@@ -99,6 +99,11 @@ std::unique_ptr<CoupledSystem> buildCoupledSystem(const json& cfg, std::vector<s
         sys.addLine(std::move(cab), a, nm);
     }
     sys.setThreads(jn.value("threads", 1));
+    if (jn.value("coupling", std::string("explicit")) == "implicit") {
+        ImplicitCoupling ic; ic.enabled = true;
+        ic.newmarkGamma = jn.value("newmark_gamma", 0.5); ic.tol = jn.value("coupling_tol", 1e-9); ic.maxIter = jn.value("coupling_max_iter", 20);
+        sys.setImplicitCoupling(ic);
+    }
     return sysPtr;
 }
 

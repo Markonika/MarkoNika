@@ -24,7 +24,7 @@ add_executable(paredes_report apps/paredes_report.cpp)
 target_link_libraries(paredes_report PRIVATE mooring)
 
 enable_testing()
-add_executable(mooring_tests tests/test_main.cpp tests/test_catenary.cpp tests/test_dynamics.cpp tests/test_hydro.cpp tests/test_chalmers.cpp tests/test_3d.cpp tests/test_points.cpp tests/test_platform.cpp tests/test_paredes.cpp tests/test_waves.cpp tests/test_azcona.cpp tests/test_lopezolocco.cpp tests/test_rope.cpp tests/test_surface.cpp tests/test_implicit.cpp tests/test_sections.cpp tests/test_genalpha.cpp tests/test_adaptive.cpp tests/test_parallel.cpp tests/test_linearize.cpp)
+add_executable(mooring_tests tests/test_main.cpp tests/test_catenary.cpp tests/test_dynamics.cpp tests/test_hydro.cpp tests/test_chalmers.cpp tests/test_3d.cpp tests/test_points.cpp tests/test_platform.cpp tests/test_paredes.cpp tests/test_waves.cpp tests/test_azcona.cpp tests/test_lopezolocco.cpp tests/test_rope.cpp tests/test_surface.cpp tests/test_implicit.cpp tests/test_sections.cpp tests/test_genalpha.cpp tests/test_adaptive.cpp tests/test_parallel.cpp tests/test_linearize.cpp tests/test_coupling.cpp)
 target_link_libraries(mooring_tests PRIVATE mooring)
 target_include_directories(mooring_tests SYSTEM PRIVATE third_party/doctest)
 target_compile_definitions(mooring_tests PRIVATE MOORING_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

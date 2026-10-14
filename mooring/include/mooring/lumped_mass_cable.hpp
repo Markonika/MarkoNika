@@ -236,6 +236,8 @@ public:
     Vec3 forceOnBody(const Vec3& fairleadPos, const Vec3& fairleadVel, double t) override;
     Vec3 staticForceOnBody(const Vec3& fairleadPos) override;
     double internalTimeStep() const override { return stableDt(); }
+    void saveState() override;
+    void restoreState() override;
     // Move the top node (e.g. to a new body position) without touching the other nodes; velocities are reset.
     void setFairlead(const Vec3& pos);
 
@@ -259,6 +261,10 @@ private:
     int jacAge_{0};
     std::vector<Vec3> aNm_;              // Newmark acceleration variable at the start of the step
     bool aValid_{false};
+    struct State {                       // physical state for saveState / restoreState (solver bookkeeping and statistics are not rolled back)
+        std::vector<Vec3> r, v, aNm; double t{0}; std::vector<double> alpha; bool aValid{false}, fairInit{false};
+        Vec3 fairPrevPos, fairPrevVel; double fairPrevT{0}; bool valid{false};
+    } saved_;
     void nodeInertia(const std::vector<Vec3>& r, double t, int i, double& mt, double& mn, Vec3& tg) const;   // M_i = mt t t^T + mn (I - t t^T)
     mutable bool skipDamping_{false};   // true only inside the explicit stages of the implicit-damping scheme
 

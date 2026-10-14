@@ -151,7 +151,71 @@ void CoupledSystem::begin(double t0) {
     report_ = CouplingReport{};
 }
 
+void CoupledSystem::stepImplicit(double dt) {
+    const BodyParams& p = body_.params();
+    const double gam = ic_.newmarkGamma, beta = 0.25 * (gam + 0.5) * (gam + 0.5);
+    const double tNew = t_ + dt;
+    const Vec6 xi0 = body_.xi, v0 = body_.xiDot, a0 = acc_;
+    const Mat6 M = body_.totalMass();
+    for (Slot& s : lines_) s.line->saveState();
+    auto buildK = [&]() {                                         // static stiffness at the current pose; the line states are rolled back afterwards
+        Kapprox_ = stiffness();
+        for (Slot& s : lines_) s.line->restoreState();
+        Kvalid_ = true;
+        ++report_.stiffnessBuilds;
+    };
+    if (!Kvalid_) buildK();
+    Vec6 xi1;
+    for (int k = 0; k < 6; ++k) xi1[k] = xi0[k] + dt * v0[k] + 0.5 * dt * dt * a0[k];          // predictor
+    std::vector<Vec3> lf(lines_.size());
+    Vec6 a1{}, v1{}, Fl{};
+    double dtLineMin = 1e300;
+    bool converged = false;
+    for (int attempt = 0; attempt < 2 && !converged; ++attempt) {
+        if (attempt == 1) { buildK(); for (int k = 0; k < 6; ++k) xi1[k] = xi0[k] + dt * v0[k] + 0.5 * dt * dt * a0[k]; }   // retry once with a fresh stiffness
+        for (int it = 0; it < ic_.maxIter; ++it) {
+            for (int k = 0; k < 6; ++k) {
+                a1[k] = (xi1[k] - xi0[k] - dt * v0[k] - dt * dt * (0.5 - beta) * a0[k]) / (beta * dt * dt);
+                v1[k] = v0[k] + dt * ((1.0 - gam) * a0[k] + gam * a1[k]);
+            }
+            body_.xi = xi1; body_.xiDot = v1;
+            forLines([&](int i) {
+                Slot& s = lines_[i];
+                s.line->restoreState();
+                s.force = s.line->forceOnBody(body_.pointPosition(s.a), body_.pointVelocity(s.a), tNew);
+                lf[i] = s.force;
+            });
+            ++report_.couplingIterations;
+            Fl = externalLoad(xi1, lf);
+            if (excitation_) { const Vec6 e = excitation_(tNew); for (int k = 0; k < 6; ++k) Fl[k] += e[k]; }
+            Vec6 R = M * a1;
+            const Vec6 Bv = p.B * v1;
+            for (int k = 0; k < 6; ++k) R[k] += Bv[k] + p.Dq[k] * std::fabs(v1[k]) * v1[k] - Fl[k];
+            Mat6 J = M * (1.0 / (beta * dt * dt)) + (p.B * (gam / (beta * dt))) + Kapprox_;
+            for (int k = 0; k < 6; ++k) J(k, k) += 2.0 * p.Dq[k] * std::fabs(v1[k]) * gam / (beta * dt);
+            Vec6 rhs; for (int k = 0; k < 6; ++k) rhs[k] = -R[k];
+            const Vec6 d = solve6(J, rhs);
+            double dmax = 0.0, xmax = 0.0;
+            for (int k = 0; k < 6; ++k) { dmax = std::max(dmax, std::fabs(d[k])); xmax = std::max(xmax, std::fabs(xi1[k])); }
+            if (!std::isfinite(dmax)) break;
+            if (dmax < ic_.tol * (1.0 + xmax)) { converged = true; if (it > ic_.maxIter / 2) Kvalid_ = false; break; }
+            for (int k = 0; k < 6; ++k) xi1[k] += d[k];
+        }
+    }
+    if (!converged) { ++report_.couplingFailures; Kvalid_ = false; }
+    for (Slot& s : lines_) dtLineMin = std::min(dtLineMin, s.line->internalTimeStep());
+    body_.xi = xi1; body_.xiDot = v1;
+    acc_ = a1;
+    Fnow_ = Fl;
+    t_ = tNew;
+    ++report_.bodySteps;
+    report_.dtBody = std::max(report_.dtBody, dt);
+    report_.dtLineMin = dtLineMin;
+    report_.subStepRatio = static_cast<int>(std::ceil(report_.dtBody / dtLineMin - 1e-12));
+}
+
 void CoupledSystem::step(double dt) {
+    if (ic_.enabled) { stepImplicit(dt); return; }
     const BodyParams& p = body_.params();
     Vec6 vh;
     for (int k = 0; k < 6; ++k) vh[k] = body_.xiDot[k] + 0.5 * dt * acc_[k];

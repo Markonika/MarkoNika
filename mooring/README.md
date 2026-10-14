@@ -61,6 +61,7 @@ Milestones 1-9 done (static solver, dynamics, hydrodynamics + seabed, Chalmers v
 | Adaptive steps (implicit scheme): mode error vs tolerance; Lopez-Olocco; Azcona snap case convergence | x10 per decade; +0.018 % at 1e-4; snap max 48.5-49.4 N across tolerances (60 seg.), 48.5-52.3 N across 30-240 segments |
 | Concurrent line solves (`numerics.threads`) | bit-identical to serial; 2.25x on the 3-line Paredes CAT case (55.8 -> 24.8 s) |
 | Linearisation (`mooring_modes`): line natural modes, mooring stiffness, body natural periods | taut-chain modes exact to 5 digits; two-medium string -0.0007 %; Paredes CON2 surge 9.156 s vs decay 9.207 s |
+| Implicit body coupling (`numerics.coupling`): stiff line on a light body at 8x the explicit limit; pendulum | explicit diverges, implicit within 1 % of the 2 ms reference; pendulum 1.2 % (0.06 % at a resolved step) |
 | Support reactions, static line | vertical sum = weight (1e-6), horizontal sum = 0 |
 
 Details: `docs/chalmers_validation.md` (results, convergence, caveats), `docs/config.md` (configuration fields).

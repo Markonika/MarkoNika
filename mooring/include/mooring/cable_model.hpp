@@ -1,5 +1,6 @@
 // Copyright (c) Marko Nika. All rights reserved. Proprietary and confidential.
 #pragma once
+#include <stdexcept>
 #include "mooring/vec3.hpp"
 
 namespace mooring {
@@ -17,6 +18,10 @@ public:
     virtual Vec3 staticForceOnBody(const Vec3& fairleadPos) = 0;
     // Internal (stable) time step of the line [s]; the coupling reports dt_body / this value as the sub-step ratio.
     virtual double internalTimeStep() const = 0;
+    // Snapshot / rollback of the physical state (needed by implicit coupling, which re-advances the line from the start of the step on every
+    // iteration). The default implementation does not support it.
+    virtual void saveState() { throw std::logic_error("this cable model does not support saveState()"); }
+    virtual void restoreState() { throw std::logic_error("this cable model does not support restoreState()"); }
 };
 
 }  // namespace mooring
