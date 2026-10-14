@@ -90,10 +90,8 @@ std::unique_ptr<CoupledSystem> buildCoupledSystem(const json& cfg, std::vector<s
         if (waves) { Environment e = cab->environment(); e.water = waves->asWaterField();
             if (cfg.at("waves").value("instantaneous_surface", false)) e.elevation = waves->asElevation();
             cab->setEnvironment(e); }
-        if (jn.contains("cfl") || jn.contains("line_dt_s")) {
-            DynOptions o; o.cfl = jn.value("cfl", 0.5); o.dt = jn.value("line_dt_s", 0.0);
-            o.scheme = jn.value("scheme", std::string("rk4")) == "verlet" ? Scheme::Verlet : Scheme::RK4;
-            o.implicitDamping = jn.value("implicit_damping", false);
+        if (jn.contains("cfl") || jn.contains("line_dt_s") || jn.contains("scheme")) {
+            DynOptions o; parseDynOptions(jn, o); o.dt = jn.value("line_dt_s", 0.0);
             cab->setDynOptions(o);
         }
         const std::string nm = jl.value("name", "line" + std::to_string(sys.numLines() + 1));

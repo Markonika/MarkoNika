@@ -101,7 +101,7 @@ struct PointElement {
     }
 };
 
-enum class Scheme { RK4, Verlet };
+enum class Scheme { RK4, Verlet, GenAlpha };   // GenAlpha: fully implicit generalised-alpha (Newmark for rhoInf = 1) with Newton iteration
 
 // Prescribed top-end motion: fills position and velocity at time t.
 using TopMotion = std::function<void(double t, Vec3& pos, Vec3& vel)>;
@@ -113,6 +113,15 @@ struct DynOptions {
     // Treat the internal axial damping c_int implicitly (Strang splitting: backward-Euler half step of the dashpot forces, the explicit scheme for
     // everything else, a second half step). Removes the c_int time-step limit; only active when c_int > 0.
     bool implicitDamping{false};
+    // Scheme::GenAlpha (Chung & Hulbert 1993): unconditionally stable for the linear problem, second order, high-frequency damping set by rhoInf
+    // (1 = Newmark average acceleration, no damping; 0 = asymptotic annihilation). Newton iterations use a finite-difference block-tridiagonal
+    // Jacobian that is refreshed every jacInterval steps or when convergence is slow; a failed step is retried as two half steps.
+    // The step is dt (if > 0), else implicitDtFactor times the axial-wave CFL step. The c_int limit and the soil limit do not apply.
+    double rhoInf{0.8};
+    double newtonTol{1e-8};     // converged when max |dr| < newtonTol * l0 (smallest segment)
+    int    maxNewton{15};
+    int    jacInterval{10};
+    double implicitDtFactor{10.0};
 };
 
 // Counters for the slack-state regularisation (never hidden, see docs/assumptions.md).
@@ -122,6 +131,10 @@ struct DynStats {
     long clippedTensionEvals{0}; // evaluations where damping made T < 0 and T was clipped to 0
     long soilContactEvals{0};    // node evaluations in seabed contact
     double dtUsed{0};
+    long newtonIters{0};         // GenAlpha: Newton iterations
+    long jacobianBuilds{0};      // GenAlpha: finite-difference Jacobian assemblies
+    long stepHalvings{0};        // GenAlpha: steps retried as two half steps after Newton failed
+    long newtonFailures{0};      // GenAlpha: steps accepted without convergence at the smallest step size
 };
 
 class LumpedMassCable;
@@ -215,6 +228,18 @@ private:
     void acceleration(std::vector<Vec3>& r, std::vector<Vec3>& v, double t, std::vector<Vec3>& a) const;
     void step(double dt);
     void implicitDamp(double h);                                  // backward-Euler solve of the axial dashpot forces over h
+    // Generalised-alpha step with Newton iteration; returns false (state untouched) if it did not converge.
+    bool genAlphaStep(double dt, bool force);
+    void stepGenAlpha(double dt);                 // advances by dt with the adaptive sub-step control below
+    double dtScale_{1.0};                         // adaptive sub-step factor (<= 1): halved when Newton fails, grown back after successes
+    int okCount_{0};
+    void buildJacobian(const std::vector<Vec3>& rf, const std::vector<Vec3>& vf, double t);
+    struct Blk { double a[3][9]; };       // lower / diagonal / upper 3x3 blocks, row-major
+    std::vector<Blk> dAdr_, dAdv_;       // finite-difference blocks of the acceleration function (nodes 1..N-1)
+    bool jacValid_{false};
+    int jacAge_{0};
+    std::vector<Vec3> aNm_;              // Newmark acceleration variable at the start of the step
+    bool aValid_{false};
     void nodeInertia(const std::vector<Vec3>& r, double t, int i, double& mt, double& mn, Vec3& tg) const;   // M_i = mt t t^T + mn (I - t t^T)
     mutable bool skipDamping_{false};   // true only inside the explicit stages of the implicit-damping scheme
 

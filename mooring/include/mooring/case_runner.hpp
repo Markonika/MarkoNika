@@ -8,6 +8,10 @@
 
 namespace mooring {
 
+// Reads the integration options common to the single-line and platform runners: scheme (rk4|verlet|genalpha|newmark), cfl, implicit_damping,
+// rho_inf, newton_tol, max_newton, jacobian_interval, implicit_dt_factor.
+void parseDynOptions(const nlohmann::json& jn, DynOptions& o);
+
 struct CycleMax { int cycle; double topMax, anchorMax; };
 
 struct CaseResult {
@@ -20,6 +24,7 @@ struct CaseResult {
     double cWave{0};
     long steps{0};
     long slackSegmentEvals{0}, clippedTensionEvals{0}, soilContactEvals{0};
+    long newtonIters{0}, jacobianBuilds{0}, stepHalvings{0}, newtonFailures{0};   // implicit scheme (Scheme::GenAlpha)
     std::vector<CycleMax> cycles;   // per excitation cycle, from every time step
     double meanMax{0};              // mean of cycle maxima over cycles >= statistics.first_cycle
     int cyclesAveraged{0};

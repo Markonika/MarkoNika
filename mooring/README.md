@@ -4,7 +4,7 @@ Copyright Marko Nika. All rights reserved. Proprietary and confidential. No lice
 the GPL `LICENSE` at the repository root belongs to the profile repository, not to this directory.
 
 ## Build and test
-    cmake -S . -B build && cmake --build build -j && ./build/mooring_tests   # about 1 min; full Chalmers grid: ctest -R chalmers_grid
+    cmake -S . -B build && cmake --build build -j && ./build/mooring_tests   # about 5 min; full Chalmers grid: ctest -R chalmers_grid
 
 Warnings: `-Wall -Wextra -Wpedantic`. Dependencies: see `THIRD_PARTY.md`.
 
@@ -57,6 +57,7 @@ Milestones 1-9 done (static solver, dynamics, hydrodynamics + seabed, Chalmers v
 | Instantaneous free-surface submergence: equals surfaceZ+eta shift; static solve unaffected; Paredes RAO effect | exact; exact; <= 1.2 % (not the cause of the wave disagreements) |
 | Implicit internal damping: decay of a longitudinal mode; stability at 40x the explicit limit; Lopez-Olocco 35-case grid | exact rate to 3 % (mode energy); monotone, finite; same statistics as explicit, 2.6 min vs ~7 min |
 | Non-uniform lines (sections): hanging two-section line; two-medium string eigenfrequency; split uniform line | 1e-6; -0.001 %; identical to 1e-8 |
+| Fully implicit generalised-alpha / Newmark line integration | 2nd order (ratios 4.0); damped mode within 2 % at 16x the explicit step; Lopez-Olocco max tension -0.07 % at 10x the CFL step; no gain on the Azcona snap case (docs/implicit_integration.md) |
 | Support reactions, static line | vertical sum = weight (1e-6), horizontal sum = 0 |
 
 Details: `docs/chalmers_validation.md` (results, convergence, caveats), `docs/config.md` (configuration fields).

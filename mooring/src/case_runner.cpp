@@ -11,6 +11,17 @@
 #include "mooring/lumped_mass_cable.hpp"
 
 namespace mooring {
+
+void parseDynOptions(const nlohmann::json& jn, DynOptions& o) {
+    const std::string sch = jn.value("scheme", std::string("rk4"));
+    o.scheme = sch == "verlet" ? Scheme::Verlet : ((sch == "genalpha" || sch == "newmark") ? Scheme::GenAlpha : Scheme::RK4);
+    o.rhoInf = sch == "newmark" ? 1.0 : jn.value("rho_inf", 0.8);
+    o.implicitDamping = jn.value("implicit_damping", false);
+    o.cfl = jn.value("cfl", 0.5);
+    o.newtonTol = jn.value("newton_tol", 1e-8); o.maxNewton = jn.value("max_newton", 15);
+    o.jacInterval = jn.value("jacobian_interval", 10); o.implicitDtFactor = jn.value("implicit_dt_factor", 10.0);
+}
+
 using json = nlohmann::json;
 namespace {
 const double kPi = 3.14159265358979323846;
@@ -147,9 +158,8 @@ CaseResult runCase(const json& cfg) {
     }
     double maxY = 0.0;
     DynOptions dyn;
-    dyn.scheme = get<std::string>(jn, "scheme", "rk4") == "verlet" ? Scheme::Verlet : Scheme::RK4;
-    dyn.implicitDamping = get(jn, "implicit_damping", false);
-    dyn.cfl = get(jn, "cfl", 0.5); dyn.dt = get(jn, "dt_s", 0.0);
+    parseDynOptions(jn, dyn);
+    dyn.dt = get(jn, "dt_s", 0.0);
     cable.setDynOptions(dyn);
     res.dt = cable.stableDt();
 
@@ -234,6 +244,8 @@ CaseResult runCase(const json& cfg) {
     res.finite = finite;
     res.steps = cable.stats().steps;
     res.slackSegmentEvals = cable.stats().slackSegmentEvals;
+    res.newtonIters = cable.stats().newtonIters; res.jacobianBuilds = cable.stats().jacobianBuilds;
+    res.stepHalvings = cable.stats().stepHalvings; res.newtonFailures = cable.stats().newtonFailures;
     res.clippedTensionEvals = cable.stats().clippedTensionEvals;
     res.soilContactEvals = cable.stats().soilContactEvals;
 
@@ -258,7 +270,7 @@ CaseResult runCase(const json& cfg) {
                           {"axial_wave_speed_m_s", res.cWave}, {"dt_used_s", res.dt}, {"steps", res.steps},
                           {"static_converged", res.staticConverged}, {"static_relax_steps", res.staticSteps},
                           {"static_top_tension_N", res.staticTopTension}, {"static_anchor_tension_N", res.staticAnchorTension},
-                          {"slack_segment_evals", res.slackSegmentEvals}, {"clipped_tension_evals", res.clippedTensionEvals},
+                          {"slack_segment_evals", res.slackSegmentEvals}, {"newton_iters", res.newtonIters}, {"jacobian_builds", res.jacobianBuilds}, {"step_halvings", res.stepHalvings}, {"newton_failures", res.newtonFailures}, {"clipped_tension_evals", res.clippedTensionEvals},
                           {"soil_contact_evals", res.soilContactEvals}, {"mean_cycle_max_N", res.meanMax},
                           {"cycles_averaged", res.cyclesAveraged}, {"finite", res.finite}, {"wall_s", res.wallSeconds}};
         std::ofstream(dir_out + "/" + tag + "_params.json") << log.dump(2) << "\n";

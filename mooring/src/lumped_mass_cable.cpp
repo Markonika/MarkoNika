@@ -336,6 +336,7 @@ RelaxResult LumpedMassCable::relaxStatic(const RelaxOptions& opt) {
     }
     capSoil_ = false;
     staticMode_ = false;
+    aValid_ = false; jacValid_ = false;
     resetInternalState();
     v_.assign(r_.size(), Vec3());                  // the line is left at rest
     return res;
@@ -347,6 +348,11 @@ RelaxResult LumpedMassCable::relaxStatic(const RelaxOptions& opt) {
 
 double LumpedMassCable::stableDt() const {
     if (dyn_.dt > 0.0) return dyn_.dt;
+    if (dyn_.scheme == Scheme::GenAlpha) {                     // implicit: no damping / soil limit, a multiple of the axial-wave CFL step
+        double d = 1e300;
+        for (const SegProps& g : seg_) d = std::min(d, g.l0 / std::sqrt(ropes_[g.sec].maxStiffness(g.EA) / g.ml));
+        return dyn_.implicitDtFactor * dyn_.cfl * d;
+    }
     double dt = 1e300;
     for (const SegProps& g : seg_) {
         const double c = std::sqrt(ropes_[g.sec].maxStiffness(g.EA) / g.ml);
@@ -367,6 +373,7 @@ double LumpedMassCable::stableDt() const {
 void LumpedMassCable::setInitialState(const std::vector<Vec3>& r, const std::vector<Vec3>& v, double t0) {
     if (r.size() != r_.size() || v.size() != r_.size()) throw std::invalid_argument("state size mismatch");
     r_ = r; v_ = v; t_ = t0;
+    aValid_ = false; jacValid_ = false;
     if (p_.planar) for (size_t i = 0; i < r_.size(); ++i) { r_[i].y = r_[0].y; v_[i].y = 0.0; }
     resetInternalState();
 }
@@ -508,7 +515,202 @@ void LumpedMassCable::implicitDamp(double h) {
     }
 }
 
+namespace {
+inline double& comp(Vec3& v, int d) { return d == 0 ? v.x : (d == 1 ? v.y : v.z); }
+inline Mat3 toMat(const double* a) { Mat3 m; for (int i = 0; i < 9; ++i) m.a[i] = a[i]; return m; }
+}  // namespace
+
+// Finite-difference blocks of A(r, v, t) = M^{-1} F (the acceleration function) with respect to the node positions and velocities. Node k depends only
+// on nodes k-1, k, k+1 (segment tensions, the tangent used by drag and added mass, local seabed and point-element forces), so nodes three apart can
+// be perturbed together: 3 colours x 3 directions x (r, v) evaluations. The statistics counters are restored.
+void LumpedMassCable::buildJacobian(const std::vector<Vec3>& rf, const std::vector<Vec3>& vf, double t) {
+    const int N = p_.N, n = N + 1;
+    dAdr_.assign(n, Blk{}); dAdv_.assign(n, Blk{});
+    const DynStats saved = stats_;
+    double l0min = 1e300;
+    for (const SegProps& g : seg_) l0min = std::min(l0min, g.l0);
+    const double hr = 1e-7 * l0min, hv = 1e-6;
+    std::vector<Vec3> r = rf, v = vf, A0(n), Ap(n), rp, vp;
+    acceleration(r, v, t, A0);
+    for (int mode = 0; mode < 2; ++mode) {
+        const double h = mode == 0 ? hr : hv;
+        for (int c = 0; c < 3; ++c) {
+            for (int d = 0; d < 3; ++d) {
+                if (p_.planar && d == 1) continue;
+                rp = r; vp = v;
+                bool any = false;
+                for (int i = 1; i < N; ++i)
+                    if (i % 3 == c) { comp(mode == 0 ? rp[i] : vp[i], d) += h; any = true; }
+                if (!any) continue;
+                acceleration(rp, vp, t, Ap);
+                for (int i = 1; i < N; ++i) {
+                    if (i % 3 != c) continue;
+                    for (int k = i - 1; k <= i + 1; ++k) {
+                        if (k < 1 || k > N - 1) continue;
+                        const Vec3 col = (Ap[k] - A0[k]) / h;
+                        double* b = (mode == 0 ? dAdr_ : dAdv_)[k].a[i - k + 1];   // 0: lower (node k-1), 1: diagonal, 2: upper (node k+1)
+                        b[0 + d] = col.x; b[3 + d] = col.y; b[6 + d] = col.z;
+                    }
+                }
+            }
+        }
+    }
+    stats_ = saved;
+    ++stats_.jacobianBuilds;
+}
+
+// One generalised-alpha step (Chung & Hulbert) for r_ -> r1 with the Newmark updates a1 = (r1 - r0 - dt v0 - dt^2 (1/2 - beta) a0) / (beta dt^2),
+// v1 = v0 + dt ((1-gamma) a0 + gamma a1) and the equation  (1-am) a1 + am a0 = A((1-af) r1 + af r0, (1-af) v1 + af v0, t + (1-af) dt).
+// Unknown: the interior node positions r1, found by Newton iteration with the block-tridiagonal Jacobian
+//   J = (1-am)/(beta dt^2) I - (1-af) (dA/dr + gamma/(beta dt) dA/dv)   (blocks from buildJacobian, reused for jacInterval steps).
+// The anchor is fixed and the top end follows the prescribed motion (or stays where it is). Maxwell internal strains are advanced as in the explicit
+// schemes (held during the step, exact update afterwards).
+bool LumpedMassCable::genAlphaStep(double dt, bool force) {
+    const int N = p_.N, n = N + 1;
+    const double rho = dyn_.rhoInf, am = (2.0 * rho - 1.0) / (rho + 1.0), af = rho / (rho + 1.0);
+    const double gam = 0.5 - am + af, beta = 0.25 * (1.0 - am + af) * (1.0 - am + af);
+    if (v_.size() != r_.size()) v_.assign(n, Vec3());
+    std::vector<Vec3> r0 = r_, v0 = v_;
+    if (top_) top_(t_, r0[N], v0[N]);
+    if (!aValid_ || aNm_.size() != size_t(n)) {
+        std::vector<Vec3> rr = r0, vv = v0;
+        acceleration(rr, vv, t_, aNm_);
+        aValid_ = true;
+    }
+    const std::vector<Vec3> a0 = aNm_;
+    double l0min = 1e300;
+    for (const SegProps& g : seg_) l0min = std::min(l0min, g.l0);
+    std::vector<double> eps0;
+    const bool anyBranch = !alpha_.empty();
+    if (anyBranch) { eps0.resize(N); for (int s = 0; s < N; ++s) eps0[s] = norm(r0[s + 1] - r0[s]) / seg_[s].l0 - 1.0; }
+    Vec3 rTop = r0[N], vTop = v0[N];
+    if (top_) top_(t_ + dt, rTop, vTop);
+
+    const double sa = (1.0 - am) / (beta * dt * dt), cv = gam / (beta * dt), c1 = 1.0 - af;
+    std::vector<Vec3> r1(n), v1(n), a1(n), rf(n), vf(n), A(n), G(n), Gt(n), rt(n), dr(n);
+    const double tf = t_ + c1 * dt;
+    // Residual G(r1) = (1-am) a1 + am a0 - A(rf, vf, tf) at the interior nodes (fills a1, v1, rf, vf); returns its max norm.
+    auto residual = [&](const std::vector<Vec3>& rr, std::vector<Vec3>& Gout) {
+        for (int i = 1; i < N; ++i) {
+            a1[i] = (rr[i] - r0[i] - v0[i] * dt - a0[i] * (dt * dt * (0.5 - beta))) / (beta * dt * dt);
+            v1[i] = v0[i] + (a0[i] * (1.0 - gam) + a1[i] * gam) * dt;
+        }
+        v1[0] = Vec3(); v1[N] = vTop;
+        for (int i = 0; i <= N; ++i) { rf[i] = rr[i] * c1 + r0[i] * af; vf[i] = v1[i] * c1 + v0[i] * af; }
+        std::vector<Vec3> r2 = rf, v2 = vf;
+        acceleration(r2, v2, tf, A);
+        double gm = 0.0;
+        for (int i = 1; i < N; ++i) {
+            Gout[i] = a1[i] * (1.0 - am) + a0[i] * am - A[i];
+            gm += dot(Gout[i], Gout[i]);
+        }
+        return std::sqrt(gm);
+    };
+    bool converged = false;
+    const bool staleStart = jacValid_ && jacAge_ < dyn_.jacInterval ? jacAge_ > 0 : false;
+    for (int attempt = 0; attempt < 2 && !converged; ++attempt) {
+        if (attempt == 1) { if (!staleStart) break; jacValid_ = false; }   // retry once with a fresh Jacobian (only if the first try used an old one)
+        for (int i = 0; i <= N; ++i) r1[i] = r0[i] + v0[i] * dt + a0[i] * (0.5 * dt * dt);   // predictor (a1 = a0)
+        r1[0] = r0[0]; r1[N] = rTop;
+        double gnorm = residual(r1, G);
+        const double gnorm0 = gnorm;
+        for (int it = 0; it < dyn_.maxNewton; ++it) {
+            if (it == 0 && (!jacValid_ || jacAge_ >= dyn_.jacInterval)) { residual(r1, Gt); buildJacobian(rf, vf, tf); jacValid_ = true; jacAge_ = 0; }
+            // J dr = -G : block Thomas on the interior nodes
+            const int m = N - 1;
+            std::vector<Mat3> Cp(m); std::vector<Vec3> gp(m);
+            for (int k = 1; k <= m; ++k) {
+                Mat3 Lk, Dk, Uk;
+                for (int q = 0; q < 9; ++q) {
+                    const double rL = dAdr_[k].a[0][q], rD = dAdr_[k].a[1][q], rU = dAdr_[k].a[2][q];
+                    const double vL = dAdv_[k].a[0][q], vD = dAdv_[k].a[1][q], vU = dAdv_[k].a[2][q];
+                    Lk.a[q] = -c1 * (rL + cv * vL); Dk.a[q] = -c1 * (rD + cv * vD); Uk.a[q] = -c1 * (rU + cv * vU);
+                }
+                Dk.a[0] += sa; Dk.a[4] += sa; Dk.a[8] += sa;
+                Vec3 b = G[k] * (-1.0);
+                if (k > 1) { Dk -= Lk * Cp[k - 2]; b -= Lk * gp[k - 2]; }
+                const Mat3 Di = Dk.inverse();
+                gp[k - 1] = Di * b;
+                if (k < m) Cp[k - 1] = Di * Uk;
+            }
+            double dmax = 0.0;
+            bool bad = false;
+            Vec3 xnext;
+            for (int k = m; k >= 1; --k) {
+                xnext = k == m ? gp[k - 1] : gp[k - 1] - Cp[k - 1] * xnext;
+                if (p_.planar) xnext.y = 0.0;
+                if (!std::isfinite(xnext.x + xnext.y + xnext.z)) bad = true;
+                dr[k] = xnext;
+                dmax = std::max(dmax, std::max({std::fabs(xnext.x), std::fabs(xnext.y), std::fabs(xnext.z)}));
+            }
+            ++stats_.newtonIters;
+            if (bad) break;
+            // Backtracking line search on |G| (the bilinear tension makes the plain Newton step cycle across the slack/taut kink).
+            double lam = 1.0, gtry = 0.0;
+            bool accepted = false;
+            for (int ls = 0; ls < 10; ++ls, lam *= 0.5) {
+                for (int k = 1; k < N; ++k) rt[k] = r1[k] + dr[k] * lam;
+                rt[0] = r1[0]; rt[N] = r1[N];
+                gtry = residual(rt, Gt);
+                if (std::isfinite(gtry) && (gtry < (1.0 - 1e-4 * lam) * gnorm || gtry == 0.0)) { accepted = true; break; }
+            }
+            if (!accepted) {
+                // No descent along the Newton direction. If the residual has already dropped by three orders of magnitude (it is then at the noise
+                // floor of the finite-difference Jacobian and the nonsmooth tension), accept the iterate; otherwise give up (the caller reduces the step).
+                if (gnorm <= 1e-3 * gnorm0 && std::isfinite(gnorm)) converged = true;
+                break;
+            }
+            lam *= 1.0;                                              // (lam is the accepted factor)
+            for (int k = 1; k < N; ++k) { r1[k] = rt[k]; G[k] = Gt[k]; }
+            gnorm = gtry;
+            if (lam < 1.0) jacValid_ = false;                       // a damped step signals a poor Jacobian: rebuild next iteration / step
+            if (lam * dmax < dyn_.newtonTol * l0min || gnorm == 0.0) { converged = true; if (it + 1 > dyn_.maxNewton / 2) jacValid_ = false; break; }
+        }
+    }
+    if (!converged && !force) return false;
+    if (!converged) ++stats_.newtonFailures;
+    for (int i = 1; i < N; ++i) {
+        a1[i] = (r1[i] - r0[i] - v0[i] * dt - a0[i] * (dt * dt * (0.5 - beta))) / (beta * dt * dt);
+        v1[i] = v0[i] + (a0[i] * (1.0 - gam) + a1[i] * gam) * dt;
+    }
+    a1[0] = Vec3(); a1[N] = Vec3();
+    r_ = r1; v_ = v1; v_[0] = Vec3(); v_[N] = vTop;
+    aNm_ = a1;
+    t_ += dt;
+    ++jacAge_;
+    for (int s = 0; s < N && anyBranch; ++s) {
+        const RopeLaw& rl = ropes_[seg_[s].sec];
+        if (rl.branches.empty()) continue;
+        const double eps1 = norm(r_[s + 1] - r_[s]) / seg_[s].l0 - 1.0;
+        for (size_t k = 0; k < rl.branches.size(); ++k)
+            alpha_[seg_[s].aoff + k] = RopeLaw::advanceAlpha(alpha_[seg_[s].aoff + k], eps0[s], eps1, dt, rl.branches[k].tau);
+    }
+    ++stats_.steps;
+    return true;
+}
+
+// Sub-steps of at most dt * dtScale_. A step that does not converge halves dtScale_ (down to 1/256, where the last iterate is accepted and counted);
+// every three successful steps it grows by 1.5 back towards 1, so the step shrinks only around slack / snap events.
+void LumpedMassCable::stepGenAlpha(double dt) {
+    double remaining = dt;
+    while (remaining > 1e-9 * dt) {
+        const double h = std::min(remaining, dt * dtScale_);
+        const bool last = dtScale_ < 1.0 / 256.0 * 1.0001;
+        if (genAlphaStep(h, last)) {
+            remaining -= h;
+            if (++okCount_ >= 3) { dtScale_ = std::min(1.0, dtScale_ * 1.5); okCount_ = 0; }
+        } else {
+            dtScale_ *= 0.5; okCount_ = 0; ++stats_.stepHalvings;
+        }
+    }
+}
+
 void LumpedMassCable::step(double dt) {
+    if (dyn_.scheme == Scheme::GenAlpha) {
+        stepGenAlpha(dt);
+        if (observer_) observer_(*this);
+        return;
+    }
     const int n = p_.N + 1, N = p_.N;
     if (v_.size() != r_.size()) v_.assign(n, Vec3());
     if (top_) top_(t_, r_[N], v_[N]);
@@ -570,7 +772,8 @@ void LumpedMassCable::advanceTo(double tEnd) {
     const double dt0 = stableDt();
     stats_.dtUsed = dt0;
     if (v_.size() != r_.size()) v_.assign(r_.size(), Vec3());
-    while (t_ < tEnd - 1e-12 * dt0) step(std::min(dt0, tEnd - t_));
+    const double tol = dyn_.scheme == Scheme::GenAlpha ? 1e-9 : 1e-12;     // implicit: never take a vanishing step to land on tEnd
+    while (t_ < tEnd - tol * dt0) step(std::min(dt0, tEnd - t_));
 }
 
 double LumpedMassCable::energy() const {
@@ -609,6 +812,7 @@ Vec3 LumpedMassCable::forceOnBody(const Vec3& pos, const Vec3& vel, double t) {
 void LumpedMassCable::setFairlead(const Vec3& pos) {
     r_[p_.N] = pos;
     v_.assign(r_.size(), Vec3());
+    aValid_ = false; jacValid_ = false;
     resetInternalState();
     fairInit_ = false;                             // next forceOnBody() restarts the fairlead interpolation
 }
