@@ -16,6 +16,7 @@ int main(int argc, char** argv) {
     std::printf("dt %.3e s, steps %ld, wall %.1f s, finite=%d\n", r.dt, r.steps, r.wallSeconds, int(r.finite));
     std::printf("slack evals %ld, clipped %ld, soil contact evals %ld\n", r.slackSegmentEvals, r.clippedTensionEvals, r.soilContactEvals);
     if (r.newtonIters > 0) std::printf("implicit: %ld Newton iterations, %ld Jacobian builds, %ld step halvings, %ld unconverged steps\n", r.newtonIters, r.jacobianBuilds, r.stepHalvings, r.newtonFailures);
+    if (r.newtonIters > 0) std::printf("sub-steps: %ld rejected by the error estimate, accepted dt from %.3e to %.3e s\n", r.rejectedSteps, r.dtMinUsed, r.dtMaxUsed);
     std::printf("mean of cycle maxima (%d cycles): %.4f N\n", r.cyclesAveraged, r.meanMax);
     return r.finite ? 0 : 1;
 }

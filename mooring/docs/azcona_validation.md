@@ -63,3 +63,6 @@ Nothing in the table was adopted as a calibration. The Cdn sensitivity shows how
 ## Not covered
 * The paper's marker trajectories (Figs 10-25, eight positions along the chain) were not compared (figures only, no tabulated data).
 * The computed tension loops (tension vs fairlead position) were compared through maxima, minima and quasi-static ends, not point by point.
+
+## Snap case with error-controlled time stepping (added later)
+The fixed-step schemes above mix time-step and spatial scatter. With the implicit integrator and adaptive steps (`docs/implicit_integration.md`) the configuration 2 / 1.58 s maximum is 48.5-49.4 N for adaptive tolerances 1e-2 to 1e-5 at 60 segments (time-step scatter about +-1 %), and 52.3 / 48.5 / 51.6 / 50.3 N for 30 / 60 / 120 / 240 segments at tolerance 1e-4. The time-and-space converged value is about 50 +- 2 N, i.e. +12 +- 5 % against the measured 44.5 N (the earlier "+9 to +24 %" statement stands, with a narrower range). The remaining difference to the measurement is therefore a model/input effect (anchor position by 2.4 cm, friction, internal damping, drag coefficient: see the sensitivity table above), not the time integrator.

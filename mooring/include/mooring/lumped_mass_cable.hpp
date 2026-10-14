@@ -122,6 +122,15 @@ struct DynOptions {
     int    maxNewton{15};
     int    jacInterval{10};
     double implicitDtFactor{10.0};
+    // Adaptive step control for Scheme::GenAlpha (the step above is then the maximum). Local error estimate of the Newmark family,
+    // LTE_r = (beta - 1/6) dt^2 (a1 - a0) at every node, turned into a segment-strain error |LTE_{j+1} - LTE_j . t_j| / l0 and compared with
+    // adaptRtol times the largest current strain (floor adaptAtolStrain), i.e. a tension error relative to the peak tension. A step is rejected
+    // when the scaled error exceeds 1; the next step is dt * min(2, max(0.2, adaptSafety err^(-1/3))). The minimum step is adaptMinFactor * max step.
+    bool   adaptive{false};
+    double adaptRtol{1e-3};
+    double adaptAtolStrain{1e-6};
+    double adaptSafety{0.9};
+    double adaptMinFactor{1.0 / 1024.0};
 };
 
 // Counters for the slack-state regularisation (never hidden, see docs/assumptions.md).
@@ -134,7 +143,9 @@ struct DynStats {
     long newtonIters{0};         // GenAlpha: Newton iterations
     long jacobianBuilds{0};      // GenAlpha: finite-difference Jacobian assemblies
     long stepHalvings{0};        // GenAlpha: steps retried as two half steps after Newton failed
-    long newtonFailures{0};      // GenAlpha: steps accepted without convergence at the smallest step size
+    long newtonFailures{0};      // GenAlpha: steps taken by the explicit fallback after Newton failed at the smallest step
+    long rejectedSteps{0};       // GenAlpha adaptive: converged steps rejected by the error estimate
+    double dtMinUsed{0}, dtMaxUsed{0};   // GenAlpha: smallest / largest accepted sub-step
 };
 
 class LumpedMassCable;
@@ -229,7 +240,11 @@ private:
     void step(double dt);
     void implicitDamp(double h);                                  // backward-Euler solve of the axial dashpot forces over h
     // Generalised-alpha step with Newton iteration; returns false (state untouched) if it did not converge.
-    bool genAlphaStep(double dt, bool force);
+    // Returns 0 = accepted, 1 = Newton did not converge, 2 = rejected by the error estimate (state untouched in both failure cases unless force).
+    // *err (if given) receives the scaled local error estimate (<= 1 means within tolerance).
+    int genAlphaStep(double dt, bool force, double* err = nullptr);
+    double hCur_{0.0};                            // adaptive: current step (0 = not initialised)
+    void explicitFallback(double h);
     void stepGenAlpha(double dt);                 // advances by dt with the adaptive sub-step control below
     double dtScale_{1.0};                         // adaptive sub-step factor (<= 1): halved when Newton fails, grown back after successes
     int okCount_{0};

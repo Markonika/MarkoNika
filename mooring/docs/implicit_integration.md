@@ -11,7 +11,7 @@ with alpha_m, alpha_f, gamma, beta from rho_inf (second order, unconditionally s
 * Jacobian J = (1 - alpha_m)/(beta dt^2) I - (1 - alpha_f)(dA/dr + gamma/(beta dt) dA/dv): block tridiagonal (a node depends on itself and its two neighbours). dA/dr and dA/dv are assembled by finite differences with three node colours (18 evaluations of A, 12 in planar mode) and reused for `jacobian_interval` steps (default 10); the blocks do not depend on dt. They are rebuilt when a damped Newton step signals a poor Jacobian or convergence was slow, and once more within a step before it is declared failed. Block-Thomas solve with 3x3 blocks.
 * Backtracking line search on the residual norm (the bilinear tension makes the plain Newton step cycle across the slack/taut kink). A step that cannot find a descent direction is accepted only if the residual has dropped by 1e-3 (noise floor of the finite-difference Jacobian), otherwise it counts as failed.
 * Convergence: the accepted correction < `newton_tol` (default 1e-8) x the smallest segment length.
-* Step control: the step is `dt_s` or `implicit_dt_factor` (default 10) x the axial-wave CFL step. A failed step halves a sub-step factor (down to 1/256, where the last iterate is accepted and counted in `newton_failures`); every three successes it grows by 1.5 back to 1. So the step shrinks only around slack/snap events (`step_halvings` in the output).
+* Step control: the step is `dt_s` or `implicit_dt_factor` (default 10) x the axial-wave CFL step. A failed step halves a sub-step factor (down to 1/256, where an explicit RK4 micro-step is taken instead and counted in `newton_failures`; an unconverged implicit iterate is never accepted); every three successes it grows by 1.5 back to 1. So the step shrinks only around slack/snap events (`step_halvings` in the output).
 * The internal damping c_int is treated implicitly through the velocity; the c_int and soil step limits disappear. Maxwell internal strains are held during the step and advanced exactly afterwards (as in the explicit schemes).
 
 ## Verification (`tests/test_genalpha.cpp`)
@@ -48,8 +48,33 @@ The error is not monotone in the step once step halvings occur; f = 10-20 is the
 
 The implicit scheme is not faster here (the sub-stepping drops to the explicit step around the snap) and the maximum still scatters between 50 and 61 N, as with the explicit schemes and the discretisation study (48-67 N). So the time integrator is not the cause of the snap-case spread; the sensitivity lies in the model and its discretisation (slack/snap, seabed contact, anchor position).
 
+## Adaptive (error-controlled) steps
+`numerics.adaptive: true` (with `adapt_rtol`, `adapt_atol_strain`, `adapt_min_factor`): the step (`implicit_dt_factor` x CFL, or `dt_s`) becomes the *maximum* and the controller chooses sub-steps in [max/1024, max].
+* The Newton unknown is the step increment D = r1 - r0 rather than r1, so the Newmark acceleration (D - dt v0 - ...)/(beta dt^2) keeps its precision for tiny steps (with absolute positions it is garbage below about 1e-7 s).
+* Local error estimate of the Newmark family, LTE_r = (beta - 1/6) dt^2 (a1 - a0) per node, converted to a segment-strain error |LTE_{j+1} - LTE_j . t_j| / l0 and scaled by `adapt_rtol` x the largest current strain (floor `adapt_atol_strain`): a tension error relative to the peak tension. The estimate is a heuristic for generalised-alpha with rho_inf < 1 (a_n is the Newmark variable, not the exact acceleration).
+* Accept if the scaled error <= 1, else reject and retry with dt x min(0.9, 0.9 err^(-1/3)) (>= 0.2); after acceptance the next step is dt x min(2, 0.9 err^(-1/3)). A remainder of at most 1.5 steps is taken in one step so that no tiny landing step is created. At the minimum step an error above tolerance is accepted (counted nowhere; `dt_min_used` shows when the floor is reached) and Newton failure falls back to an explicit micro-step.
+* The tolerance is relative to the *peak* strain: an oscillation that is small against the static strain needs a smaller `adapt_rtol` (the longitudinal-mode test uses 1e-4 to 1e-6 for a dynamic strain of 3e-6 on a static 1e-3).
+
+Verification (`tests/test_adaptive.cpp`): the error of the longitudinal mode falls by a factor 10 per decade of `adapt_rtol` (1.8, 0.18, 0.013 of the mode amplitude for 1e-4, 1e-5, 1e-6; 108 to 412 steps). Lopez-Olocco WO_CW, A = 0.225 m, T = 2.8 s (explicit 24.3200 N), maximum step 20 x CFL: adapt_rtol 1e-3 -> +0.058 %, 1e-4 -> +0.018 %, with steps down to the 1/1024 floor around the slack/taut transitions (87 000 and 150 000 sub-steps against 33 000 at the fixed 10 x CFL step: the controller buys a controlled error, not speed).
+
+### Time-step convergence of the Azcona snap case
+Configuration 2, T = 1.58 s, maximum fairlead tension (measured about 44.5 N; fixed-step schemes gave 50-61 N), maximum step 10 x CFL. Time-step convergence at 60 segments:
+
+| adapt_rtol | 1e-2 | 1e-3 | 1e-4 | 1e-5 |
+|---|---|---|---|---|
+| max tension [N] | 49.09 | 48.62 | 48.53 | 49.40 |
+| sub-steps | 107 000 | 251 000 | 734 000 | 1 693 000 |
+
+Spatial convergence at adapt_rtol = 1e-4:
+
+| segments | 30 | 60 | 120 | 240 |
+|---|---|---|---|---|
+| max tension [N] | 52.3 | 48.5 | 51.6 | 50.3 |
+
+With error control the time-integration scatter at fixed discretisation is about +-0.5 N (+-1 %), against 50-61 N for fixed steps, so a large part of the earlier snap-case spread was time-step noise. The remaining spread with the number of segments (48.5-52.3 N, +-4 %) is the spatial discretisation (where the snap lands relative to a node), and the converged value is about 50 +- 2 N, i.e. +12 +- 5 % against the measured 44.5 N, still above the measurement. A first version without the increment formulation accepted unconverged micro-steps and produced a nonsense 4545 N at 240 segments (fixed before the results above; the 240-segment run took 270 s).
+
 ## Limitations
 * The Jacobian is finite-difference: one rebuild costs 12-18 evaluations of the acceleration function, so the scheme only pays when steps are much larger than the explicit limit and the response is smooth (taut/slowly slack lines).
-* Not a step-size error controller: the step is fixed apart from the Newton-failure halving; no local error estimate.
+* The error estimator is heuristic (see above) and only controls the strain error of the position update; it does not see errors in the transverse shape of low-tension lines or in hydrodynamic forces.
 * Large steps skip fast physics (axial waves, contact chatter); high-frequency tension content (snap peaks) is smoothed with rho_inf < 1.
 * `implicit_damping` (Strang splitting for the explicit schemes, assumptions item 45) is separate and not used with GenAlpha.

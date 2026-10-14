@@ -20,6 +20,8 @@ void parseDynOptions(const nlohmann::json& jn, DynOptions& o) {
     o.cfl = jn.value("cfl", 0.5);
     o.newtonTol = jn.value("newton_tol", 1e-8); o.maxNewton = jn.value("max_newton", 15);
     o.jacInterval = jn.value("jacobian_interval", 10); o.implicitDtFactor = jn.value("implicit_dt_factor", 10.0);
+    o.adaptive = jn.value("adaptive", false); o.adaptRtol = jn.value("adapt_rtol", 1e-3); o.adaptAtolStrain = jn.value("adapt_atol_strain", 1e-6);
+    o.adaptMinFactor = jn.value("adapt_min_factor", 1.0 / 1024.0);
 }
 
 using json = nlohmann::json;
@@ -246,6 +248,7 @@ CaseResult runCase(const json& cfg) {
     res.slackSegmentEvals = cable.stats().slackSegmentEvals;
     res.newtonIters = cable.stats().newtonIters; res.jacobianBuilds = cable.stats().jacobianBuilds;
     res.stepHalvings = cable.stats().stepHalvings; res.newtonFailures = cable.stats().newtonFailures;
+    res.rejectedSteps = cable.stats().rejectedSteps; res.dtMinUsed = cable.stats().dtMinUsed; res.dtMaxUsed = cable.stats().dtMaxUsed;
     res.clippedTensionEvals = cable.stats().clippedTensionEvals;
     res.soilContactEvals = cable.stats().soilContactEvals;
 
@@ -270,7 +273,7 @@ CaseResult runCase(const json& cfg) {
                           {"axial_wave_speed_m_s", res.cWave}, {"dt_used_s", res.dt}, {"steps", res.steps},
                           {"static_converged", res.staticConverged}, {"static_relax_steps", res.staticSteps},
                           {"static_top_tension_N", res.staticTopTension}, {"static_anchor_tension_N", res.staticAnchorTension},
-                          {"slack_segment_evals", res.slackSegmentEvals}, {"newton_iters", res.newtonIters}, {"jacobian_builds", res.jacobianBuilds}, {"step_halvings", res.stepHalvings}, {"newton_failures", res.newtonFailures}, {"clipped_tension_evals", res.clippedTensionEvals},
+                          {"slack_segment_evals", res.slackSegmentEvals}, {"newton_iters", res.newtonIters}, {"jacobian_builds", res.jacobianBuilds}, {"step_halvings", res.stepHalvings}, {"newton_failures", res.newtonFailures}, {"rejected_steps", res.rejectedSteps}, {"dt_min_used", res.dtMinUsed}, {"dt_max_used", res.dtMaxUsed}, {"clipped_tension_evals", res.clippedTensionEvals},
                           {"soil_contact_evals", res.soilContactEvals}, {"mean_cycle_max_N", res.meanMax},
                           {"cycles_averaged", res.cyclesAveraged}, {"finite", res.finite}, {"wall_s", res.wallSeconds}};
         std::ofstream(dir_out + "/" + tag + "_params.json") << log.dump(2) << "\n";

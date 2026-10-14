@@ -24,7 +24,8 @@ struct CaseResult {
     double cWave{0};
     long steps{0};
     long slackSegmentEvals{0}, clippedTensionEvals{0}, soilContactEvals{0};
-    long newtonIters{0}, jacobianBuilds{0}, stepHalvings{0}, newtonFailures{0};   // implicit scheme (Scheme::GenAlpha)
+    long newtonIters{0}, jacobianBuilds{0}, stepHalvings{0}, newtonFailures{0}, rejectedSteps{0};
+    double dtMinUsed{0}, dtMaxUsed{0};   // implicit scheme (Scheme::GenAlpha)
     std::vector<CycleMax> cycles;   // per excitation cycle, from every time step
     double meanMax{0};              // mean of cycle maxima over cycles >= statistics.first_cycle
     int cyclesAveraged{0};

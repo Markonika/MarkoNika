@@ -565,7 +565,7 @@ void LumpedMassCable::buildJacobian(const std::vector<Vec3>& rf, const std::vect
 //   J = (1-am)/(beta dt^2) I - (1-af) (dA/dr + gamma/(beta dt) dA/dv)   (blocks from buildJacobian, reused for jacInterval steps).
 // The anchor is fixed and the top end follows the prescribed motion (or stays where it is). Maxwell internal strains are advanced as in the explicit
 // schemes (held during the step, exact update afterwards).
-bool LumpedMassCable::genAlphaStep(double dt, bool force) {
+int LumpedMassCable::genAlphaStep(double dt, bool force, double* errOut) {
     const int N = p_.N, n = N + 1;
     const double rho = dyn_.rhoInf, am = (2.0 * rho - 1.0) / (rho + 1.0), af = rho / (rho + 1.0);
     const double gam = 0.5 - am + af, beta = 0.25 * (1.0 - am + af) * (1.0 - am + af);
@@ -587,16 +587,17 @@ bool LumpedMassCable::genAlphaStep(double dt, bool force) {
     if (top_) top_(t_ + dt, rTop, vTop);
 
     const double sa = (1.0 - am) / (beta * dt * dt), cv = gam / (beta * dt), c1 = 1.0 - af;
-    std::vector<Vec3> r1(n), v1(n), a1(n), rf(n), vf(n), A(n), G(n), Gt(n), rt(n), dr(n);
+    std::vector<Vec3> Dn(n), r1(n), v1(n), a1(n), rf(n), vf(n), A(n), G(n), Gt(n), rt(n), dr(n);
     const double tf = t_ + c1 * dt;
     // Residual G(r1) = (1-am) a1 + am a0 - A(rf, vf, tf) at the interior nodes (fills a1, v1, rf, vf); returns its max norm.
-    auto residual = [&](const std::vector<Vec3>& rr, std::vector<Vec3>& Gout) {
+    // The unknown is the step increment D = r1 - r0 (not r1): the Newmark acceleration (D - dt v0 - ...)/(beta dt^2) then keeps its relative precision for tiny dt.
+    auto residual = [&](const std::vector<Vec3>& DD, std::vector<Vec3>& Gout) {
         for (int i = 1; i < N; ++i) {
-            a1[i] = (rr[i] - r0[i] - v0[i] * dt - a0[i] * (dt * dt * (0.5 - beta))) / (beta * dt * dt);
+            a1[i] = (DD[i] - v0[i] * dt - a0[i] * (dt * dt * (0.5 - beta))) / (beta * dt * dt);
             v1[i] = v0[i] + (a0[i] * (1.0 - gam) + a1[i] * gam) * dt;
         }
         v1[0] = Vec3(); v1[N] = vTop;
-        for (int i = 0; i <= N; ++i) { rf[i] = rr[i] * c1 + r0[i] * af; vf[i] = v1[i] * c1 + v0[i] * af; }
+        for (int i = 0; i <= N; ++i) { rf[i] = r0[i] + DD[i] * c1; vf[i] = v1[i] * c1 + v0[i] * af; }
         std::vector<Vec3> r2 = rf, v2 = vf;
         acceleration(r2, v2, tf, A);
         double gm = 0.0;
@@ -610,12 +611,12 @@ bool LumpedMassCable::genAlphaStep(double dt, bool force) {
     const bool staleStart = jacValid_ && jacAge_ < dyn_.jacInterval ? jacAge_ > 0 : false;
     for (int attempt = 0; attempt < 2 && !converged; ++attempt) {
         if (attempt == 1) { if (!staleStart) break; jacValid_ = false; }   // retry once with a fresh Jacobian (only if the first try used an old one)
-        for (int i = 0; i <= N; ++i) r1[i] = r0[i] + v0[i] * dt + a0[i] * (0.5 * dt * dt);   // predictor (a1 = a0)
-        r1[0] = r0[0]; r1[N] = rTop;
-        double gnorm = residual(r1, G);
+        for (int i = 0; i <= N; ++i) Dn[i] = v0[i] * dt + a0[i] * (0.5 * dt * dt);   // predictor (a1 = a0)
+        Dn[0] = Vec3(); Dn[N] = rTop - r0[N];
+        double gnorm = residual(Dn, G);
         const double gnorm0 = gnorm;
         for (int it = 0; it < dyn_.maxNewton; ++it) {
-            if (it == 0 && (!jacValid_ || jacAge_ >= dyn_.jacInterval)) { residual(r1, Gt); buildJacobian(rf, vf, tf); jacValid_ = true; jacAge_ = 0; }
+            if (it == 0 && (!jacValid_ || jacAge_ >= dyn_.jacInterval)) { residual(Dn, Gt); buildJacobian(rf, vf, tf); jacValid_ = true; jacAge_ = 0; }
             // J dr = -G : block Thomas on the interior nodes
             const int m = N - 1;
             std::vector<Mat3> Cp(m); std::vector<Vec3> gp(m);
@@ -649,8 +650,8 @@ bool LumpedMassCable::genAlphaStep(double dt, bool force) {
             double lam = 1.0, gtry = 0.0;
             bool accepted = false;
             for (int ls = 0; ls < 10; ++ls, lam *= 0.5) {
-                for (int k = 1; k < N; ++k) rt[k] = r1[k] + dr[k] * lam;
-                rt[0] = r1[0]; rt[N] = r1[N];
+                for (int k = 1; k < N; ++k) rt[k] = Dn[k] + dr[k] * lam;
+                rt[0] = Dn[0]; rt[N] = Dn[N];
                 gtry = residual(rt, Gt);
                 if (std::isfinite(gtry) && (gtry < (1.0 - 1e-4 * lam) * gnorm || gtry == 0.0)) { accepted = true; break; }
             }
@@ -661,19 +662,36 @@ bool LumpedMassCable::genAlphaStep(double dt, bool force) {
                 break;
             }
             lam *= 1.0;                                              // (lam is the accepted factor)
-            for (int k = 1; k < N; ++k) { r1[k] = rt[k]; G[k] = Gt[k]; }
+            for (int k = 1; k < N; ++k) { Dn[k] = rt[k]; G[k] = Gt[k]; }
             gnorm = gtry;
             if (lam < 1.0) jacValid_ = false;                       // a damped step signals a poor Jacobian: rebuild next iteration / step
             if (lam * dmax < dyn_.newtonTol * l0min || gnorm == 0.0) { converged = true; if (it + 1 > dyn_.maxNewton / 2) jacValid_ = false; break; }
         }
     }
-    if (!converged && !force) return false;
-    if (!converged) ++stats_.newtonFailures;
+    if (!converged) return 1;                                         // never commit an unconverged iterate
     for (int i = 1; i < N; ++i) {
-        a1[i] = (r1[i] - r0[i] - v0[i] * dt - a0[i] * (dt * dt * (0.5 - beta))) / (beta * dt * dt);
+        a1[i] = (Dn[i] - v0[i] * dt - a0[i] * (dt * dt * (0.5 - beta))) / (beta * dt * dt);
         v1[i] = v0[i] + (a0[i] * (1.0 - gam) + a1[i] * gam) * dt;
     }
     a1[0] = Vec3(); a1[N] = Vec3();
+    for (int i = 0; i <= N; ++i) r1[i] = r0[i] + Dn[i];
+    double err = 0.0;
+    if (dyn_.adaptive || errOut) {
+        // Local truncation error of the position update (Newmark family): (beta - 1/6) dt^2 (a1 - a0); the end nodes are prescribed (zero error).
+        std::vector<Vec3> e(n);
+        for (int i = 1; i < N; ++i) e[i] = (a1[i] - a0[i]) * ((beta - 1.0 / 6.0) * dt * dt);
+        double emax = 0.0, smax = 0.0;
+        for (int j = 0; j < N; ++j) {
+            const Vec3 d = r1[j + 1] - r1[j];
+            const double len = norm(d);
+            if (len <= 0.0) continue;
+            emax = std::max(emax, std::fabs(dot(e[j + 1] - e[j], d / len)) / seg_[j].l0);
+            smax = std::max(smax, len / seg_[j].l0 - 1.0);
+        }
+        err = emax / (dyn_.adaptRtol * std::max(smax, dyn_.adaptAtolStrain));
+    }
+    if (errOut) *errOut = err;
+    if (dyn_.adaptive && err > 1.0 && !force) return 2;
     r_ = r1; v_ = v1; v_[0] = Vec3(); v_[N] = vTop;
     aNm_ = a1;
     t_ += dt;
@@ -686,19 +704,73 @@ bool LumpedMassCable::genAlphaStep(double dt, bool force) {
             alpha_[seg_[s].aoff + k] = RopeLaw::advanceAlpha(alpha_[seg_[s].aoff + k], eps0[s], eps1, dt, rl.branches[k].tau);
     }
     ++stats_.steps;
-    return true;
+    stats_.dtMinUsed = stats_.dtMinUsed > 0.0 ? std::min(stats_.dtMinUsed, dt) : dt;
+    stats_.dtMaxUsed = std::max(stats_.dtMaxUsed, dt);
+    return 0;
 }
 
 // Sub-steps of at most dt * dtScale_. A step that does not converge halves dtScale_ (down to 1/256, where the last iterate is accepted and counted);
 // every three successful steps it grows by 1.5 back towards 1, so the step shrinks only around slack / snap events.
+// Explicit RK4 micro-step used when Newton cannot converge even at the smallest step (never an unconverged implicit iterate): at this size
+// the explicit scheme is trivially stable (hmin << CFL step) and exact enough; the Newmark acceleration is recomputed afterwards.
+void LumpedMassCable::explicitFallback(double h) {
+    const Scheme saved = dyn_.scheme;
+    const StepObserver obs = observer_;
+    observer_ = nullptr;
+    dyn_.scheme = Scheme::RK4;
+    const long steps = stats_.steps;
+    step(h);
+    dyn_.scheme = saved;
+    observer_ = obs;
+    stats_.steps = steps + 1;
+    ++stats_.newtonFailures;
+    aValid_ = false;
+}
+
+// Sub-steps. Non-adaptive: at most dt * dtScale_ (halved when Newton fails, down to 1/256, then an explicit micro-step; grows by 1.5 every three
+// successes). Adaptive: error-controlled sub-steps in [dt * adaptMinFactor, dt], dt (the macro step, e.g. implicit_dt_factor x CFL) being the maximum.
 void LumpedMassCable::stepGenAlpha(double dt) {
     double remaining = dt;
+    if (dyn_.adaptive) {
+        const double hmin = dt * dyn_.adaptMinFactor;
+        if (hCur_ <= 0.0 || hCur_ > dt) hCur_ = dt;
+        bool justRejected = false;
+        while (remaining > 1e-9 * dt) {
+            // Avoid a tiny landing step: if what remains is at most 1.5 current steps, take it in one go (not right after a rejection).
+            const bool landing = !justRejected && remaining <= 1.5 * hCur_;
+            const double h = landing ? remaining : std::min(remaining, hCur_);
+            justRejected = false;
+            const bool last = h <= hmin * 1.0001;
+            double err = 0.0;
+            const int rc = genAlphaStep(h, last, &err);
+            if (rc == 0) {                                          // (at the smallest step an error above tolerance is accepted: force)
+                remaining -= h;
+                const double fac = std::min(2.0, std::max(0.2, dyn_.adaptSafety * std::pow(std::max(err, 1e-10), -1.0 / 3.0)));
+                if (!landing || fac < 1.0) hCur_ = std::min(dt, std::max(hmin, h * fac));
+            } else if (rc == 2) {
+                ++stats_.rejectedSteps;
+                justRejected = true;
+                hCur_ = std::max(hmin, h * std::max(0.2, std::min(0.9, dyn_.adaptSafety * std::pow(err, -1.0 / 3.0))));
+            } else if (last) {
+                explicitFallback(h);
+                remaining -= h;
+            } else {
+                ++stats_.stepHalvings;
+                justRejected = true;
+                hCur_ = std::max(hmin, 0.5 * h);
+            }
+        }
+        return;
+    }
     while (remaining > 1e-9 * dt) {
         const double h = std::min(remaining, dt * dtScale_);
         const bool last = dtScale_ < 1.0 / 256.0 * 1.0001;
-        if (genAlphaStep(h, last)) {
+        if (genAlphaStep(h, last) == 0) {
             remaining -= h;
             if (++okCount_ >= 3) { dtScale_ = std::min(1.0, dtScale_ * 1.5); okCount_ = 0; }
+        } else if (last) {
+            explicitFallback(h);
+            remaining -= h;
         } else {
             dtScale_ *= 0.5; okCount_ = 0; ++stats_.stepHalvings;
         }

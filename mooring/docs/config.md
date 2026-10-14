@@ -80,3 +80,6 @@ The relaxed (static) stiffness is the curve; the high-rate stiffness adds sum K.
 
 ### Fully implicit integration
 `numerics.scheme` = `"genalpha"` (generalised-alpha, `rho_inf` default 0.8) or `"newmark"` (rho_inf = 1); also `newton_tol` (default 1e-8, relative to the smallest segment), `max_newton` (15), `jacobian_interval` (10), `implicit_dt_factor` (10 x the axial CFL step; `dt_s` / `line_dt_s` override the step). See `docs/implicit_integration.md`. The output reports Newton iterations, Jacobian builds, step halvings and unconverged steps.
+
+### Adaptive time stepping (implicit scheme)
+`numerics.adaptive` (default false; only with `scheme` genalpha/newmark), `adapt_rtol` (1e-3, relative to the peak strain), `adapt_atol_strain` (1e-6), `adapt_min_factor` (1/1024); the step from `implicit_dt_factor` / `dt_s` is the maximum. The output reports rejected sub-steps and the smallest/largest accepted step. See `docs/implicit_integration.md`.
