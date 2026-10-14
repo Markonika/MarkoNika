@@ -92,3 +92,6 @@ The relaxed (static) stiffness is the curve; the high-rate stiffness adds sum K.
 
 ### Bending stiffness
 `line.bending_stiffness_Nm2` (EI, default 0; also per section and in `line_defaults`), `line.bending_anchor_direction` / `line.bending_fairlead_direction` (clamp the end along this direction; default pinned). See `docs/bending.md`.
+
+### Irregular waves, force table and depth-varying currents
+`waves.spectrum` {`type` "jonswap"|"pm", `hs_m`, `tp_s`, `gamma`, `n_components` (50), `seed`, `omega_min_factor` (0.5), `omega_max_factor` (4), `direction_deg`}; `body.wave_force_table` [{`period_s`, `w`[6], `delta`[6]}]; `environment.current_profile` ("table" or "power_law"). See `docs/irregular_waves_currents.md`.

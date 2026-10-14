@@ -56,18 +56,64 @@ std::unique_ptr<CoupledSystem> buildCoupledSystem(const json& cfg, std::vector<s
         const double depth = jw.at("depth_m");
         const double surfaceZ = jw.value("surface_z_m", cfg.value("environment", json::object()).value("water_surface_z_m", 0.0));
         waves = std::make_shared<WaveField>(depth, surfaceZ, jw.value("stretching", std::string("wheeler")) == "none" ? Stretching::None : Stretching::Wheeler);
-        for (const json& c : jw.at("components"))
-            waves->addComponent(c.contains("amplitude_m") ? c["amplitude_m"].get<double>() : 0.5 * c.at("height_m").get<double>(),
-                                c.at("period_s"), c.value("phase_rad", 0.0), c.value("direction_deg", 0.0));
+        if (jw.contains("components"))
+            for (const json& c : jw.at("components"))
+                waves->addComponent(c.contains("amplitude_m") ? c["amplitude_m"].get<double>() : 0.5 * c.at("height_m").get<double>(),
+                                    c.at("period_s"), c.value("phase_rad", 0.0), c.value("direction_deg", 0.0));
+        if (jw.contains("spectrum")) {                                  // JONSWAP / Pierson-Moskowitz, random-frequency discretisation
+            const json& js = jw["spectrum"];
+            SpectrumSpec sp;
+            sp.hs = js.at("hs_m"); sp.tp = js.at("tp_s");
+            const std::string st = js.value("type", std::string("jonswap"));
+            sp.gamma = st == "pm" ? 1.0 : js.value("gamma", 3.3);
+            sp.n = js.value("n_components", 50); sp.seed = js.value("seed", 1u);
+            sp.wMinFactor = js.value("omega_min_factor", 0.5); sp.wMaxFactor = js.value("omega_max_factor", 4.0);
+            sp.directionDeg = js.value("direction_deg", 0.0);
+            waves->addSpectrum(sp);
+        }
+        if (waves->components().empty()) throw std::invalid_argument("waves: give components and/or a spectrum");
         waves->setRampTime(jw.value("ramp_time_s", 0.0));
-        if (jb.contains("wave_force")) {
+        if (jb.contains("wave_force_table")) {
+            // Frequency-dependent first-order body load (e.g. from a BEM solution): per component f_i = w_i(omega) a sin(omega t + phi + delta_i(omega)),
+            // w and delta interpolated linearly in omega between the table rows; a component outside the table range is an error.
+            struct Row { double om; Vec6 w, dl; };
+            std::vector<Row> rows;
+            for (const json& r : jb["wave_force_table"]) rows.push_back({2.0 * 3.14159265358979323846 / r.at("period_s").get<double>(), vector6(r, "w"), vector6(r, "delta")});
+            std::sort(rows.begin(), rows.end(), [](const Row& x, const Row& y) { return x.om < y.om; });
+            if (rows.empty()) throw std::invalid_argument("body.wave_force_table is empty");
+            struct Comp { double om, a, ph; Vec6 w, dl; };
+            std::vector<Comp> cs;
+            for (const WaveComponent& c : waves->components()) {
+                if (std::fabs(c.direction) > 1e-12) throw std::invalid_argument("body.wave_force_table: the load coefficients are for waves along +x (direction_deg = 0)");
+                if (c.omega < rows.front().om * (1.0 - 1e-9) || c.omega > rows.back().om * (1.0 + 1e-9))
+                    throw std::invalid_argument("a wave component lies outside the period range of body.wave_force_table");
+                Comp k; k.om = c.omega; k.a = c.amplitude; k.ph = c.phase;
+                size_t j = 0;
+                while (j + 2 < rows.size() && c.omega > rows[j + 1].om) ++j;
+                if (rows.size() == 1) { k.w = rows[0].w; k.dl = rows[0].dl; }
+                else {
+                    const double f = std::min(1.0, std::max(0.0, (c.omega - rows[j].om) / (rows[j + 1].om - rows[j].om)));
+                    for (int i = 0; i < 6; ++i) { k.w[i] = rows[j].w[i] * (1 - f) + rows[j + 1].w[i] * f; k.dl[i] = rows[j].dl[i] * (1 - f) + rows[j + 1].dl[i] * f; }
+                }
+                cs.push_back(k);
+            }
+            auto wp = waves;
+            sys.setExcitation([cs, wp](double t) {
+                Vec6 F{};
+                const double r = wp->rampFactor(t);
+                for (const Comp& k : cs) for (int i = 0; i < 6; ++i) F[i] += k.w[i] * k.a * std::sin(k.om * t + k.ph + k.dl[i]);
+                for (int i = 0; i < 6; ++i) F[i] *= r;
+                return F;
+            });
+        } else if (jb.contains("wave_force")) {
+            if (waves->components().size() != 1) throw std::invalid_argument("body.wave_force is for one regular wave; use body.wave_force_table for several components or a spectrum");
             const Vec6 w = vector6(jb["wave_force"], "w"), dl = vector6(jb["wave_force"], "delta");
             const WaveComponent c0 = waves->components().at(0);          // the force coefficients belong to the first (regular) component
             auto wp = waves;
             sys.setExcitation([w, dl, c0, wp](double t) {
                 Vec6 F{};
                 const double r = wp->rampFactor(t);
-                for (int k = 0; k < 6; ++k) F[k] = w[k] * c0.amplitude * r * std::sin(c0.omega * t + dl[k]);
+                for (int k = 0; k < 6; ++k) F[k] = w[k] * c0.amplitude * r * std::sin(c0.omega * t + c0.phase + dl[k]);
                 return F;
             });
         }
@@ -87,7 +133,7 @@ std::unique_ptr<CoupledSystem> buildCoupledSystem(const json& cfg, std::vector<s
         }
         const Vec3 a = vec(jl.at("fairlead_body_m")), anchor = vec(jl.at("anchor_m"));
         std::unique_ptr<LumpedMassCable> cab = buildLine(lc, anchor, sys.body().pointPosition(a));
-        if (waves) { Environment e = cab->environment(); e.water = waves->asWaterField();
+        if (waves) { Environment e = cab->environment(); e.water = withCurrent(waves->asWaterField(), makeCurrentProfile(lc.value("environment", json::object()), e.surfaceZ));
             if (cfg.at("waves").value("instantaneous_surface", false)) e.elevation = waves->asElevation();
             cab->setEnvironment(e); }
         if (jn.contains("cfl") || jn.contains("line_dt_s") || jn.contains("scheme")) {

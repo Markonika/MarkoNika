@@ -104,7 +104,9 @@ std::unique_ptr<LumpedMassCable> buildLine(const json& cfg, const Vec3& anchor, 
     p.soil.Ks = get(jsoil, "stiffness_Pa_per_m", 0.0); p.soil.zeta = get(jsoil, "damping_factor", 1.0);
     p.soil.mu = get(jsoil, "friction", 0.0); p.soil.vlim = get(jsoil, "v_lim_m_s", 0.01);
 
-    if (jenv.contains("current_m_s")) {              // uniform steady current (no water acceleration)
+    if (jenv.contains("current_profile")) {         // depth-varying steady current (no water acceleration)
+        env.water = withCurrent(WaterField(), makeCurrentProfile(jenv, env.surfaceZ));
+    } else if (jenv.contains("current_m_s")) {      // uniform steady current (no water acceleration)
         const Vec3 U = vec(jenv["current_m_s"]);
         env.water = [U](const Vec3&, double, Vec3& vw, Vec3& aw) { vw = U; aw = Vec3(); };
     }
@@ -131,6 +133,28 @@ std::unique_ptr<LumpedMassCable> buildLine(const json& cfg, const Vec3& anchor, 
     const bool touchdown = get<std::string>(cfg.value("initial", json::object()), "shape", "touchdown") == "touchdown";
     if (touchdown && env.seabed) cable.initTouchdownCatenary();
     return cablePtr;
+}
+
+CurrentProfile makeCurrentProfile(const json& jenv, double surfaceZ) {
+    CurrentProfile cur(surfaceZ);
+    if (jenv.contains("current_profile")) {
+        const json& jp = jenv["current_profile"];
+        const std::string type = jp.value("type", std::string("table"));
+        if (type == "power_law") cur.setPowerLaw(vec(jp.at("surface_velocity_m_s")), jp.value("exponent", 0.143), jp.at("water_depth_m"));
+        else if (type == "table") for (const json& pt : jp.at("points")) cur.addPoint(pt.at("depth_m"), vec(pt.at("velocity_m_s")));
+        else throw std::invalid_argument("unknown current_profile type: " + type);
+    } else if (jenv.contains("current_m_s")) {
+        cur.addPoint(0.0, vec(jenv["current_m_s"]));
+    }
+    return cur;
+}
+
+WaterField withCurrent(const WaterField& base, const CurrentProfile& cur) {
+    if (cur.empty()) return base;
+    return [base, cur](const Vec3& pos, double t, Vec3& vw, Vec3& aw) {
+        if (base) base(pos, t, vw, aw); else { vw = Vec3(); aw = Vec3(); }
+        vw += cur.velocity(pos.z);
+    };
 }
 
 std::unique_ptr<LumpedMassCable> buildStaticLine(const json& cfg) {

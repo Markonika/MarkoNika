@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "mooring/current.hpp"
 #include "mooring/lumped_mass_cable.hpp"
 #include "nlohmann/json.hpp"
 
@@ -12,6 +13,12 @@ namespace mooring {
 // Reads the integration options common to the single-line and platform runners: scheme (rk4|verlet|genalpha|newmark), cfl, implicit_damping,
 // rho_inf, newton_tol, max_newton, jacobian_interval, implicit_dt_factor.
 void parseDynOptions(const nlohmann::json& jn, DynOptions& o);
+
+// Steady current from environment.current_profile ({"type": "table", "points": [{"depth_m", "velocity_m_s": [..]}, ...]} or {"type": "power_law",
+// "surface_velocity_m_s": [..], "exponent", "water_depth_m"}) or environment.current_m_s (uniform). Empty profile if none is given.
+CurrentProfile makeCurrentProfile(const nlohmann::json& jenv, double surfaceZ);
+// Water field = base field (may be empty) + current profile (orbital velocity and current are superposed; no wave-current interaction).
+WaterField withCurrent(const WaterField& base, const CurrentProfile& cur);
 
 // Single-line config -> line at its static equilibrium (touchdown start + relaxation), for analyses such as natural modes.
 std::unique_ptr<LumpedMassCable> buildStaticLine(const nlohmann::json& cfg);
