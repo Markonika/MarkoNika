@@ -9,7 +9,7 @@ data was obtained. Instead a linear potential-flow (BEM) solution for the hull a
   water depth 0.9 m; rho = 1000. The hull is a flat-bottomed cylinder (the exact thesis hull shape was not available), clipped at z = 0.
 * Output is in the code's convention: moments about the CG, F(t) = w a sin(wt + delta) for eta = a sin(wt) at x = 0.
   Excitation = Froude-Krylov + diffraction (Capytaine's diffraction result alone is NOT the excitation; this was a bug in the first run).
-* **Not done:** mesh-convergence study, T = 1.5 s and CON2 RAO runs, viscous damping, comparison with the true hull shape.
+* **Not done:** T = 1.5 s and CON2 RAO runs, viscous damping, comparison with the true hull shape.
 
 ## Comparison with thesis Table 3.4 (hull alone, T = 1.3 s)
 | quantity | BEM | Table 3.4 |
@@ -43,5 +43,26 @@ The shifted A15 and B15 match in magnitude (8-17 %) but with the **opposite sign
   a plausible partial cause of the earlier pitch disagreement.
 * **Surge gets worse** (over-predicted by a factor 2.6-3.5 at 1.3 s). The BEM does not explain the surge disagreement; the measured surge
   minimum is probably a viscous/mooring effect that inviscid constant-coefficient hydrodynamics cannot capture.
-* Caveats: the BEM hull is a reconstruction, the mesh is not converged, and the by-eye measured values carry their own uncertainty, so these are
+* Caveats: the BEM hull is a reconstruction, and the by-eye measured values carry their own uncertainty, so these are
   indications, not a validation. Real validation data (MHKDR 677 / OC5, 4TU) still requires the hosts listed in the session notes to be allowed.
+
+## Mesh convergence
+Same hull, `mesh_resolution_factor` 0.6 / 1.0 / 1.5 / 2.0 = 364 / ~1000 / 2232 / 3936 wetted panels (displaced volume 0.03636 / - / 0.03662 / 0.03664 m^3
+against 0.03666 exact). Values at T = 1.3 s (similar at 1.4 and 1.5 s):
+
+| quantity | 0.6 | 1.0 | 1.5 | 2.0 | change 1.0 -> 2.0 |
+|---|---|---|---|---|---|
+| A11 | 26.73 | 26.04 | 25.72 | 25.56 | -1.9 % |
+| A33 | 28.10 | 28.18 | 28.26 | 28.30 | +0.5 % |
+| B11 | 37.06 | 35.68 | 35.03 | 34.68 | -2.8 % |
+| B33 | 37.79 | 39.54 | 40.30 | 40.69 | +2.9 % |
+| A15 / B15 | 1.281 / 2.291 | 1.331 / 2.364 | 1.350 / 2.387 | 1.360 / 2.399 | +2.2 % / +1.5 % |
+| w1 / w3 / w5 | 1115 / 858 / 79.1 | 1105 / 863 / 80.5 | 1099 / 865 / 80.7 | 1097 / 865 / 80.7 | -0.7 % / +0.2 % / +0.2 % |
+| delta1 / delta3 | 1.464 / 0.264 | 1.468 / 0.267 | 1.470 / 0.268 | 1.470 / 0.268 | < 0.003 rad |
+
+* Excitation is converged to < 1 %; added mass and damping still drift by up to 3 % between 1.0 and 2.0 (B33 and B11 move in opposite directions), and
+  A, B are still changing slowly at 2.0, so the finest mesh is not fully converged in B (probably another ~1 %).
+* **Effect on the moored RAOs** (CAT, mesh 1.0 -> 2.0, `docs/data_paredes_bem_fine.json`): T = 1.3 s surge 0.852 -> 0.857, heave 1.319 -> 1.321, pitch 1.892 -> 1.892;
+  T = 1.4 s 0.893 -> 0.897, 1.185 -> 1.189, 1.660 -> 1.652. All changes <= 0.6 %, so the discretisation is not a cause of the conclusions above
+  (the 10-20 % pitch and heave shortfalls and the surge excess); the hull-shape reconstruction and viscous effects remain unquantified.
+  CON1/CON2 were not re-run on the fine mesh.
