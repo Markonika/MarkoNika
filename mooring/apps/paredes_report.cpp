@@ -1,5 +1,5 @@
 // Copyright (c) Marko Nika. All rights reserved. Proprietary and confidential.
-// Usage: paredes_report [dir_with_configs] [statics|stiffness|free|decay|waves|all] [con1|con2|cat] [inst]
+// Usage: paredes_report [dir_with_configs] [statics|stiffness|free|decay|waves|all] [con1|con2|cat] [inst|-] [coefficient_json]
 #include <cstdio>
 #include <fstream>
 #include <string>
@@ -22,6 +22,8 @@ int main(int argc, char** argv) {
         std::printf("== free buoy decay (potential-theory A, B; measured heave 1.112+-0.006 s, pitch 1.170+-0.005 s)\n");
         std::printf("   heave T_d = %.4f s,  pitch T_d = %.4f s\n", paredesDecayPeriod(fb, 2, 0.02, 20.0, 1e-3), paredesDecayPeriod(fb, 4, 0.05, 20.0, 1e-3));
     }
+    json coef; const bool haveCoef = argc > 5;
+    if (haveCoef) { std::ifstream ci(argv[5]); if (!ci) { std::fprintf(stderr, "cannot open %s\n", argv[5]); return 2; } coef = json::parse(ci); }
     for (const char* n : {"con1", "con2", "cat"}) {
         if (argc > 3 && std::string(argv[3]) != n) continue;               // optional: run a single configuration
         const json cfg = load(dir, n);
@@ -41,7 +43,7 @@ int main(int argc, char** argv) {
         }
         if (what == "waves") {
             for (double T : {1.30, 1.40}) {
-                const ParedesRAO r = paredesWaveRAO(cfg, T, 0.08, 30.0, 15, 2e-3, true, argc > 4 && std::string(argv[4]) == "inst");
+                const ParedesRAO r = paredesWaveRAO(cfg, T, 0.08, 30.0, 15, 2e-3, true, argc > 4 && std::string(argv[4]) == "inst", haveCoef ? &coef : nullptr);
                 std::printf("== %s regular waves H = 0.08 m, T = %.2f s: RAO surge %.3f, heave %.3f, pitch/(ka) %.3f (mean surge offset %.4f m)\n", n, T, r.surge, r.heave, r.pitch, r.meanSurge);
                 std::fflush(stdout);
             }

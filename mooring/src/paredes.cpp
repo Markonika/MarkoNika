@@ -147,9 +147,22 @@ const Tab34 kTab[] = {{1.30, 24.55, 31.73, 1057.8, 1.475, 26.23, 37.94, 817.9, 0
                       {1.50, 23.17, 14.05, 880.2, 1.519, 27.83, 37.47, 1016.4, 0.168, 0.2564, 0.01213, 25.86, -1.623, 1.1004, 0.4129}};
 }  // namespace
 
-ParedesRAO paredesWaveRAO(json cfg, double period, double height, double tEnd, int fitCycles, double dtBody, bool steadyStart, bool instantaneousSurface) {
+ParedesRAO paredesWaveRAO(json cfg, double period, double height, double tEnd, int fitCycles, double dtBody, bool steadyStart, bool instantaneousSurface, const json* coefficients) {
     const Tab34* c = nullptr;
-    for (const Tab34& e : kTab) if (std::fabs(e.T - period) < 1e-9) c = &e;
+    Tab34 fromFile{};
+    if (coefficients) {
+        // Coefficients supplied by the caller (e.g. a BEM table, scripts/bem_paredes_buoy.py): {"rows":[{period_s, A[6][6], B[6][6], w[6], delta[6]}]}
+        // in the code's own convention (moments about the CG, F = w a sin(wt + delta)); only the surge/heave/pitch entries used by this harness are read.
+        for (const json& r : coefficients->at("rows")) {
+            if (std::fabs(r.at("period_s").get<double>() - period) > 1e-3) continue;
+            const json &Am = r.at("A"), &Bm = r.at("B"), &w = r.at("w"), &d = r.at("delta");
+            fromFile = {period, Am[0][0], Bm[0][0], w[0], d[0], Am[2][2], Bm[2][2], w[2], d[2], Am[4][4], Bm[4][4], w[4], d[4], Am[0][4], Bm[0][4]};
+            c = &fromFile;
+        }
+        if (!c) throw std::invalid_argument("coefficient file has no row for this period");
+    } else {
+        for (const Tab34& e : kTab) if (std::fabs(e.T - period) < 1e-9) c = &e;
+    }
     if (!c) throw std::invalid_argument("Table 3.4 has coefficients only for T = 1.30, 1.40, 1.50 s");
     json A = json::array(), B = json::array();
     for (int i = 0; i < 6; ++i) { A.push_back(json::array({0, 0, 0, 0, 0, 0})); B.push_back(json::array({0, 0, 0, 0, 0, 0})); }
