@@ -9,7 +9,7 @@ data was obtained. Instead a linear potential-flow (BEM) solution for the hull a
   water depth 0.9 m; rho = 1000. The hull is a flat-bottomed cylinder (the exact thesis hull shape was not available), clipped at z = 0.
 * Output is in the code's convention: moments about the CG, F(t) = w a sin(wt + delta) for eta = a sin(wt) at x = 0.
   Excitation = Froude-Krylov + diffraction (Capytaine's diffraction result alone is NOT the excitation; this was a bug in the first run).
-* **Not done:** T = 1.5 s and CON2 RAO runs, viscous damping, comparison with the true hull shape.
+* **Not done:** viscous damping, comparison with the true hull shape.
 
 ## Comparison with thesis Table 3.4 (hull alone, T = 1.3 s)
 | quantity | BEM | Table 3.4 |
@@ -66,3 +66,23 @@ against 0.03666 exact). Values at T = 1.3 s (similar at 1.4 and 1.5 s):
   T = 1.4 s 0.893 -> 0.897, 1.185 -> 1.189, 1.660 -> 1.652. All changes <= 0.6 %, so the discretisation is not a cause of the conclusions above
   (the 10-20 % pitch and heave shortfalls and the surge excess); the hull-shape reconstruction and viscous effects remain unquantified.
   CON1/CON2 were not re-run on the fine mesh.
+
+## CON2 and T = 1.5 s (added after the first write-up)
+Same procedure; Table 3.4 run -> BEM run / measured. No measured RAO exists for T = 1.5 s (the thesis figures contain 1.3 and 1.4 s only), so those rows are model-to-model only.
+
+| config, T | surge | heave | pitch/(ka) |
+|---|---|---|---|
+| CON2, 1.3 | 0.69 -> 0.92 / 0.40-0.45 | 1.29 -> 1.48 / 1.45-1.50 | 2.20 -> 2.35 / 1.7-1.95 |
+| CON2, 1.4 | 0.78 -> 0.93 / 0.62-0.68 | 1.17 -> 1.30 / 1.30-1.48 | 1.64 -> 1.89 / 1.55-1.75 |
+| CAT, 1.5 | 0.88 -> 0.94 / - | 1.03 -> 1.12 / - | 0.83 -> 1.54 / - |
+| CON1, 1.5 | 0.84 -> 0.94 / - | 1.07 -> 1.17 / - | 1.06 -> 1.46 / - |
+| CON2, 1.5 | 0.81 -> 0.93 / - | 1.11 -> 1.22 / - | 1.38 -> 1.63 / - |
+
+* **CON2 is the counter-example to the pitch story.** Its Table 3.4 pitch (2.20 / 1.64) was already 13-17 % above the measured band, and the BEM
+  coefficients raise it further (2.35 / 1.89, 20-38 % above at 1.3 s and 8-22 % above at 1.4 s). So the pitch result is a mixed improvement:
+  CON1 and CAT move toward the data, CON2 moves away from it. Across the six measured cases the BEM pitch is now within or near the band for
+  CON1 at 1.3 s (1.96 vs 2.1-2.3, -7 %) and CON1/CAT at 1.4 s are still 5-20 % low, while CON2 is high. The waterline-reference explanation therefore
+  does not by itself make the model consistent; the mooring pitch stiffness/compliance differences between configurations are a likelier remaining factor.
+* CON2 heave with the BEM coefficients is inside the measured band at both periods, and the surge excess persists (about a factor 2 at 1.3 s).
+* At T = 1.5 s the BEM raises pitch strongly (+0.7 for CAT/CON1) because Table 3.4 combined with the CG-referenced stiffness gives a very low pitch there;
+  there is no measurement to check against.
