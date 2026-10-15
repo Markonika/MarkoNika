@@ -64,6 +64,7 @@ Milestones 1-9 done (static solver, dynamics, hydrodynamics + seabed, Chalmers v
 | Implicit body coupling (`numerics.coupling`): stiff line on a light body at 8x the explicit limit; pendulum | explicit diverges, implicit within 1 % of the 2 ms reference; pendulum 1.2 % (0.06 % at a resolved step) |
 | Bending stiffness: force = -grad(energy); pinned / clamped beam deflection; taut beam frequencies; implicit vs explicit | 4e-7 N; +0.01 % / +0.49 %; <= 0.03 %; 1e-7 m (docs/bending.md) |
 | Irregular waves (JONSWAP/PM) + force table; depth-varying currents | PM closed form 1e-4; exact Hs; record variance 0.5618 vs 0.5625 m^2; free-body heave in a 30-component sea 1e-4; sheared-current drag exact |
+| Frequency-dependent A(omega), B(omega) (Cummins, retardation function) | K(t) within 1e-4 k0; forced heave vs frequency domain 5e-5..3.5e-4 of the amplitude; irregular sea 4e-4; natural frequency with A(omega) exact |
 | Support reactions, static line | vertical sum = weight (1e-6), horizontal sum = 0 |
 
 Details: `docs/chalmers_validation.md` (results, convergence, caveats), `docs/config.md` (configuration fields).
@@ -88,5 +89,5 @@ Platform: `build/mooring_platform examples/platform/three_leg_example.json` (con
 
 ## Limitations (so far)
 Rope law is optional and unvalidated against rope tests (no hysteresis, mean-load dependence or creep; `docs/config.md`, assumptions item 43).
-Optional bending stiffness (Euler-Bernoulli, no torsion/VIV); piecewise-uniform properties only (sections, no continuous taper); small-angle rigid-body dynamics (no quaternion/Euler nonlinearity), constant A and B, linear waves only (regular or irregular, no second-order loads), flat seabed, no soil dynamics beyond the spring-damper; momentum conservation not tested (ends are held).
+Optional bending stiffness (Euler-Bernoulli, no torsion/VIV); piecewise-uniform properties only (sections, no continuous taper); small-angle rigid-body dynamics (no quaternion/Euler nonlinearity), A and B constant or frequency-dependent (Cummins, explicit coupling), linear waves only (regular or irregular, no second-order loads), flat seabed, no soil dynamics beyond the spring-damper; momentum conservation not tested (ends are held).
 See `docs/assumptions.md`.

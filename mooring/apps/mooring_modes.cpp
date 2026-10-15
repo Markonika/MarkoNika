@@ -9,6 +9,7 @@
 #include <string>
 #include "mooring/case_runner.hpp"
 #include "mooring/coupled_runner.hpp"
+#include "mooring/radiation.hpp"
 
 using namespace mooring;
 
@@ -44,8 +45,9 @@ int main(int argc, char** argv) {
         const Mat6 K = sys.stiffness();
         std::printf("total linearised stiffness K = -dG/dxi [N/m, N/rad, N m/m, N m/rad] (rows/cols: surge sway heave rx ry rz):\n");
         for (int i = 0; i < 6; ++i) { for (int j = 0; j < 6; ++j) std::printf(" %11.4f", K(i, j)); std::printf("\n"); }
-        const BodyModes bm = bodyModes(sys.body().totalMass(), K);
-        std::printf("body natural frequencies (undamped, total mass incl. added mass), K asymmetry %.1e:\n", bm.asymmetry);
+        const RadiationModel* rad = sys.radiation();
+        const BodyModes bm = rad ? bodyModesRadiation(sys.body().totalMass() - rad->Ainf(), *rad, K) : bodyModes(sys.body().totalMass(), K);
+        std::printf("body natural frequencies (undamped, %s), K asymmetry %.1e:\n", rad ? "frequency-dependent added mass A(omega) at each mode" : "total mass incl. added mass", bm.asymmetry);
         const char* dn[6] = {"surge", "sway", "heave", "roll", "pitch", "yaw"};
         for (int k = 0; k < 6; ++k) {
             int dom = 0; for (int i = 1; i < 6; ++i) if (std::fabs(bm.shape[k][i]) > std::fabs(bm.shape[k][dom])) dom = i;

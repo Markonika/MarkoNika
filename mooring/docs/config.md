@@ -95,3 +95,6 @@ The relaxed (static) stiffness is the curve; the high-rate stiffness adds sum K.
 
 ### Irregular waves, force table and depth-varying currents
 `waves.spectrum` {`type` "jonswap"|"pm", `hs_m`, `tp_s`, `gamma`, `n_components` (50), `seed`, `omega_min_factor` (0.5), `omega_max_factor` (4), `direction_deg`}; `body.wave_force_table` [{`period_s`, `w`[6], `delta`[6]}]; `environment.current_profile` ("table" or "power_law"). See `docs/irregular_waves_currents.md`.
+
+### Frequency-dependent added mass and radiation damping
+`body.hydro_table` {`rows` [{`omega_rad_s`|`period_s`, `A`|`A_diag`, `B`|`B_diag`}], `A_inf`|`A_inf_diag`, `retardation_length_s` (30), `retardation_step_s` (0.01), `high_frequency_tail` (true)}: Cummins equation with a retardation function (explicit coupling only). See `docs/radiation.md`.

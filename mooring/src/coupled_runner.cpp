@@ -7,6 +7,7 @@
 #include <fstream>
 #include <stdexcept>
 #include "mooring/case_runner.hpp"
+#include "mooring/radiation.hpp"
 #include "mooring/waves.hpp"
 #include "mooring/lumped_mass_cable.hpp"
 
@@ -45,8 +46,27 @@ std::unique_ptr<CoupledSystem> buildCoupledSystem(const json& cfg, std::vector<s
     bp.A = matrix6(jb, "A"); bp.B = matrix6(jb, "B"); bp.C = matrix6(jb, "C");
     bp.Dq = vector6(jb, "Dq"); bp.F0 = vector6(jb, "F0");
     bp.cgRef = vec(jb.at("cg_ref_m"));
+    // Frequency-dependent added mass / radiation damping from a table (BEM output): the body mass matrix gets A_inf (plus the constant body.A as an
+    // extra), the memory force acts through the retardation function K(t) built from B(omega) (docs/radiation.md).
+    std::shared_ptr<RadiationModel> radiation;
+    if (jb.contains("hydro_table")) {
+        const json& jh = jb["hydro_table"];
+        HydroTable ht;
+        struct Row { double om; Mat6 A, B; };
+        std::vector<Row> rows;
+        for (const json& r : jh.at("rows")) {
+            const double om = r.contains("omega_rad_s") ? r["omega_rad_s"].get<double>() : 2.0 * 3.14159265358979323846 / r.at("period_s").get<double>();
+            rows.push_back({om, matrix6(r, "A"), matrix6(r, "B")});
+        }
+        std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.om < b.om; });
+        for (const Row& r : rows) { ht.omega.push_back(r.om); ht.A.push_back(r.A); ht.B.push_back(r.B); }
+        if (jh.contains("A_inf") || jh.contains("A_inf_diag")) { ht.hasAinf = true; ht.Ainf = matrix6(jh, "A_inf"); }
+        radiation = std::make_shared<RadiationModel>(ht, jh.value("retardation_length_s", 30.0), jh.value("retardation_step_s", 0.01), jh.value("high_frequency_tail", true));
+        bp.A = bp.A + radiation->Ainf();
+    }
     auto sysPtr = std::make_unique<CoupledSystem>(bp);
     CoupledSystem& sys = *sysPtr;
+    if (radiation) sys.setRadiation(radiation);
 
     // Waves: Airy components (+ Wheeler stretching), used for the line/point-element kinematics and, with
     // body.wave_force {w [N/m or N per m of amplitude], delta [rad]}, for the body excitation f_i = w_i A sin(omega t + delta_i) (Eq. 3.60).

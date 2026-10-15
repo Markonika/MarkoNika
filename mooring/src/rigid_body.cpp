@@ -1,5 +1,6 @@
 // Copyright (c) Marko Nika. All rights reserved. Proprietary and confidential.
 #include "mooring/rigid_body.hpp"
+#include "mooring/radiation.hpp"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -12,6 +13,7 @@ Vec6 operator*(const Mat6& m, const Vec6& v) {
     return r;
 }
 Mat6 operator+(const Mat6& a, const Mat6& b) { Mat6 r; for (int i = 0; i < 36; ++i) r.a[i] = a.a[i] + b.a[i]; return r; }
+Mat6 operator-(const Mat6& a, const Mat6& b) { Mat6 r; for (int i = 0; i < 36; ++i) r.a[i] = a.a[i] - b.a[i]; return r; }
 Mat6 operator*(const Mat6& m, double s) { Mat6 r; for (int i = 0; i < 36; ++i) r.a[i] = m.a[i] * s; return r; }
 
 Vec6 solve6(Mat6 m, Vec6 b) {
@@ -83,6 +85,11 @@ Vec6 CoupledSystem::externalLoad(const Vec6& xi, const std::vector<Vec3>& lf) co
     return F;
 }
 
+void CoupledSystem::setRadiation(std::shared_ptr<const RadiationModel> m) {
+    radModel_ = m;
+    radMem_ = m ? std::make_shared<RadiationMemory>(m) : nullptr;
+}
+
 void CoupledSystem::setThreads(int n) {
     pool_.reset();
     if (n > 1) pool_ = std::make_unique<WorkerPool>(std::min<int>(n, std::max<int>(1, int(lines_.size()))));
@@ -149,6 +156,7 @@ void CoupledSystem::begin(double t0) {
     for (int k = 0; k < 6; ++k) F[k] -= Bv[k] + body_.params().Dq[k] * std::fabs(body_.xiDot[k]) * body_.xiDot[k];
     acc_ = solve6(body_.totalMass(), F);
     report_ = CouplingReport{};
+    if (radMem_) radMem_->reset(t0, body_.xiDot);
 }
 
 void CoupledSystem::stepImplicit(double dt) {
@@ -215,7 +223,10 @@ void CoupledSystem::stepImplicit(double dt) {
 }
 
 void CoupledSystem::step(double dt) {
-    if (ic_.enabled) { stepImplicit(dt); return; }
+    if (ic_.enabled) {
+        if (radMem_) throw std::logic_error("frequency-dependent added mass / radiation damping is not available with the implicit coupling");
+        stepImplicit(dt); return;
+    }
     const BodyParams& p = body_.params();
     Vec6 vh;
     for (int k = 0; k < 6; ++k) vh[k] = body_.xiDot[k] + 0.5 * dt * acc_[k];
@@ -236,15 +247,24 @@ void CoupledSystem::step(double dt) {
     Fnow_ = externalLoad(body_.xi, lf);
     if (excitation_) { const Vec6 e = excitation_(tNew); for (int k = 0; k < 6; ++k) Fnow_[k] += e[k]; }
 
-    // v_{n+1}: (M + dt/2 B) v = M vh + dt/2 (F - Dq|vh|vh)
+    // v_{n+1}: (M + dt/2 B) v = M vh + dt/2 (F - Dq|vh|vh); with the radiation memory force I (Cummins) the velocity-history part of I enters the
+    // right-hand side and the zero-lag part (dt/2) K(0) v_{n+1} acts like an additional damping.
+    Vec6 Imem{};
+    Mat6 C0;
+    if (radMem_) { Imem = radMem_->known(tNew); C0 = radMem_->zeroLag(dt); }
     Vec6 rhs = body_.totalMass() * vh;
-    for (int k = 0; k < 6; ++k) rhs[k] += 0.5 * dt * (Fnow_[k] - p.Dq[k] * std::fabs(vh[k]) * vh[k]);
-    Mat6 lhs = body_.totalMass() + p.B * (0.5 * dt);
+    for (int k = 0; k < 6; ++k) rhs[k] += 0.5 * dt * (Fnow_[k] - p.Dq[k] * std::fabs(vh[k]) * vh[k] - Imem[k]);
+    Mat6 lhs = body_.totalMass() + (radMem_ ? (p.B + C0) : p.B) * (0.5 * dt);
     const Vec6 vNew = solve6(lhs, rhs);
     body_.xiDot = vNew;
     Vec6 F = Fnow_;
     const Vec6 Bv = p.B * vNew;
     for (int k = 0; k < 6; ++k) F[k] -= Bv[k] + p.Dq[k] * std::fabs(vNew[k]) * vNew[k];
+    if (radMem_) {
+        const Vec6 C0v = C0 * vNew;
+        for (int k = 0; k < 6; ++k) F[k] -= Imem[k] + C0v[k];
+        radMem_->push(tNew, vNew);
+    }
     acc_ = solve6(body_.totalMass(), F);
     t_ = tNew;
     ++report_.bodySteps;

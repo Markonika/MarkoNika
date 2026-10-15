@@ -23,6 +23,7 @@ struct Mat6 {
 };
 Vec6 operator*(const Mat6& m, const Vec6& v);
 Mat6 operator+(const Mat6& a, const Mat6& b);
+Mat6 operator-(const Mat6& a, const Mat6& b);
 Mat6 operator*(const Mat6& m, double s);
 // Solve m x = b by Gaussian elimination with partial pivoting; throws std::runtime_error if singular.
 Vec6 solve6(Mat6 m, Vec6 b);
@@ -91,6 +92,9 @@ struct CouplingReport {
 // Natural frequencies of a body with total mass matrix M and stiffness K (see linearize.hpp).
 BodyModes bodyModes(const Mat6& M, const Mat6& K);
 
+class RadiationModel;
+class RadiationMemory;
+
 class CoupledSystem {
 public:
     explicit CoupledSystem(const BodyParams& p) : body_(p) {}
@@ -130,6 +134,10 @@ public:
     double time() const { return t_; }
     // Advance / solve the lines concurrently on n threads (1 = serial, the default). The lines share no state, so the results are identical to the
     // serial ones bit for bit; it pays for 2+ lines when the line work per body step is large (small time steps, fine discretisation, static solves).
+    // Frequency-dependent added mass / radiation damping (Cummins): the body mass matrix must already contain A_inf (BodyParams::A); the memory
+    // force is integrated with the explicit coupling (not available together with the implicit coupling).
+    void setRadiation(std::shared_ptr<const RadiationModel> m);
+    const RadiationModel* radiation() const { return radModel_.get(); }
     void setThreads(int n);
     int threads() const { return pool_ ? pool_->concurrency() : 1; }
     CouplingReport report() const { return report_; }
@@ -142,6 +150,8 @@ private:
     std::vector<Slot> lines_;
     std::unique_ptr<WorkerPool> pool_;
     ImplicitCoupling ic_;
+    std::shared_ptr<const RadiationModel> radModel_;
+    std::shared_ptr<RadiationMemory> radMem_;
     Mat6 Kapprox_;
     bool Kvalid_{false};
     void stepImplicit(double dt);
