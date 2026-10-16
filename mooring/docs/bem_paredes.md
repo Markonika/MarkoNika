@@ -150,6 +150,33 @@ The static-K value is 2.047. CON1 is independent of wave height (as a linear sys
 at H = 0.02 m to 15 % at 0.08 m and then saturates (heave varies too, 1.39 -> 1.49). The CON2 excess is therefore an **amplitude-dependent (nonlinear) effect of the clump leg**, not a
 linear resonance. Candidate mechanisms, none tested: loss of tension (the line law is bilinear, T = max(0, ...)) or large changes of the leg geometry with the clump swinging at 13-23 deg of pitch;
 drag nonlinearity of the floater/clump (the no-drag run, 4.10, shows the drag controls the level but the clump drag alone does not change it); and the small-angle rigid-body model itself, which is being used at
-pitch amplitudes of about 0.2 rad. A tension time series of the CON2 legs and a larger-angle body formulation would be the next tests.
+pitch amplitudes of about 0.2 rad. The tension time series below tests the first of these.
 
-Net status: the CON2 pitch excess is **explained as nonlinear and clump-related, mechanism not identified**; the earlier resonance interpretation is withdrawn.
+
+### Tension time series of the legs (T = 1.3 s; `paredes_report ... <cfg> - <bem.json> 1.30 <H> <out.csv>`)
+`LumpedMassCable::minSegmentTension` (new diagnostic) gives, for every output sample (0.01 s), the smallest segment tension, its segment and the number of slack
+segments (strain <= 0, i.e. zero tension in the bilinear law). Statistics over the last 15 wave cycles of the 30 s run:
+
+| run | fairlead tension range [N] (3 legs) | smallest segment tension [N] | slack segments | pitch/(ka) |
+|---|---|---|---|---|
+| CON2, H = 0.08 m | 9.78 .. 12.84 | 5.62 / 5.98 / 5.98 | none (0 % of the time) | 2.348 |
+| CON2, H = 0.02 m | 10.52 .. 11.53 | 6.22 / 6.28 / 6.28 | none | 2.128 |
+| CON1, H = 0.08 m | 2.63 .. 2.94 | 2.62 / 2.63 / 2.62 | none | 1.957 |
+
+(the static values are 10.9-11.0 N fairlead and about 6.3-6.8 N minimum for CON2, and 2.74 N for CON1).
+
+* **Loss of tension is ruled out** as the cause: no segment of any leg slackens in the analysis window; the CON2 minimum is 5.6 N, i.e. about 90 % of its static value.
+  The bilinear tension law is never active there.
+* **Start-up artefact:** slack segments do appear in the first samples (CON2 up to t = 0.13 s, CON1 up to 0.04 s, up to all 23 segments). They come from the harness
+  imposing the steady-state pose and velocity of the free body at t = 0 on lines still in their static shape; they are over by 0.13 s and the fit window starts at 10.5 s.
+* **The response is stationary** in the fit window: the CON2 pitch amplitude is 0.229-0.233 rad cycle by cycle after the 4th cycle (the 15-cycle fit is not biased by a slow transient);
+  CON1 fluctuates by about +-3 % cycle to cycle (0.185-0.202 rad), so its RAO carries a corresponding scatter.
+* **The line force is nearly linear in the wave height:** the amplitude of the leg-1 fairlead tension is 0.36 N at H = 0.02 m and 1.29 N at 0.08 m (a factor 3.6 for a factor 4,
+  i.e. about 10 % sub-linear), while the pitch RAO changes by 10 % between those heights. The nonlinearity of the CON2 pitch is thus small in the line force itself.
+* Pitch amplitude at H = 0.08 m is 0.23 rad (13 deg) for CON2 and 0.19 rad for CON1; the rigid body of this code is a small-angle model.
+
+What this leaves: the amplitude dependence appears only in CON2, whose pretension is four times that of CON1 (11 N against 2.7 N per leg). The pattern is consistent with a geometric
+(large-rotation) effect of the pretension on the fairlead moment, which a small-angle body formulation does not represent, but this is **not tested** (it would need a large-angle
+body formulation or a CON2 variant with the pretension scaled). The assumed rope/floater/clump drag (not given in the thesis) remains the only damping and the pitch level is
+very sensitive to the pitch inertia and damping of the hull (see above). Status: the CON2 pitch excess is a nonlinear effect specific to the heavily pretensioned configuration;
+mechanism not identified; loss of tension and clump drag are excluded.
