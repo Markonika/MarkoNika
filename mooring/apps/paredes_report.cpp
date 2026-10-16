@@ -7,6 +7,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include "mooring/lumped_mass_cable.hpp"
 #include "mooring/paredes.hpp"
 
 using namespace mooring;
@@ -79,6 +80,30 @@ int main(int argc, char** argv) {
                                     detail.lineNames[k].c_str(), topMin[k], topMax[k], segMin[k], maxSlack[k], span > 0 ? 100.0 * slackTime[k] / span : 0.0);
                 }
                 std::fflush(stdout);
+            }
+        }
+        if (what == "shape") {
+            auto sysPtr = buildCoupledSystem(cfg);
+            CoupledSystem& sys = *sysPtr;
+            sys.solveEquilibrium(1e-6);
+            const double surfaceZ = cfg.value("environment", json::object()).value("water_surface_z_m", 0.9);
+            auto* lm = dynamic_cast<LumpedMassCable*>(&sys.line(0));
+            const Vec3 fl = sys.fairleadPosition(0);
+            std::printf("== %s leg 1 static shape: fairlead (%.3f, %.3f, %.3f), still-water level z = %.3f\n", n, fl.x, fl.y, fl.z, surfaceZ);
+            if (lm) {
+                const auto& r = lm->nodes();
+                const int N = int(r.size()) - 1;
+                std::printf("   node  arclength  horizontal distance from fairlead  z  depth below surface  tension\n");
+                for (int i = 0; i <= N; i += std::max(1, N / 12)) {
+                    const double hd = std::hypot(r[i].x - fl.x, r[i].y - fl.y);
+                    std::printf("   %3d  %7.3f   %7.3f  %7.3f  %7.3f\n", i, lm->arclength()[i], hd, r[i].z, surfaceZ - r[i].z);
+                }
+                for (const json& pe : cfg["lines"][0].value("point_elements", json::array())) {
+                    const int nd = pe.contains("node") ? pe["node"].get<int>() : lm->nodeAtArclength(pe.at("arclength_m"));
+                    const double hd = std::hypot(r[nd].x - fl.x, r[nd].y - fl.y);
+                    std::printf("   %s at node %d (arclength from anchor %.3f m): z = %.3f m, depth below surface %.3f m, horizontal distance from fairlead %.3f m, height above bed %.3f m\n",
+                                pe.at("type").get<std::string>().c_str(), nd, lm->arclength()[nd], r[nd].z, surfaceZ - r[nd].z, hd, r[nd].z - cfg.value("environment", json::object()).value("seabed_z_m", 0.0));
+                }
             }
         }
         if (what == "pitchcurve") {
