@@ -314,3 +314,38 @@ So the excess, its pretension dependence and its wave-height dependence arise fr
 
 Status of the CON2 pitch excess (summary): it is a dynamic response of the legs to the fairlead motion, controlled by the pretension and by the assumed floater drag; excluded are slack, clump inertia and drag, discretisation,
 large-rotation geometry, a 1.331 s resonance peak, and wave forcing of the lines. The detailed mechanism (how the floater drag turns the lightly damped leg modes into the observed smooth enhancement) is **not resolved**.
+
+### Pitch-inertia sensitivity (BEM coefficients, H = 0.08 m)
+The pitch (and roll) inertia of the buoy about the CG is uncertain: 0.87 kg m^2 is the thesis value that excludes fixtures and adapters (Table 5.3), while the measured free pitch period 1.170 s
+(model 1.098 s) corresponds, with the BEM added mass A55 = 0.312, to a total of 1.312 kg m^2, i.e. I55 = **1.00** (the thesis' own decay-derived total is 1.31 kg m^2). These runs are a **sensitivity to a
+poorly known input, not a calibration**: the measured RAOs were not used to choose the inertia, and the base configuration files are unchanged. The hull is on the steep flank of its pitch resonance
+(natural period 1.11 s at I55 = 0.87 and 1.17 s at 1.0), so the response is very sensitive.
+
+Pitch/(ka) at T = 1.3 s (time domain / quasi-static closed form with the static `K` of each configuration):
+| I55 [kg m^2] | CON1 | CON2 | CAT |
+|---|---|---|---|
+| 0.87 (base) | 1.957 / 1.941 | 2.348 / 2.047 | 1.892 / 2.046 |
+| 0.93 | 2.202 / 2.188 | 2.724 / 2.323 | |
+| 0.97 | 2.401 / 2.392 | 3.043 / 2.552 | |
+| 1.00 | 2.594 / 2.571 | 3.341 / 2.756 | 2.411 / 2.742 |
+| 1.03 | 2.809 / 2.779 | 3.701 / 2.995 | |
+
+At T = 1.4 s: I55 = 0.87 gives 1.630 (CON1), 1.889 (CON2), 1.660 (CAT); I55 = 1.00 gives 1.943, 2.338, 1.949. Heave and surge change by under 3 %.
+
+Against the measured bands (read by eye, see `waves_validation.md`), at the inertia implied by the measured pitch period (I55 = 1.00):
+| config, T | measured | I55 = 0.87 | I55 = 1.00 |
+|---|---|---|---|
+| CON1, 1.3 | 2.1-2.3 | 1.957 (7-15 % low) | 2.594 (13-24 % high) |
+| CON1, 1.4 | 1.75-1.90 | 1.630 (7-14 % low) | 1.943 (2-11 % high) |
+| CON2, 1.3 | 1.7-1.95 | 2.348 (20-38 % high) | 3.341 (71-97 % high) |
+| CON2, 1.4 | 1.55-1.75 | 1.889 (8-22 % high) | 2.338 (34-51 % high) |
+| CAT, 1.3 | 2.1-2.55 | 1.892 (10-26 % low) | **2.411 (inside)** |
+| CAT, 1.4 | 1.85-2.05 | 1.660 (10-19 % low) | **1.949 (inside)** |
+
+* **A 15 % larger inertia raises the pitch RAO at 1.3 s by 33 % (CON1) and 42 % (CON2)**: the inertia is as important for this comparison as any mooring effect studied so far.
+* **The closed form still tracks the time domain** for CON1 at every inertia (ratio 1.00-1.01) and for CAT (0.88-0.97), so the sensitivity is that of the hull's resonance flank, not a numerical artefact.
+  The CON2 excess over its quasi-static value **grows with the inertia** (ratio 1.147, 1.173, 1.192, 1.212, 1.236 for I55 = 0.87 ... 1.03), i.e. it is amplified by proximity to the resonance.
+* **No common inertia reconciles the three configurations:** the measured-period value brings CAT inside the band at both periods and CON1 to within 2-24 %, but takes CON2 from 8-38 % above the band to 34-97 % above it;
+  CON2 would need a lower inertia, which is opposite to the other two and to the measured pitch period. CON2 therefore remains the **outlier**, and its disagreement must come from the CON2-specific model
+  (the legs: clump, floater and their assumed drag; the as-built geometry) or from the experiment, not from the hull inertia.
+* The measured pitch damping (not available to us) matters as much as the inertia on this flank: the model has radiation damping only (ratio about 1 %).
