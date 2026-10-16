@@ -86,3 +86,32 @@ Same procedure; Table 3.4 run -> BEM run / measured. No measured RAO exists for 
 * CON2 heave with the BEM coefficients is inside the measured band at both periods, and the surge excess persists (about a factor 2 at 1.3 s).
 * At T = 1.5 s the BEM raises pitch strongly (+0.7 for CAT/CON1) because Table 3.4 combined with the CG-referenced stiffness gives a very low pitch there;
   there is no measurement to check against.
+
+## Why is the CON2 pitch too high? (diagnostic study, T = 1.3 s, BEM coefficients)
+CON2 is the only configuration whose pitch RAO is above the measured band (2.35 vs 1.7-1.95). All runs below use the same BEM table; the variants are
+**diagnostics, not calibrations** (the base configuration files are unchanged).
+
+| run | pitch/(ka) at 1.3 s | reading |
+|---|---|---|
+| CON2 as configured | 2.348 | |
+| closed form, hull + quasi-static mooring stiffness `K` from `mooring_modes` | 2.047 | what the mooring does *statically* |
+| same closed form, CON1 / CAT | 1.941 / 2.046 (time domain 1.957 / 1.892) | CON1 reproduced to 1 %; CAT is 8 % below its static value |
+| CON2 with 46 instead of 23 segments | 2.340 | not a discretisation effect |
+| CON2 with clump drag Cd = 0 | 2.371 | not clump drag |
+| CON2 with the clump removed | 1.957 (= CON1 exactly) | the clump alone carries the whole excess |
+| CON2 with zero drag on lines, floater and clump | 4.097 | drag is what limits the response |
+
+Facts established:
+* The hull is on a steep resonance flank: BEM pitch natural period 1.11 s against waves of 1.3-1.4 s, radiation damping ratio 1.3 %. Free-hull pitch RAO is
+  2.14 (1.3 s) and moves to 2.97 for I55 = 1.0 instead of 0.87 kg m^2 (the inertia implied by the measured 1.170 s pitch period), i.e. the absolute pitch level is
+  extremely sensitive to the poorly known pitch inertia and to the (absent) viscous pitch damping. This affects all configurations, not CON2 in particular.
+* Quasi-static mooring stiffness is nearly identical in the three configurations (surge 22-27 N/m, surge-pitch coupling 3.7-5.0 N, pitch 38.9-39.5 N m/rad) and
+  predicts pitch within 1 % for CON1 only. CON2's time-domain pitch is **15 % above** its quasi-static prediction, so the excess is a *dynamic* line/clump effect.
+* Line modes (`mooring_modes --lines`, undamped, rope law included): CON1 leg lowest mode **0.868 s**; CON2 leg modes **1.331 s and 1.500 s** (clump on the rope), then 0.691 s.
+  The T = 1.3 s wave is 2.3 % from the 1.331 s mode; T = 1.4 s lies between the two modes.
+
+Interpretation: the clump creates a line mode at 1.33 s that the 1.3 s wave excites almost at resonance through the fairlead motion; the line force it feeds back to the
+body raises pitch by about 15 % over the quasi-static value. This is **consistent with all the evidence but not proved**: not tested are a period sweep through 1.33 s, a shifted
+clump position or mass (which should move the resonance), and the effect of the assumed clump/floater hydrodynamic data (Cm = 0, Cd = 0.5/1.0, none given in the thesis). The clump's
+drag is not the mechanism, but line/floater drag is the only damping present (no drag: pitch 4.1), so the result depends on the unverified rope drag coefficients (chain values Cdn = 2.5 applied to a rope).
+Whether the real rope/clump system is as lightly damped at 1.33 s as the model is not known; the by-eye measured values cannot discriminate this.
