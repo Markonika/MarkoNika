@@ -349,3 +349,38 @@ Against the measured bands (read by eye, see `waves_validation.md`), at the iner
   CON2 would need a lower inertia, which is opposite to the other two and to the measured pitch period. CON2 therefore remains the **outlier**, and its disagreement must come from the CON2-specific model
   (the legs: clump, floater and their assumed drag; the as-built geometry) or from the experiment, not from the hull inertia.
 * The measured pitch damping (not available to us) matters as much as the inertia on this flank: the model has radiation damping only (ratio about 1 %).
+
+### As-built CON2 geometry check
+**Layout (which end the element distances are measured from).** The thesis gives rope sections 0.700 + 0.900 + 0.685 m with the floater after the first and the clump after the second section, but not from which end. The code
+measures `arclength_m` from the anchor (floater 0.7 m, clump 1.6 m from the anchor). The mirrored reading (distances from the fairlead: floater 1.585 m, clump 0.685 m from the anchor) was built and checked against the
+**measured statics** (independent of the wave results; `paredes_report <dir> statics|shape`):
+| | anchor-measured (as run) | mirrored | measured |
+|---|---|---|---|
+| CON1 leg tension at the fairlead | 2.75 N | **0.006 N** (floater at z = 0.925 m, above the still-water level, leg slack) | 2.8 / 3.1 N |
+| CON2 leg tension | 10.9-11.0 N | **5.6 N** (clump at z = -0.08 m, below the bed) | 10.6 / 11.0 N |
+| CON2 draft change | +12.9 mm | +2.5 mm | +13 mm |
+The mirrored layout is therefore **rejected by the measurements**; the anchor-measured layout stands. (The drawing's floater depth of about 0.11 m below the surface remains unexplained: the model has 0.22 m for CON1 and
+0.40 m for CON2.)
+
+**Static shape of a CON2 leg (as run):** floater 0.400 m below the surface, 1.30 m horizontally from the fairlead; clump 0.565 m below the surface, 0.42 m from the fairlead, 0.335 m above the bed, hanging on a short steep
+pendant (0.685 m of rope) up to the fairlead. This pendant is the structure behind the leg modes at 1.33 and 1.50 s found earlier.
+
+**Sensitivity to the element positions.** The measurements do not fix the positions along the rope. Point elements snap to the nearest node (node spacing 0.099 m), so the variants are one-node (about 0.1 m, 4 % of the rope) shifts; the
+requested 1.55 m (clump) is the same node as the as-run 1.60 m. Each variant was checked against the measured statics first (leg tension 10.6 / 11.0 N, draft change 13 mm, both +-0.2 N and +-3 mm), then run in waves at T = 1.3 s, H = 0.08 m
+(BEM coefficients, I55 = 0.87). These are **sensitivities, not calibrations**; the base files are unchanged.
+| variant (node, arclength from the anchor) | clump distance from fairlead [m] | leg tension [N] | draft change [mm] | pitch/(ka) | surge | heave |
+|---|---|---|---|---|---|---|
+| clump node 15 (1.49 m) | 0.503 | 10.63-10.74 | 12.2 | **2.164** | 0.908 | 1.440 |
+| as run: clump node 16 (1.59 m) | 0.418 | 10.92-11.02 | 12.9 | **2.348** | 0.920 | 1.475 |
+| clump node 17 (1.69 m) | 0.338 | 11.11-11.21 | 13.5 | **2.484** | 0.917 | 1.504 |
+| clump node 18 (1.79 m) | 0.263 | 11.20-11.30 | 14.0 | **2.792** | 0.895 | 1.595 |
+| floater node 6 (0.60 m) | 0.401 | 11.18-11.27 | 13.5 | **2.525** | 0.923 | 1.514 |
+| floater node 8 (0.80 m) | 0.434 | 10.57-10.68 | 12.2 | **2.205** | 0.915 | 1.445 |
+
+* **The CON2 pitch depends strongly on the element positions:** moving the clump one node closer to the fairlead raises it by 6 %, three nodes by 19 %; one node away lowers it by 8 %. The floater moves it by -6 % / +8 %.
+  Over these plausible positions the pitch spans 2.16-2.79 and heave 1.44-1.60.
+* **The statics cannot discriminate between them:** every variant lies within or at the edge of the measured leg tension and draft change (the clump-18 and floater-6 variants are 0.2-0.3 N above the 11.0 N value). The
+  as-built position of the clump and the floater, which the data do not resolve, is thus a first-order uncertainty of the CON2 wave response, comparable to the pitch inertia.
+* **None of the positions brings the pitch into the measured band (1.7-1.95):** the lowest value, 2.16, is 11-27 % above it. The CON2 pitch disagreement is therefore not explained by the element positions either, within +-0.1 m.
+* Together with the earlier sensitivities (drag: 2.07-2.42; inertia: 2.35-3.34 for I55 = 0.87-1.00) this leaves the CON2 pitch above the measured band for every plausible variation of the uncertain inputs tested one at a time; the
+  quasi-static value (2.05) is itself above the band. Not tested: combinations of lower inertia, positions and drag together, the true sphere/clump attachment geometry (effective rope length), and the experimental uncertainty of the CON2 measurement.

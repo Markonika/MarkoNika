@@ -85,6 +85,6 @@ of the as-built model. The drawing (Fig. 5.4) also shows the floater about 0.11 
 
 ## Open questions for the author of the experiment / the user
 1. At which displacement(s) do the K_t values of Table 5.12 (28.65, 28.28, 23.63 N/m) apply? (Fig. 5.21 shows the curves; the comparison above uses them.)
-2. Exact rope lengths (mm accuracy) and where the cables are attached on the floater sphere and clump; the effective length matters at the 10 % level.
+2. Exact rope lengths (mm accuracy) and where the cables are attached on the floater sphere and clump; the effective length matters at the 10 % level. (The reading of the 0.700 / 1.600 m element distances as measured from the anchor was checked against the measured statics and the fairlead-measured reading rejected, see `bem_paredes.md`; the one-node, 0.1 m sensitivity of the CON2 wave pitch is 2.16-2.79.)
 3. Pitch: the real inertia of the instrumented buoy (with fixtures) and the coupled surge-pitch added mass A15 at the natural frequency (BEM output).
 4. Hydrodynamic coefficients and diameter of the polyester cable; drag of the floaters and clumpweights; soil data of the CAT bed.
