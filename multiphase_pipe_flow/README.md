@@ -2247,6 +2247,109 @@ flow-pattern finding above from independent data. See VALIDATION.md's
 "Quantitative validation" section and the paper (Section 7) for full
 results. Driver: `validate_quantitative`, in `validation/`.
 
+### A high-pressure (field-representative) holdup validation, and a validation-driver bug it exposed
+
+Every dataset above is near-atmospheric lab data. Real subsea gas pipelines
+(the motivating application this check was looking for -- see the Ionian
+Sea / offshore gas exploration discussion in this project's own history)
+run at tens to hundreds of bar, where gas density -- the single parameter
+most directly controlling stratified-vs-dispersed flow-regime transitions
+and KH stability -- is an order of magnitude higher than atmospheric air.
+A literature search for genuine high-pressure gas-liquid data turned up
+Wang, Yu, Liu, Chang, Zhao & Wang (2024), *"Experimental Study on
+Gas-Liquid Two-Phase Stratified Flow at High Pressure in a Horizontal
+Pipe,"* Energies 17(5):1056 (fully open access,
+[doi:10.3390/en17051056](https://doi.org/10.3390/en17051056)), run on a
+50 mm I.D., 11.6 m test section at 0.1/1.0/2.0 MPa; fluid properties
+(liquid/gas density and viscosity at 2 MPa) are taken from the same
+facility's earlier companion paper, Wang, Liu, Chang, Zhao & Guo (2019),
+*"Experimental study of gas-liquid two-phase wavy stratified flow in
+horizontal pipe at high pressure,"* Int. J. Heat and Mass Transfer
+143:118537.
+
+**Honest provenance of the data.** Neither paper publishes a raw data
+table or supplementary file (the 2024 paper's own Data Availability
+Statement: *"Data are contained within the article"*) -- both report
+correlations fitted to the data, not the data itself, with one exception:
+Figure 6 of the 2024 paper plots liquid film thickness `h_L` against gas
+superficial velocity `V_GS`, as eight clean curves (one per liquid
+superficial velocity `V_LS`) at 1.0 and 2.0 MPa. `h_L` in a stratified
+flow is exactly this project's own `h1` (`PipeGeometry`'s liquid-layer
+height), so it converts directly to liquid holdup via the standard
+Taitel & Dukler (1976) circular-segment formula
+`A_L/A = (1/pi)*[acos(1-2h~) - (1-2h~)*sin(acos(1-2h~))]`, `h~ = h_L/D`
+-- re-derived from the circular-segment area and cross-checked against
+direct numerical integration of the pipe cross-section (agreement to
+~1e-6, limited only by discretization) before use, not taken on faith.
+48 cases (8 `V_LS` values x 3 `V_GS` points x 2 pressures) were read
+directly off the plotted curves against their axis gridlines -- an
+honest, approximate visual digitization (no numeric table exists to
+digitize exactly), the same kind of literature-compilation this
+project's own Mendeley dataset already relies on. `validation/
+wang2024_high_pressure_cases.csv` is this digitized set, in the same
+format `quant_unified_cases.csv` uses, kept as its own file rather than
+merged into the main 349-case set since its provenance (chart-read, not
+tabulated) and purpose (a field-pressure check, not the main train/held-
+out split) are both different.
+
+**A real bug this surfaced: the validation driver's `tEnd` cap is far too
+short for these cases' much lower superficial velocities.** The first
+run (`validate_quantitative`'s default settings, unchanged) gave a
+dismal MAE of 0.2492 -- a severe, systematic UNDER-prediction (43 of 48
+cases) that looked at first like a genuine high-gas-density closure
+failure. It wasn't. `runOneCase()`'s `tEnd = clamp(10*residenceTime, 1,
+8)` was tuned against the existing datasets' faster flows; for these new
+cases' much lower combined superficial velocities, 10 residence times
+can reach 140s, clamped down to 8s -- well under even ONE residence
+time. A direct check (running one of the worst cases, 2 MPa /
+`Vsl=0.015` / `Vsg=0.2`, out to 150s) showed predicted holdup barely
+moving off its initial homogeneous-flow guess (0.070) by the 8s cutoff,
+then climbing steadily to 0.433 by 150s against an experimental value of
+0.576 -- the model hadn't failed, the driver had sampled it mid-transient.
+`validate_quantitative` gained an optional `maxTEnd` CLI argument
+(default 8.0, bit-exact with every invocation that omits it) so this is
+reproducible through the tracked driver rather than a one-off script;
+see `runOneCase()`'s own comment.
+
+**Re-run with `maxTEnd=150`, the real picture is much more encouraging --
+and importantly, not uniformly so:**
+
+| `V_GS` tier | n | MAE, capped (8s) | MAE, `maxTEnd=150` |
+|---|---|---|---|
+| low (~0.15-0.2 m/s) | 16 | 0.408 | **0.088** |
+| mid (~0.7 m/s) | 16 | 0.327 | **0.194** |
+| high (~3.4 m/s) | 16 | 0.013 | 0.013 (unchanged) |
+| **all 48** | 48 | 0.249 | **0.098** |
+
+The high-`V_GS` tier was never affected (its own residence time already
+fits inside 8s) and stayed excellent throughout -- confirming the capped
+run's problem was purely a sampling-time artifact there, not a hidden
+accuracy issue. The low-`V_GS` tier improved by 4.6x once given proper
+equilibration time, confirming the time cap was the dominant effect, not
+a closure failure at this dataset's higher gas density. The mid-`V_GS`
+tier improved markedly but retains a real, smaller residual gap (0.194),
+in the same ballpark as -- not dramatically worse than -- the 0.09-0.30
+MAE range already documented across the existing near-atmospheric
+datasets above; `V_GS~0.7` m/s sits in or near the wave-stratified
+regime on this paper's own flow-pattern map, plausibly the same kind of
+intermittent/transitional-regime error this project's holdup validation
+already shows elsewhere (see "Quantitative validation" in
+VALIDATION.md), not something new to high pressure specifically.
+
+**Bottom line for the original motivating question** (whether this
+model is usable, even approximately, at field gas pressures rather than
+only the near-atmospheric lab conditions it was built and tuned
+against): encouraging, not a clean pass. Once given adequate
+equilibration time, this high-pressure dataset's overall MAE (0.098) sits
+at the GOOD end of, not outside, the existing near-atmospheric range
+(0.09-0.30) -- no evidence here that the closures break down at an order
+of magnitude higher gas density. The residual mid-velocity gap is real
+and should be treated as a genuine open question, not dismissed, but it
+reads as the same kind of regime-transition error already documented
+elsewhere in this project rather than a high-pressure-specific failure.
+One dataset, one facility, chart-digitized rather than tabulated --
+treat this as a first, promising look, not a closed case.
+
 ## Building
 
 ```sh

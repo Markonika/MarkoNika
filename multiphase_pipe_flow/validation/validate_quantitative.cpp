@@ -11,7 +11,7 @@
 //
 // Output CSV adds: pred_holdup,pred_dPdz_Pa_m,blew_up
 //
-// Usage: validate_quantitative <input.csv> <output.csv> [closureCorrectionScale] [closureF0Shift] [closureDepositionVelocityScale] [enableTurbulentViscosity(0|1)] [turbulentMixingLengthFraction] [enableInterfacialPressureJump(0|1)] [interfacialPressureJumpCoefficient] [enableInterfacialSlopeClosure(0|1)] [interfacialSlopeCoefficient] [N] [enableRoeScheme(0|1)]
+// Usage: validate_quantitative <input.csv> <output.csv> [closureCorrectionScale] [closureF0Shift] [closureDepositionVelocityScale] [enableTurbulentViscosity(0|1)] [turbulentMixingLengthFraction] [enableInterfacialPressureJump(0|1)] [interfacialPressureJumpCoefficient] [enableInterfacialSlopeClosure(0|1)] [interfacialSlopeCoefficient] [N] [enableRoeScheme(0|1)] [maxTEnd]
 // The optional third/fourth/fifth arguments, if any is given, set
 // SolverOptions::enableDataDrivenClosureCorrection=true and
 // closureCorrectionScale/closureF0Shift/closureDepositionVelocityScale
@@ -125,7 +125,7 @@ RunResult runOneCase(const Case& c, bool haveClosureScale, double closureScale,
                       bool enableTurbVisc, bool haveMixingLength, double mixingLengthFraction,
                       bool enableInterfacialPressureJump, bool haveCi, double Ci,
                       bool enableInterfacialSlopeClosure, bool haveSlopeCoeff, double slopeCoeff,
-                      int N, bool enableRoeScheme) {
+                      int N, bool enableRoeScheme, double maxTEnd) {
     const double D = c.D;
     const double L = std::clamp(60.0 * D, 0.6, 20.0);
 
@@ -175,7 +175,14 @@ RunResult runOneCase(const Case& c, bool haveClosureScale, double closureScale,
 
     const double umix = c.Vsl + c.Vsg;
     const double residenceTime = L / std::max(umix, 0.02);
-    const double tEnd = std::clamp(10.0 * residenceTime, 1.0, 8.0);
+    // maxTEnd defaults to 8.0, the original hardcoded ceiling -- bit-exact
+    // with every invocation that omits it. See VALIDATION.md's "Wang et
+    // al. (2024) high-pressure holdup validation": for very low combined
+    // superficial velocities (residence time well past ~1s) this ceiling
+    // can cut a run off long before it reaches even one residence time,
+    // sampling holdup while the flow is still near its initial
+    // homogeneous-holdup guess rather than its true equilibrium.
+    const double tEnd = std::clamp(10.0 * residenceTime, 1.0, maxTEnd);
     const double warmupEnd = 0.5 * tEnd;
     const int maxSteps = 300000;
     const double sampleInterval = (tEnd - warmupEnd) / 30.0;
@@ -248,7 +255,7 @@ RunResult runOneCase(const Case& c, bool haveClosureScale, double closureScale,
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::cerr << "Usage: validate_quantitative <input.csv> <output.csv> [closureCorrectionScale] [closureF0Shift] [closureDepositionVelocityScale] [enableTurbulentViscosity(0|1)] [turbulentMixingLengthFraction] [enableInterfacialPressureJump(0|1)] [interfacialPressureJumpCoefficient] [enableInterfacialSlopeClosure(0|1)] [interfacialSlopeCoefficient] [N] [enableRoeScheme(0|1)]\n";
+        std::cerr << "Usage: validate_quantitative <input.csv> <output.csv> [closureCorrectionScale] [closureF0Shift] [closureDepositionVelocityScale] [enableTurbulentViscosity(0|1)] [turbulentMixingLengthFraction] [enableInterfacialPressureJump(0|1)] [interfacialPressureJumpCoefficient] [enableInterfacialSlopeClosure(0|1)] [interfacialSlopeCoefficient] [N] [enableRoeScheme(0|1)] [maxTEnd]\n";
         return 1;
     }
     const bool haveClosureScale = (argc >= 4);
@@ -276,6 +283,10 @@ int main(int argc, char** argv) {
     // See SolverOptions::enableRoeScheme; no extra coefficient needed
     // (a scheme choice, not a tunable).
     const bool enableRoeScheme = (argc >= 14) && std::stoi(argv[13]) != 0;
+    // Ceiling on simulated time per case, default 8.0 (bit-exact with every
+    // invocation that omits it). See runOneCase()'s own comment and
+    // VALIDATION.md's "Wang et al. (2024) high-pressure holdup validation".
+    const double maxTEnd = (argc >= 15) ? std::stod(argv[14]) : 8.0;
     const auto cases = readCases(argv[1]);
 
     // Each case is an independent FourFieldSolver instance (no shared
@@ -295,7 +306,7 @@ int main(int argc, char** argv) {
                                  haveMixingLength, mixingLengthFraction,
                                  enableInterfacialPressureJump, haveCi, Ci,
                                  enableInterfacialSlopeClosure, haveSlopeCoeff, slopeCoeff, N,
-                                 enableRoeScheme);
+                                 enableRoeScheme, maxTEnd);
 #ifdef _OPENMP
 #pragma omp critical
 #endif

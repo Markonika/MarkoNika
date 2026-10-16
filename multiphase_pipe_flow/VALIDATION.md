@@ -1169,3 +1169,60 @@ methodology, tables, and figures are in the paper (Section 7,
     `WaveletDetail` available as a principled alternative. Regression-
     confirmed bit-for-bit identical `step()` behaviour throughout with
     the default indicator.
+26. **Done: a high-pressure (field-representative) holdup validation --
+    encouraging once a real validation-driver bug it exposed was fixed.**
+    See README.md, "A high-pressure (field-representative) holdup
+    validation, and a validation-driver bug it exposed" for the full
+    account. Motivated by whether this model is usable at all, even
+    approximately, at the gas pressures a real subsea pipeline runs at
+    (tens-hundreds of bar) rather than only the near-atmospheric lab
+    conditions every other dataset here uses. Digitized 48 cases (8
+    liquid superficial velocities x 3 gas superficial velocities x 2
+    pressures) from Wang, Yu, Liu, Chang, Zhao & Wang (2024, Energies
+    17(5):1056, open access) Figure 6's liquid-film-thickness curves at
+    1.0/2.0 MPa, 50 mm I.D. -- no numeric table exists in either that
+    paper or its companion (Wang, Liu, Chang, Zhao & Guo, 2019, Int. J.
+    Heat Mass Transfer 143:118537, source of the 2 MPa fluid properties
+    used), so these are an honest, approximate chart reading, the same
+    kind of literature compilation the existing Mendeley dataset already
+    relies on. Converted liquid film thickness to holdup via the Taitel &
+    Dukler (1976) circular-segment formula, re-derived and verified
+    against direct numerical integration of the pipe cross-section
+    (agreement ~1e-6) before use.
+
+    The first run, through `validate_quantitative` completely unchanged,
+    gave a severe MAE of 0.2492 (43/48 cases under-predicted) that looked
+    like a genuine high-gas-density closure failure. It wasn't: a direct
+    check (running the worst case, 2 MPa / Vsl=0.015 / Vsg=0.2, out to
+    150s instead of the driver's `tEnd<=8s` cap) showed predicted holdup
+    essentially stuck at its initial homogeneous-flow guess (0.070) at
+    8s, climbing to 0.433 by 150s against an experimental 0.576 -- these
+    new cases' much lower superficial velocities push the natural
+    equilibration time (10 residence times) to well over 100s in some
+    cases, clamped by the driver's hardcoded 8s ceiling to well under
+    ONE residence time. `validate_quantitative` gained an optional
+    `maxTEnd` CLI argument (default 8.0, bit-exact with every invocation
+    that omits it) to make this fix reproducible through the tracked
+    driver instead of a one-off script. Re-run with `maxTEnd=150`:
+
+    | V_GS tier | n | MAE capped (8s) | MAE maxTEnd=150 |
+    |---|---|---|---|
+    | low (~0.15-0.2 m/s) | 16 | 0.408 | 0.088 |
+    | mid (~0.7 m/s) | 16 | 0.327 | 0.194 |
+    | high (~3.4 m/s) | 16 | 0.013 | 0.013 |
+    | all 48 | 48 | 0.249 | 0.098 |
+
+    The high-V_GS tier (already well inside 8s' worth of residence
+    times) was unaffected and stayed excellent throughout, confirming
+    the capped run's failure was a sampling-time artifact there, not a
+    hidden accuracy problem. Overall MAE after the fix (0.098) sits at
+    the GOOD end of the 0.09-0.30 range already documented across the
+    existing near-atmospheric datasets -- no evidence of closure
+    breakdown at an order of magnitude higher gas density. A real,
+    smaller residual gap remains at mid-V_GS (0.194), plausibly the same
+    kind of wave-stratified/intermittent-regime error already documented
+    elsewhere in this project's holdup validation rather than something
+    high-pressure-specific, but genuinely open rather than explained
+    away. Regression-confirmed bit-for-bit identical output on the full
+    349-case canonical dataset (`quant_unified_cases.csv`, diffed against
+    the already-tracked `quant_results.csv`) with `maxTEnd` omitted.
