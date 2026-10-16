@@ -106,12 +106,50 @@ Facts established:
   2.14 (1.3 s) and moves to 2.97 for I55 = 1.0 instead of 0.87 kg m^2 (the inertia implied by the measured 1.170 s pitch period), i.e. the absolute pitch level is
   extremely sensitive to the poorly known pitch inertia and to the (absent) viscous pitch damping. This affects all configurations, not CON2 in particular.
 * Quasi-static mooring stiffness is nearly identical in the three configurations (surge 22-27 N/m, surge-pitch coupling 3.7-5.0 N, pitch 38.9-39.5 N m/rad) and
-  predicts pitch within 1 % for CON1 only. CON2's time-domain pitch is **15 % above** its quasi-static prediction, so the excess is a *dynamic* line/clump effect.
+  predicts pitch within 1 % for CON1 only. CON2's time-domain pitch is **15 % above** its quasi-static prediction, so the excess is not quasi-static (later shown to be amplitude dependent, see below).
 * Line modes (`mooring_modes --lines`, undamped, rope law included): CON1 leg lowest mode **0.868 s**; CON2 leg modes **1.331 s and 1.500 s** (clump on the rope), then 0.691 s.
   The T = 1.3 s wave is 2.3 % from the 1.331 s mode; T = 1.4 s lies between the two modes.
 
-Interpretation: the clump creates a line mode at 1.33 s that the 1.3 s wave excites almost at resonance through the fairlead motion; the line force it feeds back to the
-body raises pitch by about 15 % over the quasi-static value. This is **consistent with all the evidence but not proved**: not tested are a period sweep through 1.33 s, a shifted
-clump position or mass (which should move the resonance), and the effect of the assumed clump/floater hydrodynamic data (Cm = 0, Cd = 0.5/1.0, none given in the thesis). The clump's
-drag is not the mechanism, but line/floater drag is the only damping present (no drag: pitch 4.1), so the result depends on the unverified rope drag coefficients (chain values Cdn = 2.5 applied to a rope).
-Whether the real rope/clump system is as lightly damped at 1.33 s as the model is not known; the by-eye measured values cannot discriminate this.
+~~Interpretation: clump-rope resonance at 1.33 s~~ **(retracted, see the period sweep and amplitude test below)**: the first write-up suggested that the 1.331 s line mode
+is excited almost at resonance by the 1.3 s wave. The sweep below does not support this.
+
+### Period sweep through the 1.331 s line mode (CON2, H = 0.08 m; CON1 as control)
+BEM rows at the extra periods were computed with the same mesh (`scripts/bem_paredes_buoy.py out.json 1.0 <periods>`); `static-K` is the closed-form 2-DOF response with the
+quasi-static linearised stiffness of `mooring_modes` (CON2: Kxx 26.63, Kxp 4.11, Kpp 38.94; CON1: 24.72, 3.72, 39.51).
+
+| T [s] | CON2 time domain | CON2 static-K | ratio | CON1 time domain | CON1 static-K | ratio |
+|---|---|---|---|---|---|---|
+| 1.20 | 3.927 | 3.021 | 1.300 | | | |
+| 1.25 | 2.850 | 2.387 | 1.194 | 2.259 | 2.240 | 1.009 |
+| 1.28 | 2.511 | 2.162 | 1.161 | | | |
+| 1.30 | 2.348 | 2.047 | 1.147 | 1.957 | 1.941 | 1.008 |
+| 1.31 | 2.281 | 1.998 | 1.142 | | | |
+| 1.33 | 2.167 | 1.911 | 1.134 | 1.834 | 1.819 | 1.008 |
+| 1.35 | 2.072 | 1.838 | 1.127 | | | |
+| 1.37 | 1.992 | 1.775 | 1.122 | 1.703 | 1.698 | 1.003 |
+| 1.40 | 1.889 | 1.697 | 1.113 | 1.630 | 1.627 | 1.002 |
+| 1.45 | 1.745 | 1.598 | 1.092 | | | |
+| 1.50 | 1.628 | 1.524 | 1.068 | 1.462 | 1.469 | 0.995 |
+
+* **There is no peak near 1.33 s.** The CON2 pitch falls monotonically with period, and the ratio to the quasi-static value increases smoothly toward short periods
+  (1.07 at 1.5 s, 1.13 at 1.33 s, 1.30 at 1.2 s). A resonance of the 1.331 s line mode would give a local maximum of the ratio there; it is absent.
+* The CON1 control is quasi-static to within 1 % at every period, so the hull-plus-stiffness model and the BEM table are not the source of the CON2 excess.
+* A single frequency-independent reduction of the CON2 pitch stiffness of about **1.5 N m/rad (4 %; range 1.2-1.7 over the sweep)** reproduces all eleven time-domain values
+  (equivalently +0.06...+0.08 kg m^2 of inertia). The excess therefore looks like a small softening of the effective pitch stiffness amplified by the steep resonance flank
+  (hull pitch period 1.11 s), not a dynamic line effect at the wave frequency. (Diagnostic fit only; it is not used anywhere.)
+
+### Amplitude test (T = 1.3 s)
+| H [m] | CON2 pitch/(ka) | CON2 heave | CON1 pitch/(ka) |
+|---|---|---|---|
+| 0.02 | 2.128 | 1.393 | |
+| 0.04 | 2.285 | 1.445 | 1.947 |
+| 0.08 | 2.348 | 1.450 | 1.957 |
+| 0.16 | 2.326 | 1.490 | |
+
+The static-K value is 2.047. CON1 is independent of wave height (as a linear system would be); **CON2 is not**: its pitch/(ka) grows from 4 % above the quasi-static value
+at H = 0.02 m to 15 % at 0.08 m and then saturates (heave varies too, 1.39 -> 1.49). The CON2 excess is therefore an **amplitude-dependent (nonlinear) effect of the clump leg**, not a
+linear resonance. Candidate mechanisms, none tested: loss of tension (the line law is bilinear, T = max(0, ...)) or large changes of the leg geometry with the clump swinging at 13-23 deg of pitch;
+drag nonlinearity of the floater/clump (the no-drag run, 4.10, shows the drag controls the level but the clump drag alone does not change it); and the small-angle rigid-body model itself, which is being used at
+pitch amplitudes of about 0.2 rad. A tension time series of the CON2 legs and a larger-angle body formulation would be the next tests.
+
+Net status: the CON2 pitch excess is **explained as nonlinear and clump-related, mechanism not identified**; the earlier resonance interpretation is withdrawn.
