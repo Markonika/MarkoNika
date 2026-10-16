@@ -180,3 +180,38 @@ What this leaves: the amplitude dependence appears only in CON2, whose pretensio
 body formulation or a CON2 variant with the pretension scaled). The assumed rope/floater/clump drag (not given in the thesis) remains the only damping and the pitch level is
 very sensitive to the pitch inertia and damping of the hull (see above). Status: the CON2 pitch excess is a nonlinear effect specific to the heavily pretensioned configuration;
 mechanism not identified; loss of tension and clump drag are excluded.
+
+### Scaled-pretension variants of CON2 (T = 1.3 s, BEM coefficients)
+The CON2 pretension comes from the clump (submerged weight 9.97 N, mass 1.115 kg at 1.6 m); CON1 is the same rope without it. The clump was scaled by `s`
+(**diagnostic variants, not calibrations**; the base files are unchanged): **A** scales submerged weight and mass together, **B** scales the submerged weight only (mass fixed), which separates pretension
+from clump inertia. For each variant the quasi-static stiffness was recomputed with `mooring_modes` (the static stiffness does not depend on the clump mass:
+A and B have identical `K`) and the closed-form 2-DOF pitch RAO of that stiffness is the reference.
+
+| variant | leg-1 fairlead tension [N] | Kxx / Kxp / Kpp | H [m] | pitch/(ka) time domain | quasi-static | ratio | min segment tension [N] |
+|---|---|---|---|---|---|---|---|
+| CON1 (s = 0) | 2.63 .. 2.93 | 24.7 / 3.72 / 39.5 | 0.08 | 1.957 | 1.941 | 1.008 | 2.62 |
+| A s = 0.25 | 4.13 .. 4.29 | 18.1 / 2.77 / 39.3 | 0.08 | 2.014 | 1.951 | 1.032 | 3.55 |
+| A s = 0.25 | 4.02 .. 4.29 | same | 0.02 | 2.078 | 1.951 | 1.065 | 3.39 |
+| B s = 0.25 | 3.51 .. 4.79 | same | 0.08 | 1.990 | 1.951 | 1.020 | 3.40 |
+| A s = 0.5 | 5.94 .. 6.87 | 19.4 / 3.01 / 39.3 | 0.08 | 2.050 | 1.961 | 1.045 | 4.47 |
+| A s = 0.5 | 6.17 .. 6.45 | same | 0.02 | 2.043 | 1.961 | 1.042 | 4.61 |
+| B s = 0.5 | 5.55 .. 7.17 | same | 0.08 | 2.040 | 1.961 | 1.040 | 4.42 |
+| A s = 0.75 | 7.89 .. 9.59 | 22.6 / 3.51 / 39.1 | 0.08 | 2.165 | 1.996 | 1.085 | 5.28 |
+| CON2 (s = 1) | 9.78 .. 12.84 | 26.6 / 4.11 / 38.9 | 0.08 | 2.348 | 2.047 | 1.147 | 5.62 |
+| CON2 (s = 1) | 10.52 .. 11.53 | same | 0.02 | 2.128 | 2.047 | 1.040 | 6.22 |
+| A s = 1.5 | 13.48 .. 18.78 | 36.2 / 5.49 / 38.4 | 0.08 | 2.963 | 2.185 | 1.356 | 7.10 |
+
+No segment is slack in the analysis window in any variant.
+
+* **The excess over the quasi-static response is controlled by the pretension.** At H = 0.08 m the ratio time domain / quasi-static is 1.008, 1.032, 1.045, 1.085, 1.147 and 1.356 for
+  s = 0, 0.25, 0.5, 0.75, 1, 1.5 (mean fairlead tension about 2.7, 4.2, 6.4, 8.7, 11, 16 N). For s >= 0.5 the excess (ratio - 1) grows roughly as the square of the pretension
+  (exponent about 2.1-2.4 between neighbouring points; a rough reading of six points, not a fitted law); s = 0.25 lies above that trend.
+* **The clump inertia is not the cause:** the B variants (mass fixed) give 1.990 and 2.040 against 2.014 and 2.050 for A (within 1-2 %).
+* **The amplitude dependence only appears at full pretension:** for s = 0.5 the RAO is the same at H = 0.02 and 0.08 m (2.043 vs 2.050); for s = 0.25 it is 2.078 vs 2.014 (3 % in the opposite
+  direction, which shows that amplitude-independent scatter of this size exists); for s = 1 it is 2.128 vs 2.348 (10 %). Together with the earlier wave-height test, the
+  excess is amplitude- and pretension-dependent in a way that fits a nonlinearity that scales with (pretension x amplitude), the signature of a geometric stiffness effect
+  at finite rotation. A residual of about 4-6 % above the quasi-static value remains at the smallest amplitudes and is not explained.
+
+Status: the CON2 pitch excess is a **pretension-controlled nonlinear effect**; inertia, drag of the clump, discretisation, line resonance and loss of tension have each been excluded.
+The geometric large-rotation explanation (the small-angle body model at 0.2 rad pitch) is **consistent with every result but not demonstrated**: the discriminating test is a large-angle
+rigid-body formulation, which this code does not have. Until then the CON2 wave-pitch comparison with the measurements should be read as model-form limited at high pretension.
