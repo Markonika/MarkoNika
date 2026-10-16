@@ -56,6 +56,7 @@ Example: `examples/platform/three_leg_example.json` (generic, **not** the Parede
 | `waves.depth_m`, `waves.surface_z_m` | constant water depth and still-water level (default: `environment.water_surface_z_m`) |
 | `waves.components[]` | `{height_m` or `amplitude_m, period_s, phase_rad, direction_deg}` Airy components (sum = irregular kinematics) |
 | `waves.stretching` | `wheeler` (default) or `none` |
+| `waves.apply_to_lines` | `true` (default) or `false`: diagnostic switch, with `false` the lines and point elements sit in still water (they still move with the body); the body excitation is unaffected. The Paredes harness reads extra wave keys from `waves_extra` |
 | `waves.ramp_time_s` | cosine ramp of all amplitudes over the first seconds (0 = off) |
 | `body.wave_force.w`, `.delta` | 6 + 6 numbers: `f_i = w_i A sin(omega t + delta_i)` with A and omega of the first component (Eq. 3.60) |
 | `initial.xi_dot0` | initial body velocity; applied **after** the equilibrium solve as well |

@@ -153,7 +153,7 @@ std::unique_ptr<CoupledSystem> buildCoupledSystem(const json& cfg, std::vector<s
         }
         const Vec3 a = vec(jl.at("fairlead_body_m")), anchor = vec(jl.at("anchor_m"));
         std::unique_ptr<LumpedMassCable> cab = buildLine(lc, anchor, sys.body().pointPosition(a));
-        if (waves) { Environment e = cab->environment(); e.water = withCurrent(waves->asWaterField(), makeCurrentProfile(lc.value("environment", json::object()), e.surfaceZ));
+        if (waves && cfg.at("waves").value("apply_to_lines", true)) { Environment e = cab->environment(); e.water = withCurrent(waves->asWaterField(), makeCurrentProfile(lc.value("environment", json::object()), e.surfaceZ));
             if (cfg.at("waves").value("instantaneous_surface", false)) e.elevation = waves->asElevation();
             cab->setEnvironment(e); }
         if (jn.contains("cfl") || jn.contains("line_dt_s") || jn.contains("scheme")) {

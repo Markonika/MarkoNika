@@ -188,6 +188,7 @@ ParedesRAO paredesWaveRAO(json cfg, double period, double height, double tEnd, i
     const double ramp = steadyStart ? 0.0 : 5.0 * period;
     cfg["waves"] = {{"depth_m", depth}, {"surface_z_m", cfg["environment"].value("water_surface_z_m", depth)}, {"ramp_time_s", ramp}, {"instantaneous_surface", instantaneousSurface},
                     {"components", json::array({ {{"height_m", height}, {"period_s", period}} })}};
+    if (cfg.contains("waves_extra")) cfg["waves"].update(cfg["waves_extra"]);   // e.g. {"apply_to_lines": false} (diagnostic: lines in still water)
     if (steadyStart) {
         // Start from the steady-state response of the FREE body (closed form of the 6-DOF model without lines), so that only the small
         // mooring-induced transient remains: the lightly damped surge-pitch mode would otherwise need ~1000 s to settle (see test_waves.cpp).
