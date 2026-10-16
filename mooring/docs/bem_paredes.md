@@ -386,9 +386,9 @@ requested 1.55 m (clump) is the same node as the as-run 1.60 m. Each variant was
   quasi-static value (2.05) is itself above the band. Not tested: combinations of lower inertia, positions and drag together, the true sphere/clump attachment geometry (effective rope length), and the experimental uncertainty of the CON2 measurement.
 
 ### Combined sensitivity study of the CON2 wave response (T = 1.3 and 1.4 s, H = 0.08 m, BEM coefficients)
-All uncertain inputs varied together (; a **sensitivity study, not a calibration**, nothing fitted): pitch inertia I55 in [0.87, 1.00] kg m^2 (thesis value without fixtures ..
+All uncertain inputs varied together (`scripts/paredes_con2_sensitivity.py`; a **sensitivity study, not a calibration**, nothing fitted): pitch inertia I55 in [0.87, 1.00] kg m^2 (thesis value without fixtures ..
 value implied by the measured pitch period), clump node 15-17 (as run 16), floater node 6-8 (as run 7), floater Cd scale 0-2, line Cdt/Cdn scale 0.5-2. Stage 1: four corner cases at both periods; stage 2: a 16-point
-Latin hypercube at T = 1.3 s. Every variant was also checked against the measured statics (): "consistent" means leg tension within 10.4-11.2 N (measured 10.6 / 11.0 N +-0.2) and draft change
+Latin hypercube at T = 1.3 s. Every variant was also checked against the measured statics (`paredes_report <dir> statics con2`): "consistent" means leg tension within 10.4-11.2 N (measured 10.6 / 11.0 N +-0.2) and draft change
 within 10-16 mm (measured 13 +- 3 mm). Measured pitch/(ka) bands (by eye): 1.7-1.95 at 1.3 s, 1.55-1.75 at 1.4 s.
 
 | run | I55 | clump node | floater node | floater drag x | line drag x | leg tension [N] / draft [mm] | statics consistent | pitch/(ka) 1.3 s | pitch/(ka) 1.4 s |
