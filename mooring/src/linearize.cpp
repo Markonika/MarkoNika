@@ -138,6 +138,118 @@ LineModes LumpedMassCable::naturalModes(int nModes) {
     return out;
 }
 
+namespace {
+using cd = std::complex<double>;
+inline double& comp(Vec3& v, int d) { return d == 0 ? v.x : (d == 1 ? v.y : v.z); }
+// Solve A X = B for X (n x m, row-major) by Gaussian elimination with partial pivoting; A is overwritten.
+void complexSolve(std::vector<cd>& A, std::vector<cd>& B, int n, int m) {
+    for (int c = 0; c < n; ++c) {
+        int piv = c;
+        for (int r = c + 1; r < n; ++r) if (std::abs(A[size_t(r) * n + c]) > std::abs(A[size_t(piv) * n + c])) piv = r;
+        if (std::abs(A[size_t(piv) * n + c]) < 1e-300) throw std::runtime_error("fairleadDynamicStiffness: singular interior matrix");
+        if (piv != c) { for (int j = 0; j < n; ++j) std::swap(A[size_t(c) * n + j], A[size_t(piv) * n + j]); for (int j = 0; j < m; ++j) std::swap(B[size_t(c) * m + j], B[size_t(piv) * m + j]); }
+        for (int r = c + 1; r < n; ++r) {
+            const cd f = A[size_t(r) * n + c] / A[size_t(c) * n + c];
+            if (f == cd(0)) continue;
+            for (int j = c; j < n; ++j) A[size_t(r) * n + j] -= f * A[size_t(c) * n + j];
+            for (int j = 0; j < m; ++j) B[size_t(r) * m + j] -= f * B[size_t(c) * m + j];
+        }
+    }
+    for (int c = n - 1; c >= 0; --c)
+        for (int j = 0; j < m; ++j) {
+            cd s = B[size_t(c) * m + j];
+            for (int k = c + 1; k < n; ++k) s -= A[size_t(c) * n + k] * B[size_t(k) * m + j];
+            B[size_t(c) * m + j] = s / A[size_t(c) * n + c];
+        }
+}
+}  // namespace
+
+void LumpedMassCable::fairleadDynamicStiffness(double omega, std::complex<double> D[9]) {
+    using cd = std::complex<double>;
+    const int N = p_.N;
+    const std::vector<int> comps = p_.planar ? std::vector<int>{0, 2} : std::vector<int>{0, 1, 2};
+    const int nc = int(comps.size()), nI = nc * (N - 1), nU = nI + nc;         // interior dofs, then the top node
+    std::vector<Vec3> r = r_, v = v_.size() == r_.size() ? v_ : std::vector<Vec3>(r_.size());
+    double l0min = 1e300;
+    for (const SegProps& g : seg_) l0min = std::min(l0min, g.l0);
+    const double hr = 1e-6 * l0min, hv = 1e-6;
+    auto unode = [&](int u) { return u < nI ? u / nc + 1 : N; };
+    auto ucomp = [&](int u) { return comps[u % nc]; };
+    std::vector<double> Kr(size_t(nU) * nU, 0.0), Kv(size_t(nU) * nU, 0.0);   // dF_row/d(r or v)_col
+    std::vector<Vec3> fp, fm;
+    auto fvec = [&](const Vec3& x, int comp_) { return comp_ == 0 ? x.x : (comp_ == 1 ? x.y : x.z); };
+    for (int mode = 0; mode < 2; ++mode) {
+        const double h = mode == 0 ? hr : hv;
+        for (int c = 0; c < nU; ++c) {
+            std::vector<Vec3> rp = r, vp = v, rm = r, vm = v;
+            Vec3& xp = mode == 0 ? rp[unode(c)] : vp[unode(c)];
+            Vec3& xm = mode == 0 ? rm[unode(c)] : vm[unode(c)];
+            comp(xp, ucomp(c)) += h; comp(xm, ucomp(c)) -= h;
+            computeForces(rp, vp, t_, fp);
+            computeForces(rm, vm, t_, fm);
+            for (int rr = 0; rr < nU; ++rr)
+                (mode == 0 ? Kr : Kv)[size_t(rr) * nU + c] = (fvec(fp[unode(rr)], ucomp(rr)) - fvec(fm[unode(rr)], ucomp(rr))) / (2.0 * h);
+        }
+    }
+    // Interior inertia (3x3 blocks restricted to the active components)
+    std::vector<cd> Gii(size_t(nI) * nI), Git(size_t(nI) * nc), Gti(size_t(nc) * nI), Gtt(size_t(nc) * nc);
+    const cd iw(0.0, omega);
+    auto G = [&](int a, int b) { return cd(Kr[size_t(a) * nU + b], 0.0) + iw * Kv[size_t(a) * nU + b]; };
+    for (int a = 0; a < nI; ++a) for (int b = 0; b < nI; ++b) Gii[size_t(a) * nI + b] = G(a, b);
+    for (int a = 0; a < nI; ++a) for (int b = 0; b < nc; ++b) Git[size_t(a) * nc + b] = G(a, nI + b);
+    for (int a = 0; a < nc; ++a) for (int b = 0; b < nI; ++b) Gti[size_t(a) * nI + b] = G(nI + a, b);
+    for (int a = 0; a < nc; ++a) for (int b = 0; b < nc; ++b) Gtt[size_t(a) * nc + b] = G(nI + a, nI + b);
+    for (int i = 1; i < N; ++i) {
+        double mt, mn; Vec3 tg;
+        nodeInertia(r_, t_, i, mt, mn, tg);
+        const double t3[3] = {tg.x, tg.y, tg.z};
+        for (int ra = 0; ra < nc; ++ra) for (int cb = 0; cb < nc; ++cb) {
+            const int a = comps[ra], b = comps[cb];
+            const double tt = t3[a] * t3[b], id = a == b ? 1.0 : 0.0;
+            Gii[size_t(nc * (i - 1) + ra) * nI + nc * (i - 1) + cb] += omega * omega * (mt * tt + mn * (id - tt));
+        }
+    }
+    // Schur complement: Gtt - Gti (Gii + w^2 M)^-1 Git
+    std::vector<cd> X = Git;
+    complexSolve(Gii, X, nI, nc);
+    for (int a = 0; a < 9; ++a) D[a] = cd(0.0, 0.0);
+    for (int ra = 0; ra < nc; ++ra) for (int cb = 0; cb < nc; ++cb) {
+        cd s = Gtt[size_t(ra) * nc + cb];
+        for (int k = 0; k < nI; ++k) s -= Gti[size_t(ra) * nI + k] * X[size_t(k) * nc + cb];
+        D[3 * comps[ra] + comps[cb]] = -s;
+    }
+}
+
+std::array<std::complex<double>, 36> CoupledSystem::dynamicLineStiffness(double omega) {
+    using cd = std::complex<double>;
+    std::array<cd, 36> K{};
+    const Mat3 R = body_.rotation();
+    for (int k = 0; k < numLines(); ++k) {
+        auto* lm = dynamic_cast<LumpedMassCable*>(&line(k));
+        if (!lm) throw std::invalid_argument("dynamicLineStiffness: lumped-mass lines only");
+        cd D[9];
+        lm->fairleadDynamicStiffness(omega, D);
+        const Vec3 Ra = rotate(R, lines_[k].a);
+        const double ra[3] = {Ra.x, Ra.y, Ra.z};
+        // J (3 x 6): u = dx - [Ra]x dtheta;  [Ra]x = [[0,-z,y],[z,0,-x],[-y,x,0]]
+        double J[3][6] = {};
+        for (int i = 0; i < 3; ++i) J[i][i] = 1.0;
+        const double cr[3][3] = {{0, -ra[2], ra[1]}, {ra[2], 0, -ra[0]}, {-ra[1], ra[0], 0}};
+        for (int i = 0; i < 3; ++i) for (int j = 0; j < 3; ++j) J[i][3 + j] = -cr[i][j];
+        for (int a = 0; a < 6; ++a) for (int b = 0; b < 6; ++b) {
+            cd s(0.0, 0.0);
+            for (int i = 0; i < 3; ++i) for (int j = 0; j < 3; ++j) s += J[i][a] * D[3 * i + j] * J[j][b];
+            K[6 * a + b] += s;
+        }
+        // geometric stiffness: dQ_rot = (Ra f0^T - (f0.Ra) I) dtheta  ->  K_geo = -(Ra f0^T - (f0.Ra) I)
+        const Vec3 f0 = lm->endForce(true);
+        const double f3[3] = {f0.x, f0.y, f0.z};
+        const double fr = f0.x * Ra.x + f0.y * Ra.y + f0.z * Ra.z;
+        for (int i = 0; i < 3; ++i) for (int j = 0; j < 3; ++j) K[6 * (3 + i) + (3 + j)] += cd(-(ra[i] * f3[j] - (i == j ? fr : 0.0)), 0.0);
+    }
+    return K;
+}
+
 Mat6 CoupledSystem::stiffness(double h) {
     const Vec6 x0 = body_.xi;
     Mat6 K;

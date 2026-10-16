@@ -1,5 +1,6 @@
 // Copyright (c) Marko Nika. All rights reserved. Proprietary and confidential.
 #pragma once
+#include <complex>
 #include <functional>
 #include <vector>
 #include "mooring/cable_model.hpp"
@@ -212,6 +213,12 @@ public:
     // Natural modes about the current shape (call after relaxStatic): the lowest 'nModes' with the dynamic (instantaneous) stiffness, i.e. including the
     // Maxwell branches of the rope law. Uses the finite-difference Jacobian of the implicit scheme.
     LineModes naturalModes(int nModes = 10);
+    // Linear dynamic stiffness of the line seen from its top (fairlead) node at angular frequency omega, about the current (static) shape, with the anchor fixed
+    // and the interior nodes eliminated: the force the line applies to the fairlead is  f = f0 - D u  for a small harmonic fairlead displacement u = Re(û e^{i omega t}).
+    // D = -(G_tt - G_ti (G_ii + omega^2 M)^-1 G_it), G = dF/dr + i omega dF/dv from central differences of the nodal forces (internal damping and the stretch-rate
+    // terms included; the quadratic Morison drag has no linearisation at rest in still water), M the nodal inertia (mass + added mass, as in naturalModes). Row-major 3 x 3.
+    // At omega = 0 it is the static stiffness of the line at the fairlead. Planar lines use the x and z components only.
+    void fairleadDynamicStiffness(double omega, std::complex<double> D[9]);
     // Start shape for a line that lies on a flat seabed and rises to the fairlead: inextensible
     // catenary with horizontal touchdown tangent (suspended part) plus a straight lying part. Needs
     // the anchor on the seabed and Environment::seabed. Returns false (keeps the current shape) when the

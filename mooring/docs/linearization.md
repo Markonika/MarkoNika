@@ -28,7 +28,24 @@ Heave 1.097 / 1.095 / 1.096 s and pitch 1.074 / 1.094 / 1.082 s for CON1 / CON2 
 
 Lopez-Olocco chain at its static state (60 segments, planar not set, 177 dof): lowest modes 1.25, 2.46, 3.67, 4.37, 4.89, 6.11 rad/s (periods 5.03, 2.56, 1.71, 1.44, 1.28, 1.03 s), i.e. the excitation periods 2.8-5.5 s of the tests lie above the first two modes.
 
+## Fairlead dynamic stiffness (`LumpedMassCable::fairleadDynamicStiffness`, `CoupledSystem::dynamicLineStiffness`, `mooring_modes --dynstiff w1,w2,...`)
+The line seen from its fairlead at angular frequency omega, about the static shape, anchor fixed, interior nodes eliminated:
+`f = f0 - D(omega) u`, `D = -(G_tt - G_ti (G_ii + omega^2 M)^-1 G_it)`, `G = dF/dr + i omega dF/dv` (central differences of the nodal forces of `computeForces`: stretch-rate/internal damping
+included; quadratic Morison drag has no linearisation at rest in still water; wave forces on the line are not included), `M` the nodal inertia of `naturalModes` (mass + added mass). For a platform the legs are assembled
+into a complex 6 x 6 body stiffness `sum_k J_k^T D_k J_k + K_geo` (`J = [I, -[R a]x]`, `K_geo` the geometric stiffness of the static fairlead force through the rotating lever arm).
+
+Verification (`tests/test_linearize.cpp`, all in the default suite; plus checks on the Paredes legs):
+| Check | Result |
+|---|---|
+| taut beaded chain (N = 60), transverse D at 0.3 / 0.6 / 0.9 / 0.97 / 1.03 times the first natural frequency vs the exact lumped result `k (1 - sin((N-1) th)/sin(N th))`, `2 - 2 cos th = m w^2/k` | 6.9143 / -5.8235 / -86.3203 / -322.3061 / 341.2961, equal to the exact result to all digits shown (test tolerance 1e-3) |
+| same chain vs the continuous string `T k cot(k L)` | within the O(1/N) lumping error (the fairlead node's half mass belongs to the body: 6.914 vs 6.841 at 0.3 w1) |
+| static limit | transverse T/L to 1e-4, axial EA/L to 2e-3 |
+| axial bead chain (link stiffness EA/l0) at 0.3 and 0.7 of the axial reference frequency | within 2e-3 |
+| pole at the first natural frequency | sign change across 0.98 / 1.02 w1, magnitude > 10 T/L |
+| Paredes CON2 platform, omega -> 0 | equals the finite-difference `lineStiffness` to 4 digits (26.6267 / 4.1106 / 17.9203 / 1.1760 ...), geometric term included |
+| Paredes CON2 leg, omega at the `naturalModes` frequencies 4.1896 and 4.7207 rad/s | stiffness changes sign across each and reaches 6e4 N/m (surge, 4.1896) and 2e4 N/m (heave, 4.7207) there: poles at the natural frequencies |
+
 ## Limitations
-* Linearisation at one static state; no amplitude dependence, no hydrodynamic (drag) damping, no frequency-dependent added mass. The body model has constant A and B anyway.
+* Linearisation at one static state; no amplitude dependence, no hydrodynamic (drag) damping (the dynamic stiffness above is undamped apart from the internal damping, which is why it has sharp poles), no frequency-dependent added mass. The body model has constant A and B anyway.
 * Jacobi eigen-decomposition is O(n^3) per sweep: fine for lines up to about 240 segments (n about 700); not meant for much finer models.
 * Finite-difference stiffness: a line near the slack/taut kink gives a stiffness that depends on the difference step; use it at taut, well-defined states.

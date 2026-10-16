@@ -240,3 +240,34 @@ What remains: the excess is a **dynamic** line-body interaction (it is absent qu
 is not due to slack, clump inertia, clump drag, resonance of the 1.331 s line mode, or discretisation. The candidates left are the dynamics of the lines themselves (inertia, added mass and
 tension-dependent transverse stiffness at 1.3 s, which a quasi-static stiffness omits) and the quadratic drag of lines, floater and clump (without any drag the pitch is 4.1). The next
 discriminating tests are the linear dynamic stiffness of the legs at 1.3 s from the linearised line model (drag-free) and time-domain runs with drag, or inertia, switched off one at a time.
+
+### Linear dynamic stiffness of the legs (no drag) at the wave frequency
+The new `mooring_modes --dynstiff` (see `linearization.md`) gives the complex 6 x 6 stiffness that the legs present to the body at omega. Putting it in the same 6-DOF closed form as before
+(BEM hull coefficients, harness body matrices; sum of the three legs; undamped apart from internal damping; **no wave force on the lines, no quadratic drag**) gives, for pitch/(ka):
+
+| T [s] | CON2 time domain (with drag, H = 0.08) | CON2 quasi-static | CON2 linear dynamic | CON1 time domain | CON1 quasi-static | CON1 linear dynamic |
+|---|---|---|---|---|---|---|
+| 1.20 | 3.927 | 3.021 | 2.932 | | 2.781 | 2.807 |
+| 1.25 | 2.850 | 2.387 | 1.805 | 2.259 | 2.240 | 2.241 |
+| 1.28 | 2.511 | 2.162 | 1.284 | | 2.042 | 2.037 |
+| 1.30 | 2.348 | 2.047 | 0.874 | 1.957 | 1.941 | 1.933 |
+| 1.31 | 2.281 | 1.998 | 0.669 | | 1.897 | 1.888 |
+| 1.33 | 2.167 | 1.911 | 1.853 | 1.834 | 1.819 | 1.809 |
+| 1.35 | 2.072 | 1.838 | 5.739 | | 1.754 | 1.742 |
+| 1.37 | 1.992 | 1.775 | 19.113 | 1.703 | 1.698 | 1.685 |
+| 1.40 | 1.889 | 1.697 | 3.899 | 1.630 | 1.627 | 1.613 |
+| 1.45 | 1.745 | 1.598 | 2.847 | | 1.536 | 1.521 |
+| 1.50 | 1.628 | 1.524 | 0.677 | 1.462 | 1.469 | 1.452 |
+
+* **CON1 (control):** the linear dynamic response equals the quasi-static one to 1 % at every period and the time-domain value (1.957 vs 1.933 at 1.3 s, 1.2 %): the CON1 case is fully linear, so the hull, the BEM table and the closed form are sound.
+* **CON2:** at omega = 4.833 rad/s (T = 1.3 s) the leg stiffness is very different from the static one: surge 156 vs 27 N/m, heave 430 vs 18 N/m, pitch 7.0 vs 1.18 N m/rad. The legs are not quasi-static at the wave
+  frequency. The undamped linear model then has **strong coupled body-line resonances between 1.31 and 1.50 s** (pitch/(ka) 0.67 at 1.31 s, 19 at 1.37 s) which are **absent from the time-domain runs**
+  (smooth, 1.63-3.93). So the lightly damped line modes (1.331 s and 1.500 s with the fairlead fixed) are present in the linear dynamics but are strongly damped in the nonlinear simulation by the quadratic drag
+  of the lines, floater and clump (the same time-domain case without any drag gives 4.10 at 1.3 s).
+* **What this explains and does not:** it is consistent with every earlier observation (excess absent quasi-statically and for CON1; larger with pretension, which sets the leg mode frequencies and strengths; amplitude
+  dependent, because quadratic drag damping is; reduced to a smooth enhancement rather than a peak by the drag), and it withdraws the earlier statement that no resonance is involved: the legs resonate near the wave
+  periods, but drag keeps the response smooth. It is **not demonstrated**: the linear model has no drag and no wave forcing of the lines, so it cannot be compared quantitatively with the time domain.
+* **Consequence:** the CON2 wave response depends on the **assumed drag coefficients** (chain values Cdn = 2.5 and Cdt = 0.5 applied to a rope, floater Cd = 0.5, clump Cd = 1.0), none of which are given in the thesis. The CON2 pitch,
+  and the comparison with the measurement, should not be regarded as a validated prediction until this sensitivity is quantified.
+
+Next discriminating test (not run): time-domain CON2 runs with the line and point-element drag scaled (for example x0.5 and x2, as a sensitivity, not a calibration), and a linear model with equivalent-linearised drag.

@@ -34,7 +34,7 @@ cases and certification. That matches the scope of the code.
 * OC6 Phase II introduced experimental **uncertainty bounds**; our Paredes/Azcona comparisons use by-eye values and should report uncertainty the same way (already flagged in the paper).
 
 ## Suggested order
-1. Finish the CON2 investigation: linear dynamic stiffness of the legs at the wave frequency, then drag/inertia switched off one at a time (the large-angle body was tested as an explanation and refuted).
+1. Finish the CON2 investigation: the linear dynamic stiffness of the legs is done (it shows lightly damped leg modes near the wave periods that the drag suppresses); next, a drag-coefficient sensitivity study (the large-angle body was tested as an explanation and refuted).
 2. Newman-approximation slow-drift force from a mean-drift table (Capytaine can supply first-order data; mean-drift/QTF data must come from a BEM that provides it), then full QTF table import.
 3. Fatigue post-processing (rainflow, S-N), line-removal (ALS) option, C API / FMU wrapper.
 4. Multi-body and shared mooring; 6-DOF buoys; bathymetry; quasi-static screening tool.

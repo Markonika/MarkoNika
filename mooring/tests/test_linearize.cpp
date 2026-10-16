@@ -127,3 +127,43 @@ TEST_CASE("Linearize: mooring stiffness of a body hanging on a line (axial EA/L,
     CHECK(foundPend);
     CHECK(h.sys->lineStiffness()(2, 2) == doctest::Approx(K(2, 2)).scale(0).epsilon(1e-9));       // no hydrostatic C in this set-up
 }
+
+TEST_CASE("Linearize: fairlead dynamic stiffness of a taut chain, exact beaded-string result D = k (1 - sin((N-1) th) / sin(N th)), 2 - 2 cos th = m w^2 / k; continuous string within the lumping error; static limit; poles") {
+    const double L = 10.0, EA = 1e5, ml = 0.1, e0 = 1e-3; const int N = 60;
+    CableParams p; p.L = L; p.N = N; p.EA = EA; p.m_l = ml; p.w = 0.0; p.g = 0.0; p.planar = true;
+    const double l0 = p.l0(), T = EA * e0, l1 = l0 * (1 + e0), Ls = N * l1;
+    LumpedMassCable c(p, Vec3(0, 0, 0), Vec3(Ls, 0, 0));
+    std::vector<Vec3> r(N + 1), v(N + 1);
+    for (int i = 0; i <= N; ++i) r[i] = Vec3(i * l1, 0, 0);
+    c.setInitialState(r, v);
+    const double m = ml * l0;                                                   // bead mass
+    // beaded string with fixed anchor and an imposed end displacement: stiffness k per link, exact in the lumped model
+    auto beaded = [&](double k, double w) {
+        const double th = std::acos(1.0 - 0.5 * m * w * w / k);
+        return k * (1.0 - std::sin((N - 1) * th) / std::sin(N * th));
+    };
+    std::complex<double> D[9];
+    c.fairleadDynamicStiffness(0.0, D);
+    CHECK(D[8].real() == doctest::Approx(T / Ls).epsilon(1e-4));                // transverse static: geometric stiffness T / L
+    CHECK(D[0].real() == doctest::Approx(EA / L).epsilon(2e-3));                // axial static: EA / L
+    const double w1 = kPi / Ls * std::sqrt(T / (ml / (1 + e0)));                // first transverse natural frequency (continuous string)
+    for (double f : {0.3, 0.6, 0.9, 0.97, 1.03}) {
+        const double w = f * w1;
+        c.fairleadDynamicStiffness(w, D);
+        const double exact = beaded(T / l1, w);
+        const double k = w * std::sqrt(ml / (1 + e0) / T), cont = T * k / std::tan(k * Ls);
+        std::printf("\n  omega/omega1 = %.2f: transverse D = %.4f (beaded chain %.4f, continuous string %.4f)", f, D[8].real(), exact, cont);
+        CHECK(D[8].real() == doctest::Approx(exact).epsilon(1e-3));
+        CHECK(std::fabs(D[8].imag()) < 1e-6 * std::fabs(exact) + 1e-9);          // undamped: purely real
+        if (f <= 0.9) CHECK(std::fabs(D[8].real() - cont) < 0.03 * T / Ls + 0.02 * std::fabs(cont));   // continuous string: lumping error O(1/N)
+    }
+    for (double f : {0.3, 0.7}) {
+        const double wa = f * kPi / Ls * std::sqrt(EA / ml);
+        c.fairleadDynamicStiffness(wa, D);
+        CHECK(D[0].real() == doctest::Approx(beaded(EA / l0, wa)).epsilon(2e-3)); // axial: bead chain with link stiffness EA / l0
+    }
+    std::complex<double> Dm[9], Dp[9];                                          // pole: sign change across the first natural frequency
+    c.fairleadDynamicStiffness(0.98 * w1, Dm); c.fairleadDynamicStiffness(1.02 * w1, Dp);
+    CHECK(Dm[8].real() * Dp[8].real() < 0.0);
+    CHECK(std::fabs(Dm[8].real()) > 10.0 * T / Ls);
+}

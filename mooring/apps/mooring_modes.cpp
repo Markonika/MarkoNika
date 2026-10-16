@@ -22,13 +22,15 @@ static void printLine(const char* name, LumpedMassCable& cab, int n) {
 }
 
 int main(int argc, char** argv) {
-    if (argc < 2) { std::fprintf(stderr, "usage: mooring_modes config.json [key=value ...] [--lines N]\n"); return 2; }
+    if (argc < 2) { std::fprintf(stderr, "usage: mooring_modes config.json [key=value ...] [--lines N] [--dynstiff w1,w2,...]\n"); return 2; }
     std::ifstream in(argv[1]);
     if (!in) { std::fprintf(stderr, "cannot open %s\n", argv[1]); return 2; }
     nlohmann::json cfg = nlohmann::json::parse(in);
     int nLine = 8;
+    std::vector<double> dynOmega;
     for (int i = 2; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--lines") && i + 1 < argc) nLine = std::atoi(argv[++i]);
+        else if (!std::strcmp(argv[i], "--dynstiff") && i + 1 < argc) { std::string a = argv[++i]; size_t p0 = 0; while (p0 <= a.size()) { size_t p1 = a.find(',', p0); if (p1 == std::string::npos) p1 = a.size(); dynOmega.push_back(std::atof(a.substr(p0, p1 - p0).c_str())); p0 = p1 + 1; } }
         else applyOverride(cfg, argv[i]);
     }
     if (cfg.contains("lines")) {
@@ -45,6 +47,16 @@ int main(int argc, char** argv) {
         const Mat6 K = sys.stiffness();
         std::printf("total linearised stiffness K = -dG/dxi [N/m, N/rad, N m/m, N m/rad] (rows/cols: surge sway heave rx ry rz):\n");
         for (int i = 0; i < 6; ++i) { for (int j = 0; j < 6; ++j) std::printf(" %11.4f", K(i, j)); std::printf("\n"); }
+        if (!dynOmega.empty()) {
+            const Mat6 Kl = sys.lineStiffness();
+            std::printf("static line stiffness by finite differences of the static solutions (body C excluded):\n");
+            for (int i = 0; i < 6; ++i) { for (int j = 0; j < 6; ++j) std::printf(" %11.4f", Kl(i, j)); std::printf("\n"); }
+            for (double w : dynOmega) {
+                const auto D = sys.dynamicLineStiffness(w);
+                std::printf("DYNK omega %.6f rad/s: real part, then imaginary part of the linearised line dynamic stiffness [N/m ... N m/rad]\n", w);
+                for (int part = 0; part < 2; ++part) { for (int i = 0; i < 6; ++i) { for (int j = 0; j < 6; ++j) std::printf(" %11.4f", part == 0 ? D[6 * i + j].real() : D[6 * i + j].imag()); std::printf("\n"); } if (part == 0) std::printf("--\n"); }
+            }
+        }
         const RadiationModel* rad = sys.radiation();
         const BodyModes bm = rad ? bodyModesRadiation(sys.body().totalMass() - rad->Ainf(), *rad, K) : bodyModes(sys.body().totalMass(), K);
         std::printf("body natural frequencies (undamped, %s), K asymmetry %.1e:\n", rad ? "frequency-dependent added mass A(omega) at each mode" : "total mass incl. added mass", bm.asymmetry);

@@ -2,6 +2,7 @@
 // Rigid-body platform with 6 DOF and multi-line fairlead coupling (milestone 7).
 #pragma once
 #include <array>
+#include <complex>
 #include <functional>
 #include <memory>
 #include <string>
@@ -120,6 +121,10 @@ public:
     // heave, rx, ry, rz.
     Mat6 stiffness(double h = 1e-4);
     Mat6 lineStiffness(double h = 1e-4);
+    // Complex 6 x 6 dynamic stiffness of all (lumped-mass) lines at angular frequency omega about the current pose: sum_k J_k^T D_k(omega) J_k + K_geo with J = [I, -[R a]x]
+    // (fairlead displacement per body displacement) and K_geo the geometric stiffness of the static fairlead force acting through the rotating lever arm. At omega = 0 it
+    // equals lineStiffness() (the static linearisation, excluding the body's own C). Row-major, same DOF order as Mat6. Requires the lines to be at their static state.
+    std::array<std::complex<double>, 36> dynamicLineStiffness(double omega);
 
     // Time-dependent generalised load on the body (e.g. wave excitation, Eq. 3.60); added to the loads at every step.
     void setExcitation(std::function<Vec6(double t)> f) { excitation_ = std::move(f); }
