@@ -384,3 +384,51 @@ requested 1.55 m (clump) is the same node as the as-run 1.60 m. Each variant was
 * **None of the positions brings the pitch into the measured band (1.7-1.95):** the lowest value, 2.16, is 11-27 % above it. The CON2 pitch disagreement is therefore not explained by the element positions either, within +-0.1 m.
 * Together with the earlier sensitivities (drag: 2.07-2.42; inertia: 2.35-3.34 for I55 = 0.87-1.00) this leaves the CON2 pitch above the measured band for every plausible variation of the uncertain inputs tested one at a time; the
   quasi-static value (2.05) is itself above the band. Not tested: combinations of lower inertia, positions and drag together, the true sphere/clump attachment geometry (effective rope length), and the experimental uncertainty of the CON2 measurement.
+
+### Combined sensitivity study of the CON2 wave response (T = 1.3 and 1.4 s, H = 0.08 m, BEM coefficients)
+All uncertain inputs varied together (; a **sensitivity study, not a calibration**, nothing fitted): pitch inertia I55 in [0.87, 1.00] kg m^2 (thesis value without fixtures ..
+value implied by the measured pitch period), clump node 15-17 (as run 16), floater node 6-8 (as run 7), floater Cd scale 0-2, line Cdt/Cdn scale 0.5-2. Stage 1: four corner cases at both periods; stage 2: a 16-point
+Latin hypercube at T = 1.3 s. Every variant was also checked against the measured statics (): "consistent" means leg tension within 10.4-11.2 N (measured 10.6 / 11.0 N +-0.2) and draft change
+within 10-16 mm (measured 13 +- 3 mm). Measured pitch/(ka) bands (by eye): 1.7-1.95 at 1.3 s, 1.55-1.75 at 1.4 s.
+
+| run | I55 | clump node | floater node | floater drag x | line drag x | leg tension [N] / draft [mm] | statics consistent | pitch/(ka) 1.3 s | pitch/(ka) 1.4 s |
+|---|---|---|---|---|---|---|---|---|---|
+| asrun | 0.870 | 16 | 7 | 1.00 | 1.00 | 10.92-11.02 / +12.9 | yes | 2.348 | 1.889 |
+| cornerLow | 0.870 | 15 | 8 | 0.00 | 0.50 | 10.16-10.28 / +11.4 | **no** | 1.700 | 1.514 |
+| cornerLowDrag1 | 0.870 | 15 | 8 | 1.00 | 1.00 | 10.16-10.28 / +11.4 | **no** | 2.051 | 1.686 |
+| cornerHigh | 1.000 | 17 | 6 | 2.00 | 2.00 | 11.27-11.36 / +14.0 | **no** | 3.825 | 2.473 |
+| lhs00 | 0.878 | 16 | 7 | 0.88 | 0.99 | 10.92-11.02 / +12.9 | yes | 2.381 |  |
+| lhs01 | 0.974 | 16 | 7 | 0.35 | 1.37 | 10.92-11.02 / +12.9 | yes | 2.889 |  |
+| lhs02 | 0.931 | 16 | 8 | 0.52 | 1.91 | 10.57-10.68 / +12.2 | yes | 2.474 |  |
+| lhs03 | 0.954 | 17 | 6 | 1.55 | 1.18 | 11.27-11.36 / +14.0 | **no** | 3.332 |  |
+| lhs04 | 0.990 | 15 | 8 | 0.04 | 1.70 | 10.16-10.28 / +11.4 | **no** | 2.462 |  |
+| lhs05 | 0.905 | 16 | 8 | 1.84 | 1.78 | 10.57-10.68 / +12.2 | yes | 2.464 |  |
+| lhs06 | 0.914 | 15 | 7 | 1.02 | 0.51 | 10.63-10.74 / +12.2 | yes | 2.397 |  |
+| lhs07 | 0.936 | 17 | 6 | 0.42 | 1.57 | 11.27-11.36 / +14.0 | **no** | 3.049 |  |
+| lhs08 | 0.873 | 15 | 7 | 0.75 | 0.73 | 10.63-10.74 / +12.2 | yes | 2.138 |  |
+| lhs09 | 0.945 | 17 | 7 | 1.16 | 1.88 | 11.11-11.21 / +13.5 | **no** | 2.977 |  |
+| lhs10 | 0.888 | 17 | 6 | 0.68 | 1.29 | 11.27-11.36 / +14.0 | **no** | 2.741 |  |
+| lhs11 | 0.982 | 16 | 7 | 1.64 | 0.65 | 10.92-11.02 / +12.9 | yes | 3.258 |  |
+| lhs12 | 0.962 | 16 | 8 | 1.95 | 1.14 | 10.57-10.68 / +12.2 | yes | 2.880 |  |
+| lhs13 | 0.923 | 15 | 6 | 0.17 | 1.51 | 10.99-11.08 / +12.8 | yes | 2.447 |  |
+| lhs14 | 0.902 | 17 | 6 | 1.34 | 0.81 | 11.27-11.36 / +14.0 | **no** | 2.917 |  |
+| lhs15 | 1.000 | 15 | 8 | 1.46 | 0.92 | 10.16-10.28 / +11.4 | **no** | 2.915 |  |
+
+**Stage 1 (corners).**
+* *As run* 2.348 / 1.889 (1.3 / 1.4 s).
+* *Most favourable corner* (lowest inertia, clump node 15, floater node 8, **floater drag zero**, line drag x0.5): **1.700 / 1.514**, i.e. at the lower edge of the band at 1.3 s and 2 % below the band at 1.4 s. Two caveats: it needs a zero floater drag
+  (unphysical for a 0.135 m sphere) and its **statics are outside the measurement** (leg tension 10.16-10.28 N, 0.3-0.4 N below the measured 10.6 / 11.0 N).
+* The same positions and inertia with the drag as configured: **2.051 / 1.686**: inside the band at 1.4 s, 5-21 % above it at 1.3 s; its statics are also outside (10.16-10.28 N).
+* *Least favourable corner* 3.825 / 2.473.
+
+**Stage 2 (Latin hypercube, T = 1.3 s).** All 16 points are above the band: pitch/(ka) min 2.138, median 2.81, max 3.33; none in 1.7-1.95. Restricted to the 9 points whose statics are consistent with the measurements:
+min 2.138, median 2.46, max 3.26 (the minimum is 10 % above the upper edge of the band, the median 26 % above).
+
+**Reading.**
+* Within the plausible and statics-consistent ranges of the uncertain inputs, the model's CON2 pitch at 1.3 s is **10-70 % above** the measured band; the best case of the full box reaches the band edge only with an unphysical (zero) floater drag
+  and statics that disagree with the measurement. At 1.4 s the best statics-inconsistent corner is inside the band.
+* The spread of the model over the uncertain inputs (2.14-3.33 at 1.3 s, a factor 1.6) is larger than the width of the measured band (1.7-1.95, 14 %), so the CON2 comparison is dominated by input uncertainty; but it is
+  one-sided: the measured band lies below essentially the whole sampled range.
+* Heave: 1.30-1.55 over the sample against 1.45-1.50 measured at 1.3 s (the variants span the measurement); surge 0.89-0.97 against 0.40-0.45 measured (not affected by these inputs).
+* Not explored: the true sphere/clump attachment geometry (effective rope length), the pitch damping, the experiment's own repeatability (the by-eye bands carry no uncertainty), correlated errors in the hull coefficients, and
+  CON1/CAT in the same design.
