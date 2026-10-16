@@ -1,5 +1,6 @@
 // Copyright (c) Marko Nika. All rights reserved. Proprietary and confidential.
-// Usage: paredes_report [dir_with_configs] [statics|stiffness|free|decay|waves|all] [con1|con2|cat] [inst|-] [coefficient_json|-] [period_s] [wave_height_m]
+// Usage: paredes_report [dir_with_configs] [statics|stiffness|free|decay|waves|all] [con1|con2|cat] [inst|-] [coefficient_json|-] [period_s] [wave_height_m] [tension_csv]
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -48,8 +49,35 @@ int main(int argc, char** argv) {
             std::vector<double> periods = {1.30, 1.40};
             if (argc > 6) periods = {std::atof(argv[6])};                                // optional: a single period (any period present in the coefficient file)
             for (double T : periods) {
-                const ParedesRAO r = paredesWaveRAO(cfg, T, argc > 7 ? std::atof(argv[7]) : 0.08, 30.0, 15, 2e-3, true, argc > 4 && std::string(argv[4]) == "inst", haveCoef ? &coef : nullptr);
+                CoupledResult detail;
+                const ParedesRAO r = paredesWaveRAO(cfg, T, argc > 7 ? std::atof(argv[7]) : 0.08, 30.0, 15, 2e-3, true, argc > 4 && std::string(argv[4]) == "inst", haveCoef ? &coef : nullptr, argc > 8 ? &detail : nullptr);
                 std::printf("== %s regular waves H = %.3f m, T = %.2f s: RAO surge %.3f, heave %.3f, pitch/(ka) %.3f (mean surge offset %.4f m)\n", n, argc > 7 ? std::atof(argv[7]) : 0.08, T, r.surge, r.heave, r.pitch, r.meanSurge);
+                if (argc > 8) {
+                    // Line-tension time series (all samples) and a summary over the last 15 wave cycles: slack means a segment with strain <= 0.
+                    std::ofstream o(argv[8]);
+                    o << "time_s,surge,heave,pitch";
+                    for (const auto& ln : detail.lineNames) o << "," << ln << "_top_N," << ln << "_min_segment_N," << ln << "_min_segment," << ln << "_slack_segments";
+                    o << "\n";
+                    const double t0 = detail.samples.back().t - 15.0 * T;
+                    std::vector<double> topMin(detail.lineNames.size(), 1e300), topMax(detail.lineNames.size(), 0.0), segMin(detail.lineNames.size(), 1e300);
+                    std::vector<int> maxSlack(detail.lineNames.size(), 0); std::vector<double> slackTime(detail.lineNames.size(), 0.0); double span = 0.0;
+                    for (size_t i = 0; i < detail.samples.size(); ++i) {
+                        const auto& sm = detail.samples[i];
+                        o << sm.t << "," << sm.xi[0] << "," << sm.xi[2] << "," << sm.xi[4];
+                        for (size_t k = 0; k < detail.lineNames.size(); ++k) o << "," << sm.topTension[k] << "," << sm.minTension[k] << "," << sm.minSegment[k] << "," << sm.numSlack[k];
+                        o << "\n";
+                        if (sm.t < t0) continue;
+                        const double dt = i + 1 < detail.samples.size() ? detail.samples[i + 1].t - sm.t : 0.0; span += dt;
+                        for (size_t k = 0; k < detail.lineNames.size(); ++k) {
+                            topMin[k] = std::min(topMin[k], sm.topTension[k]); topMax[k] = std::max(topMax[k], sm.topTension[k]);
+                            segMin[k] = std::min(segMin[k], sm.minTension[k]); maxSlack[k] = std::max(maxSlack[k], sm.numSlack[k]);
+                            if (sm.numSlack[k] > 0) slackTime[k] += dt;
+                        }
+                    }
+                    for (size_t k = 0; k < detail.lineNames.size(); ++k)
+                        std::printf("   %s: fairlead tension %.3f .. %.3f N, smallest segment tension %.4f N, max slack segments %d, time with any slack segment %.1f %% of the last 15 cycles\n",
+                                    detail.lineNames[k].c_str(), topMin[k], topMax[k], segMin[k], maxSlack[k], span > 0 ? 100.0 * slackTime[k] / span : 0.0);
+                }
                 std::fflush(stdout);
             }
         }

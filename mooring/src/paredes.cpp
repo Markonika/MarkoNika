@@ -147,7 +147,7 @@ const Tab34 kTab[] = {{1.30, 24.55, 31.73, 1057.8, 1.475, 26.23, 37.94, 817.9, 0
                       {1.50, 23.17, 14.05, 880.2, 1.519, 27.83, 37.47, 1016.4, 0.168, 0.2564, 0.01213, 25.86, -1.623, 1.1004, 0.4129}};
 }  // namespace
 
-ParedesRAO paredesWaveRAO(json cfg, double period, double height, double tEnd, int fitCycles, double dtBody, bool steadyStart, bool instantaneousSurface, const json* coefficients) {
+ParedesRAO paredesWaveRAO(json cfg, double period, double height, double tEnd, int fitCycles, double dtBody, bool steadyStart, bool instantaneousSurface, const json* coefficients, CoupledResult* detail) {
     const Tab34* c = nullptr;
     Tab34 fromFile{};
     if (coefficients) {
@@ -194,7 +194,7 @@ ParedesRAO paredesWaveRAO(json cfg, double period, double height, double tEnd, i
     }
     cfg["numerics"]["t_end_s"] = tEnd; cfg["numerics"]["dt_body_s"] = dtBody;
     cfg["output"]["write"] = false; cfg["output"]["dt_out_s"] = 0.01;
-    const CoupledResult r = runCoupledCase(cfg);
+    CoupledResult r = runCoupledCase(cfg);
     ParedesRAO o; o.finite = r.finite;
     const double om = 2.0 * kPi / period;
     o.a = 0.5 * height; o.k = WaveField::wavenumber(om, depth);
@@ -204,6 +204,7 @@ ParedesRAO paredesWaveRAO(json cfg, double period, double height, double tEnd, i
     o.surge = fitAmp(t, x1, om, t0, tEnd, &o.meanSurge) / o.a;
     o.heave = fitAmp(t, x3, om, t0, tEnd, nullptr) / o.a;
     o.pitch = fitAmp(t, x5, om, t0, tEnd, nullptr) / (o.k * o.a);
+    if (detail) *detail = std::move(r);
     return o;
 }
 

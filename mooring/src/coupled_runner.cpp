@@ -207,6 +207,7 @@ CoupledResult runCoupledCase(const json& cfg) {
         ts.open(dir + "/" + tag + "_timeseries.csv");
         ts << "time_s,surge,sway,heave,roll,pitch,yaw";
         for (const auto& n : res.lineNames) ts << "," << n << "_force_N," << n << "_top_tension_N";
+        for (const auto& n : res.lineNames) ts << "," << n << "_min_segment_tension_N," << n << "_min_segment," << n << "_slack_segments";
         ts << "\n";
     }
     auto sample = [&](double t) {
@@ -215,11 +216,14 @@ CoupledResult runCoupledCase(const json& cfg) {
             s.lineForce.push_back(norm(sys.lineForce(k)));
             const auto* lm = dynamic_cast<const LumpedMassCable*>(&sys.line(k));
             s.topTension.push_back(lm ? lm->endSegmentTension(true) : 0.0);
+            int ms = 0, ns = 0; const double mt = lm ? lm->minSegmentTension(&ms, &ns) : 0.0;
+            s.minTension.push_back(mt); s.minSegment.push_back(ms); s.numSlack.push_back(ns);
         }
         if (write) {
             char buf[128]; std::snprintf(buf, sizeof buf, "%.6f,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g", t, s.xi[0], s.xi[1], s.xi[2], s.xi[3], s.xi[4], s.xi[5]);
             ts << buf;
             for (size_t k = 0; k < s.lineForce.size(); ++k) { std::snprintf(buf, sizeof buf, ",%.9g,%.9g", s.lineForce[k], s.topTension[k]); ts << buf; }
+            for (size_t k = 0; k < s.lineForce.size(); ++k) { std::snprintf(buf, sizeof buf, ",%.9g,%d,%d", s.minTension[k], s.minSegment[k], s.numSlack[k]); ts << buf; }
             ts << "\n";
         }
         for (double v : s.xi) if (!std::isfinite(v)) res.finite = false;

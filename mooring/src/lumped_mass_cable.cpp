@@ -294,6 +294,23 @@ Vec3 LumpedMassCable::endTension(bool top) const {
     return len > 0 ? d * (segmentTension(r_, seg) / len) : Vec3();
 }
 
+double LumpedMassCable::minSegmentTension(int* segment, int* numSlack) const {
+    double tmin = 1e300; int smin = 0, slack = 0;
+    for (int seg = 0; seg < p_.N; ++seg) {
+        const Vec3 d = r_[seg + 1] - r_[seg];
+        const double len = norm(d), eps = len / seg_[seg].l0 - 1.0;
+        double T = 0.0;
+        if (eps > 0.0 && len > 0.0) {
+            const double epsDot = (seg_[seg].cint != 0.0 && v_.size() == r_.size()) ? dot(d, v_[seg + 1] - v_[seg]) / (len * seg_[seg].l0) : 0.0;
+            T = std::max(0.0, segTension(seg, eps, epsDot));
+        } else ++slack;
+        if (T < tmin) { tmin = T; smin = seg; }
+    }
+    if (segment) *segment = smin;
+    if (numSlack) *numSlack = slack;
+    return tmin;
+}
+
 double LumpedMassCable::endSegmentTension(bool top) const {
     const int seg = top ? p_.N - 1 : 0;
     const Vec3 d = r_[seg + 1] - r_[seg];

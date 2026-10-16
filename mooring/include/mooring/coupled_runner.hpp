@@ -14,6 +14,9 @@ struct CoupledSample {
     Vec6 xi;
     std::vector<double> lineForce;     // |force of line k on its fairlead| [N]
     std::vector<double> topTension;    // end-segment tension of line k at the fairlead [N] (lumped-mass lines)
+    std::vector<double> minTension;    // smallest segment tension of line k [N] (lumped-mass lines)
+    std::vector<int> minSegment;       // segment holding it
+    std::vector<int> numSlack;         // number of slack segments (zero tension) of line k
 };
 
 struct CoupledResult {

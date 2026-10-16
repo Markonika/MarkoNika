@@ -220,6 +220,9 @@ public:
     // Raw tension magnitude [N] in the end segment, including the c_int damping term (as in the force
     // evaluation, clipped at 0). Uses the current velocities.
     double endSegmentTension(bool top) const;
+    // Diagnostic over all segments (current shape and velocities): the smallest segment tension [N] (as in the force evaluation, clipped at 0), the index of that
+    // segment, and the number of slack segments (strain <= 0, i.e. zero tension).
+    double minSegmentTension(int* segment = nullptr, int* numSlack = nullptr) const;
     void setStepObserver(StepObserver o) { observer_ = std::move(o); }
 
     // ---- dynamics (milestone 2) ----
