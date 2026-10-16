@@ -213,5 +213,30 @@ No segment is slack in the analysis window in any variant.
   at finite rotation. A residual of about 4-6 % above the quasi-static value remains at the smallest amplitudes and is not explained.
 
 Status: the CON2 pitch excess is a **pretension-controlled nonlinear effect**; inertia, drag of the clump, discretisation, line resonance and loss of tension have each been excluded.
-The geometric large-rotation explanation (the small-angle body model at 0.2 rad pitch) is **consistent with every result but not demonstrated**: the discriminating test is a large-angle
-rigid-body formulation, which this code does not have. Until then the CON2 wave-pitch comparison with the measurements should be read as model-form limited at high pretension.
+~~The geometric large-rotation explanation~~ **(refuted by the quasi-static pitch curve below)**.
+
+### Quasi-static pitch curve: the geometric (large-rotation) explanation is refuted
+`paredes_report examples/paredes pitchcurve <cfg>` holds the pitch at offsets up to +-0.25 rad from the equilibrium angle, relaxes the other DOFs (lines in static equilibrium) and prints the
+line pitch moment. In this code the **fairlead positions already use the exact rotation** (`rotationFromVector`), so the geometric stiffness of the pretension at finite rotation is part of the
+line force; only the body's own dynamics (linear A, B, C, omega = d theta/dt) are small-angle.
+
+| theta [rad] | CON2 line moment [N m] | CON2 secant stiffness [N m/rad] | CON1 line moment [N m] | CON1 secant stiffness [N m/rad] |
+|---|---|---|---|---|
+| +0.05 | +0.0070 | 0.537 | -0.0588 | 1.188 |
+| +0.10 | -0.0194 | 0.533 | -0.1180 | 1.187 |
+| +0.20 | -0.0718 | 0.528 | -0.2369 | 1.187 |
+| +0.25 | -0.0979 | 0.527 | -0.2968 | 1.190 |
+| -0.05 | +0.0612 | 0.547 | +0.0603 (offset 0.0006) | 1.193 |
+| -0.10 | +0.0893 | 0.554 | +0.1204 | 1.198 |
+| -0.25 | +0.1794 | 0.582 | +0.3053 | 1.219 |
+
+(CON2 moment at theta = 0: +0.0338 N m, CON1: +0.0006 N m; tangent stiffness 0.541 and 1.19.) The secant stiffness varies by at most 2-8 % over +-0.25 rad (0.1 N m/rad or less), and the
+**total** line pitch moment at 0.25 rad is 0.1-0.3 N m. The CON2 time-domain excess is equivalent to a pitch-stiffness reduction of about 1.5 N m/rad (0.35 N m at 0.23 rad), i.e. several times the
+entire line moment. A large-angle rigid-body formulation cannot therefore be expected to remove it: **the geometric/large-rotation hypothesis is refuted, and the earlier statements that it was the most
+likely explanation (here, in the paper and in the roadmap) were wrong.** (Not covered by this test: simultaneous surge, heave and pitch of the actual motion, and the hull's own nonlinear hydrostatics, which affect
+every configuration equally and so cannot create a CON2-specific excess.)
+
+What remains: the excess is a **dynamic** line-body interaction (it is absent quasi-statically), grows with pretension (about its square) and with wave height, saturating at the highest height tested, and
+is not due to slack, clump inertia, clump drag, resonance of the 1.331 s line mode, or discretisation. The candidates left are the dynamics of the lines themselves (inertia, added mass and
+tension-dependent transverse stiffness at 1.3 s, which a quasi-static stiffness omits) and the quadratic drag of lines, floater and clump (without any drag the pitch is 4.1). The next
+discriminating tests are the linear dynamic stiffness of the legs at 1.3 s from the linearised line model (drag-free) and time-domain runs with drag, or inertia, switched off one at a time.

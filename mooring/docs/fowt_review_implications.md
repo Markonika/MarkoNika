@@ -12,7 +12,7 @@ cases and certification. That matches the scope of the code.
 ## Feature gap list (review-driven), against the current code
 | Review topic | Review statement | This code today | Priority |
 |---|---|---|---|
-| Large platform rotations | wave-frequency surge-pitch coupling dominates semi-submersibles; OC5: pitch under-predicted in steep waves | **small-angle rigid body**; our CON2 study shows a pretension-controlled excess at 0.23 rad pitch that this model form cannot be shown to represent | **1** (our own finding) |
+| Large platform rotations | wave-frequency surge-pitch coupling dominates semi-submersibles; OC5: pitch under-predicted in steep waves | linear body dynamics (constant A, B, C, omega = d theta/dt) with exact rotation of the fairlead positions; nonlinear hydrostatics and 3-D rotational dynamics are not modelled. The CON2 excess is **not** caused by this (see `bem_paredes.md`, quasi-static pitch curve) | 3 (for 3-D motions and large angles of other platforms; no longer tied to CON2) |
 | Second-order wave loads | difference-frequency (slow drift) mandatory for spar, recommended for semi; sum-frequency for TLP; OC5/OC6 main open gap; OpenFAST gained Newman approximation and full QTF import | first-order only (`wave_force_table`, Cummins); no mean drift, no QTF | **2** (Newman approximation first, QTF table import second) |
 | Viscous body damping | OC6 Ph. I: viscous drag on heave plates adds 15-25 % heave damping; potential-flow-only models miss it | body quadratic damping `Dq` exists but is zero in all validation cases (the Paredes thesis gives no values); radiation B only | 3 (needs data; do not guess coefficients) |
 | Shared mooring / multi-body | lines between adjacent floaters (about 30 % fewer anchors) are supported by MoorDyn v2 and are an emerging design trend | one rigid body per case | 3 |
@@ -34,7 +34,7 @@ cases and certification. That matches the scope of the code.
 * OC6 Phase II introduced experimental **uncertainty bounds**; our Paredes/Azcona comparisons use by-eye values and should report uncertainty the same way (already flagged in the paper).
 
 ## Suggested order
-1. Large-angle rigid-body formulation (resolves or refutes the CON2 explanation; benefits every platform case).
+1. Finish the CON2 investigation: linear dynamic stiffness of the legs at the wave frequency, then drag/inertia switched off one at a time (the large-angle body was tested as an explanation and refuted).
 2. Newman-approximation slow-drift force from a mean-drift table (Capytaine can supply first-order data; mean-drift/QTF data must come from a BEM that provides it), then full QTF table import.
 3. Fatigue post-processing (rainflow, S-N), line-removal (ALS) option, C API / FMU wrapper.
 4. Multi-body and shared mooring; 6-DOF buoys; bathymetry; quasi-static screening tool.

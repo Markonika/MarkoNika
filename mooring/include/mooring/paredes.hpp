@@ -28,6 +28,8 @@ ParedesStiffness paredesSurgeStiffness(const nlohmann::json& cfg, const std::vec
 // Mooring contribution to the heave stiffness (+-delta, N/m) and pitch stiffness (+-delta rad, N m/rad), other DOF free.
 double paredesHeaveStiffness(const nlohmann::json& cfg, double delta = 0.01);
 double paredesPitchStiffness(const nlohmann::json& cfg, double deltaRad = 0.017453292519943295);
+// Line pitch moment [N m] with the pitch held at the given offsets from the free-floating equilibrium angle and the other DOFs relaxed (lines in static equilibrium).
+std::vector<double> paredesPitchCurve(const nlohmann::json& cfg, const std::vector<double>& pitchOffsets);
 
 // Damped period [s] of DOF 'dof' from a free decay released from 'offset' (crest/trough method of the thesis,
 // sec. 5.5): time between the first and last crossing divided by the cycles in between. 0 if fewer than 3 crossings.

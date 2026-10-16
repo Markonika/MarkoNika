@@ -90,6 +90,19 @@ double paredesPitchStiffness(const json& cfg, double d) {
     return -(Mp - Mm) / (2.0 * d);
 }
 
+std::vector<double> paredesPitchCurve(const json& cfg, const std::vector<double>& pitchOffsets) {
+    auto sysPtr = buildCoupledSystem(cfg);
+    CoupledSystem& sys = *sysPtr;
+    sys.solveEquilibrium(1e-6);
+    const Vec6 xi0 = sys.body().xi;
+    std::vector<double> out;
+    for (double d : pitchOffsets) {
+        sys.body().xi = xi0;
+        out.push_back(heldEquilibrium(sys, 4, xi0[4] + d, nullptr)[4]);
+    }
+    return out;
+}
+
 double paredesDecayPeriod(json cfg, int dof, double offset, double tEnd, double dtBody) {
     cfg["numerics"]["t_end_s"] = tEnd;
     cfg["numerics"]["dt_body_s"] = dtBody;

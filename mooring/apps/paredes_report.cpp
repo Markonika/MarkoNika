@@ -81,6 +81,12 @@ int main(int argc, char** argv) {
                 std::fflush(stdout);
             }
         }
+        if (what == "pitchcurve") {
+            const std::vector<double> th = {0.0, 0.02, 0.05, 0.1, 0.15, 0.2, 0.25, -0.02, -0.05, -0.1, -0.15, -0.2, -0.25};
+            const std::vector<double> M = paredesPitchCurve(cfg, th);
+            std::printf("== %s line pitch moment at held pitch (others relaxed): theta [rad] / M [N m] / secant stiffness -(M-M0)/theta [N m/rad]\n", n);
+            for (size_t i = 0; i < th.size(); ++i) std::printf("   %+.2f  %+.4f  %s\n", th[i], M[i], i == 0 ? "-" : (std::to_string(-(M[i] - M[0]) / th[i])).c_str());
+        }
         if (all || what == "decay") {
             std::printf("== %s surge decay: T_d = %.3f s\n", n, paredesDecayPeriod(cfg, 0, 0.1, 45.0, 2e-3));
         }
