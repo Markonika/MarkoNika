@@ -271,3 +271,46 @@ The new `mooring_modes --dynstiff` (see `linearization.md`) gives the complex 6 
   and the comparison with the measurement, should not be regarded as a validated prediction until this sensitivity is quantified.
 
 Next discriminating test (not run): time-domain CON2 runs with the line and point-element drag scaled (for example x0.5 and x2, as a sensitivity, not a calibration), and a linear model with equivalent-linearised drag.
+
+### Drag sensitivity and wave forcing of the lines (CON2, T = 1.3 s, H = 0.08 m, BEM coefficients)
+The drag coefficients of the legs are assumptions (the thesis gives none for the rope, floater or clump): rope Cdt = 0.5 and Cdn = 2.5 (chain values), floater Cd = 0.5 (d = 0.135 m), clump Cd = 1.0 (d = 0.04 m).
+They were scaled in groups (**sensitivities, not calibrations**; base files unchanged). Quasi-static reference 2.047 (CON2), 1.941 (CON1).
+
+| drag scaling | pitch/(ka) | ratio to quasi-static |
+|---|---|---|
+| none at all (line, floater, clump = 0) | 4.097 | 2.00 |
+| all x0.25 | 2.207 | 1.078 |
+| all x0.5 | 2.284 | 1.116 |
+| as configured (x1) | 2.348 | 1.147 |
+| all x2 | 2.381 | 1.163 |
+| all x4 | 2.389 | 1.167 |
+| line (Cdt, Cdn) x0.5 / x2, floater and clump unchanged | 2.361 / 2.333 | 1.153 / 1.140 |
+| floater x0, line and clump unchanged | **2.072** | **1.012** |
+| floater x2 | 2.417 | 1.181 |
+| clump x0 (earlier run) | 2.371 | 1.158 |
+| CON1, all drag x0.5 / x1 / x2 | 1.947 / 1.957 / 1.974 | 1.003 / 1.008 / 1.017 |
+
+* **The floater drag controls the CON2 excess:** with the floater drag removed the response returns to the quasi-static value (+1.2 %); doubling it raises it to +18 %. The line drag (x0.5 to x2) and clump drag do not change it,
+  yet removing all drag at once gives 4.1: some dissipation in the legs is needed to suppress the leg resonances found in the linear dynamic analysis, and with the floater absent the line drag provides it. The response is
+  therefore a saturating function of the drag level (2.21-2.39 for all drag between x0.25 and x4) and a strong function only of the floater.
+* **CON1 is insensitive** to all its drag (including its own floater, same Cd), consistent with its legs being quasi-static at the wave frequency.
+* **The assumed drag does not remove the disagreement with the measurement:** even with the floater drag at zero the CON2 pitch (2.07) is above the measured band (1.7-1.95), and the whole range tested
+  (2.07-2.42, and 2.21-2.39 for any drag between x0.25 and x4) is above it. The quasi-static value itself (2.047) is already above the band, so the hull model, not the drag, carries most of the CON2 pitch discrepancy.
+  Not run: line drag alone at zero, which would separate the line from the floater in the no-drag case.
+
+### Wave forcing of the lines is not the cause (`waves.apply_to_lines = false`)
+A diagnostic switch (new, `docs/config.md`) puts the lines and point elements in still water while the body keeps its wave excitation. The floater and line drag on the wave particle velocity could have fed a wave force into the legs.
+It does not: pitch/(ka) is unchanged.
+
+| run | lines in the waves (default) | lines in still water |
+|---|---|---|
+| CON2, H = 0.08 m | 2.348 | 2.347 |
+| CON2, H = 0.02 m | 2.128 | 2.134 |
+| CON2 clump x0.5 (H = 0.08) | 2.050 | 2.029 |
+| CON2 clump x1.5 (H = 0.08) | 2.963 | 2.959 |
+| CON1, H = 0.08 m | 1.957 | 1.937 |
+
+So the excess, its pretension dependence and its wave-height dependence arise from the legs' response to the **body's own motion**; direct wave forcing of the lines is excluded (a hypothesis I had considered and which is refuted).
+
+Status of the CON2 pitch excess (summary): it is a dynamic response of the legs to the fairlead motion, controlled by the pretension and by the assumed floater drag; excluded are slack, clump inertia and drag, discretisation,
+large-rotation geometry, a 1.331 s resonance peak, and wave forcing of the lines. The detailed mechanism (how the floater drag turns the lightly damped leg modes into the observed smooth enhancement) is **not resolved**.
