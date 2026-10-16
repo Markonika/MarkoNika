@@ -6,7 +6,7 @@ Geometry (from the thesis data used in docs/paredes_validation.md): vertical cyl
 centre of gravity 0.1002 m below the waterline (examples/paredes: cg_ref 0.7998 m with the free surface at 0.9 m), depth 0.9 m, rho = 1000.
 Output: JSON table with, per period, A and B (6x6, only the surge-heave-pitch block is non-zero) and the excitation w = |F|, delta = -arg(F) in the
 convention F(t) = w a sin(omega t + delta) for an elevation a sin(omega t) at x = 0 (waves along +x), the convention of the mooring code.
-usage: bem_paredes_buoy.py OUT.json [mesh_resolution_factor]"""
+usage: bem_paredes_buoy.py OUT.json [mesh_resolution_factor] [comma-separated periods in s]"""
 import json, sys
 import numpy as np
 import capytaine as cpt
@@ -24,7 +24,7 @@ mesh = cpt.mesh_vertical_cylinder(length=draft + top, radius=R, center=(0, 0, -d
 body = cpt.FloatingBody(mesh, dofs=cpt.rigid_body_dofs(rotation_center=(0.0, 0.0, zcg))).immersed_part(free_surface=0.0)
 print("D = %.4f m, mesh %s -> %d wetted panels, displaced volume %.5f m^3 (cylinder %.5f)" % (D, res, body.mesh.nb_faces, body.volume, np.pi * R ** 2 * draft), file=sys.stderr)
 
-periods = [0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.8, 2.0, 2.3, 2.6, 3.0, 3.5, 4.0, 5.0]
+periods = [float(x) for x in sys.argv[3].split(",")] if len(sys.argv) > 3 else [0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.8, 2.0, 2.3, 2.6, 3.0, 3.5, 4.0, 5.0]
 solver = cpt.BEMSolver()
 names = ["Surge", "Sway", "Heave", "Roll", "Pitch", "Yaw"]
 rows = []

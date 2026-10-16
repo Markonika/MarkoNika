@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <string>
+#include <vector>
 #include "mooring/paredes.hpp"
 
 using namespace mooring;
@@ -44,9 +45,9 @@ int main(int argc, char** argv) {
             std::printf("\n   heave Km = %.2f N/m, pitch Km = %.3f N m/rad\n", paredesHeaveStiffness(cfg), paredesPitchStiffness(cfg));
         }
         if (what == "waves") {
-            for (double T : {1.30, 1.40, 1.50}) {
-                if (argc > 6 && std::fabs(std::atof(argv[6]) - T) > 1e-6) continue;           // optional: a single period
-                if (argc <= 6 && T > 1.45) continue;                                         // default: the two periods with measured RAOs
+            std::vector<double> periods = {1.30, 1.40};
+            if (argc > 6) periods = {std::atof(argv[6])};                                // optional: a single period (any period present in the coefficient file)
+            for (double T : periods) {
                 const ParedesRAO r = paredesWaveRAO(cfg, T, 0.08, 30.0, 15, 2e-3, true, argc > 4 && std::string(argv[4]) == "inst", haveCoef ? &coef : nullptr);
                 std::printf("== %s regular waves H = 0.08 m, T = %.2f s: RAO surge %.3f, heave %.3f, pitch/(ka) %.3f (mean surge offset %.4f m)\n", n, T, r.surge, r.heave, r.pitch, r.meanSurge);
                 std::fflush(stdout);
