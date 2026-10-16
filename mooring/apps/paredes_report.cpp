@@ -1,5 +1,5 @@
 // Copyright (c) Marko Nika. All rights reserved. Proprietary and confidential.
-// Usage: paredes_report [dir_with_configs] [statics|stiffness|free|decay|waves|all] [con1|con2|cat] [inst|-] [coefficient_json|-] [period_s]
+// Usage: paredes_report [dir_with_configs] [statics|stiffness|free|decay|waves|all] [con1|con2|cat] [inst|-] [coefficient_json|-] [period_s] [wave_height_m]
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -48,8 +48,8 @@ int main(int argc, char** argv) {
             std::vector<double> periods = {1.30, 1.40};
             if (argc > 6) periods = {std::atof(argv[6])};                                // optional: a single period (any period present in the coefficient file)
             for (double T : periods) {
-                const ParedesRAO r = paredesWaveRAO(cfg, T, 0.08, 30.0, 15, 2e-3, true, argc > 4 && std::string(argv[4]) == "inst", haveCoef ? &coef : nullptr);
-                std::printf("== %s regular waves H = 0.08 m, T = %.2f s: RAO surge %.3f, heave %.3f, pitch/(ka) %.3f (mean surge offset %.4f m)\n", n, T, r.surge, r.heave, r.pitch, r.meanSurge);
+                const ParedesRAO r = paredesWaveRAO(cfg, T, argc > 7 ? std::atof(argv[7]) : 0.08, 30.0, 15, 2e-3, true, argc > 4 && std::string(argv[4]) == "inst", haveCoef ? &coef : nullptr);
+                std::printf("== %s regular waves H = %.3f m, T = %.2f s: RAO surge %.3f, heave %.3f, pitch/(ka) %.3f (mean surge offset %.4f m)\n", n, argc > 7 ? std::atof(argv[7]) : 0.08, T, r.surge, r.heave, r.pitch, r.meanSurge);
                 std::fflush(stdout);
             }
         }
