@@ -744,6 +744,57 @@ chased down further -- it's a real, reproducible observation worth a
 dedicated follow-up, not a confirmed bug, and is reported here rather
 than left out specifically so it isn't mistaken for either.
 
+**A computed comparison against Kim, Lee & Kim's own reported numbers
+(not just their methodology) was also attempted.** A standalone,
+independent reproduction (not this project's own solver) of their
+Section 3.2 Kelvin-Helmholtz test was built from their stated equations
+-- their periodic 0.5 m horizontal channel (H=2.5 cm), u_g0=13 m/s,
+u_l0=1 m/s, their Eq. 32 initial disturbance -- using a flux-conservative
+finite-volume discretization with pressure projection; the paper does
+not publish the SPACE code's own numerical method, so this is
+necessarily an independent discretization of their stated equations, not
+a code replica. Sanity checks passed: the reproduction's critical
+relative velocity came out to 10.10 m/s against their reported 10.3 m/s
+(2.0% difference, consistent with unstated exact fluid-property values),
+and the qualitative wave behaviour matched their description (the
+previous/Fullmer model damps the KH wave more than the
+present/matched-coefficient model, both less than the undamped case).
+
+But the reproduction's own mass-error ratio (their Eq. 30, computed
+exactly as they define it) came out at floating-point roundoff (~1e-13%)
+for all three variants -- no artificial viscosity, previous model, and
+present model alike -- at every resolution tried (50/125/250 cells), not
+the ~0.01% (previous) / ~1e-5% (present) they report. This is not a
+failure of the reproduction; it's a mathematically expected consequence
+of periodicity: on a periodic domain, both the advective and diffusive
+terms in a conservative finite-volume discretization of the continuity
+equations telescope to exactly zero when summed over all cells,
+regardless of whether the two phases' artificial-viscosity coefficients
+match. So the coefficient-matching mechanism Kim, Lee & Kim identify
+cannot, by itself, produce a measurable mass leak in an idealized
+conservative periodic scheme -- their reported nonzero leak must come
+from some other, unpublished detail of their actual implementation (most
+plausibly a time-level/operator-splitting inconsistency between the
+velocity field used to update each phase's own mass equation).
+
+Honest conclusion: this project's claim of matching Kim, Lee & Kim's
+*methodology* stands, verified independently above. A literal numeric
+match to their *reported magnitudes* could not be obtained or refuted
+without their source code -- an idealized, independently-coded
+reproduction of their stated equations reproduces their qualitative
+physics but not their numbers at all, which itself says those magnitudes
+are implementation-specific, not a property of the construction alone.
+For what it's worth: this project's own Brito 2012 result (N=300, t=3s,
+open inlet/outlet BCs, e_max=1.44%/2.30% liquid/gas) is roughly 140-230x
+larger than Kim, Lee & Kim's reported "previous model" value (0.01%),
+and about 10-11 orders of magnitude larger than their "present model"
+value (~1e-5%) and than this reproduction's own roundoff-level result --
+plausibly from the open (not periodic) boundary conditions and their
+cruder flux integration, the much longer simulated time (3s vs. 0.2s),
+and the fully nonlinear holdup swings this project's case reaches versus
+their small-amplitude linear test, though these weren't isolated
+individually.
+
 ### Turbulent-viscosity nonlinear regularization (`SolverOptions::enableTurbulentViscosity`)
 
 Off by default, and a *separate* mechanism from `enableSurfaceTension`

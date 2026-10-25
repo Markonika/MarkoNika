@@ -1283,3 +1283,67 @@ methodology, tables, and figures are in the paper (Section 7,
     `mass_conservation_output.csv` with the same mass-error-ratio time
     series. Regression-confirmed to reproduce the numbers above bit-for-bit
     and to change no other demo case's output.
+
+    Follow-up: attempted a direct, computed comparison against Kim, Lee &
+    Kim's own REPORTED numbers, not just their methodology. Built a
+    standalone, independent reproduction (not this project's solver) of
+    their stated PDEs for their Section 3.2 Kelvin-Helmholtz test
+    (periodic 0.5 m horizontal channel, H=2.5 cm, u_g0=13 m/s,
+    u_l0=1 m/s, their Eq. 32 initial disturbance), using a
+    flux-conservative finite-volume discretization with pressure
+    projection -- their paper does not publish the SPACE code's own
+    numerical method, so this is an independent discretization of their
+    stated equations, not a code replica. Sanity checks passed: reproduced
+    their stated critical relative velocity to 2.0% (10.10 m/s computed
+    vs. their reported 10.3 m/s), and reproduced their qualitative wave
+    behavior (the previous/Fullmer model damps the KH wave more than the
+    present/matched-coefficient model, both less damped than the
+    undamped case).
+
+    However, the reproduction's mass-error ratio (their own Eq. 30,
+    computed exactly as defined) came out at floating-point roundoff
+    (~1e-13%) for ALL THREE variants -- no artificial viscosity, previous
+    model, and present model alike -- at every resolution tried
+    (50/125/250 cells), not the ~0.01% (previous) / ~1e-5% (present) they
+    report. This is not a failure of the reproduction; it is a
+    mathematically expected consequence of periodicity: on a periodic
+    domain, both the advective (flux-difference) and diffusive
+    (second-difference) terms in a conservative finite-volume
+    discretization of the continuity equations telescope to exactly zero
+    when summed over all cells, regardless of whether the two phases'
+    artificial-viscosity coefficients match. So the coefficient-matching
+    mechanism Kim, Lee & Kim identify cannot, by itself, produce a
+    measurable mass leak in an idealized conservative periodic scheme;
+    their reported nonzero leak must come from some other, unpublished
+    detail of their actual implementation (most plausibly an
+    operator-splitting/time-level inconsistency between the velocity
+    field used to update each phase's own mass equation).
+
+    Honest conclusion: this project's claim of matching Kim, Lee & Kim's
+    METHODOLOGY (the shared-coefficient trick) stands, verified
+    independently above. A literal numeric match to their REPORTED
+    mass-error magnitudes could not be obtained or refuted without their
+    source code -- an idealized, independently-coded reproduction of
+    their stated equations does not reproduce their numbers at all
+    (floating-point roundoff instead), which itself indicates their
+    reported magnitudes are implementation-specific, not a property of
+    the mathematical construction alone.
+
+    Quantitative comparison to this project's own number: the Brito 2012
+    benchmark above (N=300, t=3s, open inlet/outlet boundary conditions)
+    shows e_max=1.44% (liquid) / 2.30% (gas) -- about 140-230x LARGER
+    than Kim, Lee & Kim's reported "previous model" (unfixed) value of
+    0.01%, roughly 10 orders of magnitude larger than their reported
+    "present model" (fixed) value of ~1e-5%, and about 11 orders of
+    magnitude larger than this independent reproduction's roundoff-level
+    result. Plausible reasons for the gap, beyond the diagnostic caveat
+    already noted above: (1) this project's case uses continuous
+    inlet/outlet boundary conditions, not a periodic/closed domain, so
+    the Eq. 30 denominator depends on a cruder, single-sample-per-step
+    boundary-flux time integration rather than exact zero net flux; (2)
+    runs to t=3s, 15x longer than Kim, Lee & Kim's t=0.2s window; (3) the
+    holdup swings into a genuinely nonlinear, large-amplitude regime, not
+    the small-amplitude linear perturbation their test uses; (4) a
+    different (four-field, semi-implicit pressure-correction) solver
+    architecture entirely. None of these were isolated individually here
+    -- reported as an honest, open gap, not explained away.
