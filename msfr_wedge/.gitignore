@@ -1,0 +1,8 @@
+# Simulation run artifacts (regenerable by running the .flml) -- not tracked
+run*.log
+*.stat
+*checkpoint*
+msfr_wedge_[0-9]*.vtu
+msfr_wedge_[0-9]*.pvtu
+matrixdump
+matrixdump.info
