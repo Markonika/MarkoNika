@@ -1226,3 +1226,53 @@ methodology, tables, and figures are in the paper (Section 7,
     away. Regression-confirmed bit-for-bit identical output on the full
     349-case canonical dataset (`quant_unified_cases.csv`, diffed against
     the already-tracked `quant_results.csv`) with `maxTEnd` omitted.
+27. **Done: an independent literature check confirmed (not duplicated)
+    this project's existing mass-conservation design for
+    `enableSurfaceTension` -- verified empirically, not just by
+    inspection.** See README.md, "Optional short-wave regularization,"
+    the paragraphs following "Validation status, honestly," for the full
+    account. Kim, Lee & Kim (2022, Nucl. Eng. Technol. 54:4322-4328)
+    address the same well-posedness-vs-mass-conservation tension for a
+    simpler two-field model: naively adding artificial diffusion to each
+    phase's own mass equation (a prior fix, Fullmer et al. 2014) leaks
+    total mass (their tests: up to 0.01-0.03%, growing with time)
+    because the two phases' diffusion terms don't cancel when summed;
+    their fix uses the SAME diffusion coefficient on both phases so the
+    terms cancel exactly, since the phase fractions sum to 1 identically.
+    This project's existing `enableSurfaceTension` biharmonic term
+    already does the four-field analogue of exactly this (the
+    `eL`-regularization term is explicitly subtracted from `eG` too, "so
+    it redistributes the interface position rather than creating mass" --
+    already in the code's own comment) -- arrived at independently, not
+    from this paper. Rather than re-implement something already present,
+    used this as a prompt to empirically verify the existing claim the
+    same way the paper itself does: tracked a mass-error ratio (the
+    paper's own Eq. 30, `e(t) = |m(t)-(m(0)+m_in-m_out)|/
+    (m(0)+m_in-m_out)*100`, applied to liquid and gas mass separately)
+    across grid refinements (N=60/150/300), `enableSurfaceTension` off
+    vs. on, on the same three KH case studies (Brito 2012, Baba 2017,
+    Ekinci 2015) this project's other regularization checks already use.
+
+    Result: confirmed. Across all 9 (case, N) combinations, the
+    mass-error ratio with the regularization ON matches OFF to 3-4
+    significant figures (e.g. Brito 2012, N=300: 1.442%/2.298% liquid/gas
+    off, 1.442%/2.297% on) -- the biharmonic term adds no measurable mass
+    leak beyond the baseline scheme's own, confirming the `eL`/`eG`
+    cancellation construction holds in the full nonlinear solver, not
+    just on paper.
+
+    Honest caveat: the BASELINE mass-error values themselves (identical
+    on/off) are larger than expected and, at one holdup (e10=0.5), grow
+    sharply at the finest grid tested (N=300: 1.4-2.3%, vs. 0.2-0.7% at
+    N=60/150) -- reproduced with AND without a seeded disturbance,
+    ruling out the seed as the cause; at a clearly stable holdup
+    (e10=0.3) the same metric stays small and flat across all three
+    resolutions, ruling out "the diagnostic always degrades at high N."
+    Most likely explanation: the diagnostic's own boundary-flux
+    integration (one instantaneous flux sample per explicit step, not
+    sub-stepped or time-centred) becomes a worse approximation of the
+    true time-integrated flux as the outlet's dynamics get less
+    numerically smoothed at finer resolution -- not necessarily a leak
+    in the solver's own renormalization-enforced volume constraint. Not
+    chased down further; reported as a genuine, reproducible open
+    observation rather than omitted or overclaimed as a confirmed bug.

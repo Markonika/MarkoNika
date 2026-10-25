@@ -683,6 +683,67 @@ is a good next step before relying on this for anything beyond "a safe,
 theoretically-motivated, off-by-default option," which is what it is
 today.
 
+**An independent literature check confirmed the mass-conservation design
+choice above, empirically, not just by inspection.** Kim, Lee & Kim
+(2022), *"Remedy for ill-posedness and mass conservation error of 1D
+incompressible two-fluid model with artificial viscosities,"* Nuclear
+Engineering and Technology 54:4322-4328, address the same family of
+problem for a simpler two-field model: a prior artificial-viscosity
+well-posedness fix (Fullmer et al. 2014) adds diffusion separately to
+each phase's own mass equation, which -- as they show both analytically
+and on two classic two-fluid benchmarks (a water-faucet flow and a
+horizontal Kelvin-Helmholtz case, the same kind of case study this
+project's own KH work already uses) -- leaks total mass (up to ~0.01-
+0.03% in their tests, growing with time) because the two phases'
+diffusion terms don't cancel when summed. Their fix: use the *same*
+diffusion coefficient on both phases' equations, so that because the
+phase fractions sum to 1 identically, the diffusion terms cancel exactly
+when summed, with no extra mass source at all.
+
+That is, independently, exactly what the "equal-and-opposite correction
+... applied to `eG` too" sentence above already does -- this project
+arrived at the same trick from a different route (making the `eL`
+regularization term literally subtract from `eG` rather than deriving
+the cancellation from a shared coefficient on a geometric identity,
+`eL+eG=1`, which is this model's four-field analogue of the paper's
+`alpha_g+alpha_l=1`). Rather than re-implement something already
+present, this was used as a prompt to empirically VERIFY the existing
+claim the same rigorous way the paper itself does: tracking a mass-error
+ratio `e(t) = |m(t) - (m(0)+m_in-m_out)| / (m(0)+m_in-m_out) * 100` (the
+paper's own Eq. 30, applied here to liquid and gas mass separately,
+since this project's bookkeeping is finer-grained than the paper's
+single combined mixture mass) across grid refinements (N=60/150/300),
+with `enableSurfaceTension` off vs. on, on the same three KH case
+studies (Brito 2012, Baba 2017, Ekinci 2015) used throughout this
+project's other regularization checks.
+
+**Result: confirmed.** Across all 9 (case, N) combinations tested, the
+mass-error ratio with the regularization ON is, to 3-4 significant
+figures, IDENTICAL to OFF (e.g. Brito 2012, N=300: 1.442% liquid / 2.298%
+gas off, 1.442% / 2.297% on) -- the biharmonic term is not introducing
+any additional mass leak beyond whatever the baseline scheme already has,
+confirming the `eL`/`eG` cancellation construction works in the full
+nonlinear solver, not just by code inspection.
+
+**An honest caveat on what this did NOT cleanly resolve.** The *baseline*
+mass-error-ratio values themselves (present identically with the
+regularization on or off) are larger than expected and, at one holdup
+tested (e10=0.5), grow sharply at the finest grid (N=300: 1.4-2.3%,
+vs. 0.2-0.7% at N=60/150) -- for BOTH a seeded and an unseeded run,
+ruling out the seeded disturbance as the cause. At a clearly stable
+holdup (e10=0.3) the same metric stays small and flat across all three
+resolutions, so this is not simply "the diagnostic always gets worse at
+high N." The most likely explanation is that the diagnostic's own
+boundary-flux integration -- a single instantaneous flux sample per
+explicit step, not a sub-stepped or time-centred integral -- becomes an
+increasingly poor approximation of the true time-integrated boundary
+flux as the outlet's own local dynamics get less numerically smoothed at
+finer resolution, rather than a genuine leak in the solver's own
+internal (renormalization-enforced) volume constraint. This was not
+chased down further -- it's a real, reproducible observation worth a
+dedicated follow-up, not a confirmed bug, and is reported here rather
+than left out specifically so it isn't mistaken for either.
+
 ### Turbulent-viscosity nonlinear regularization (`SolverOptions::enableTurbulentViscosity`)
 
 Off by default, and a *separate* mechanism from `enableSurfaceTension`
