@@ -1276,3 +1276,10 @@ methodology, tables, and figures are in the paper (Section 7,
     in the solver's own renormalization-enforced volume constraint. Not
     chased down further; reported as a genuine, reproducible open
     observation rather than omitted or overclaimed as a confirmed bug.
+
+    This check is now a permanent, reproducible benchmark: `mfs_demo
+    mass_conservation` reruns exactly the Brito 2012 case above across
+    N=60/150/300 and `enableSurfaceTension` off/on, writing
+    `mass_conservation_output.csv` with the same mass-error-ratio time
+    series. Regression-confirmed to reproduce the numbers above bit-for-bit
+    and to change no other demo case's output.

@@ -50,6 +50,17 @@
 //                         Leer, Superbee) in the field continuity
 //                         equations. Reduces numerical diffusion of a
 //                         forming front without touching the mesh itself.
+//   mfs_demo mass_conservation
+//                         A Kelvin-Helmholtz case study (Brito 2012, the
+//                         same one used elsewhere in this project's
+//                         regularization checks), tracking a mass-error
+//                         ratio (Kim, Lee & Kim 2022's own methodology)
+//                         against time, across three mesh resolutions,
+//                         with SolverOptions::enableSurfaceTension off vs.
+//                         on -- verifying that the biharmonic term's
+//                         eL/eG "equal and opposite" construction adds no
+//                         measurable mass leak beyond the baseline
+//                         scheme's own. See VALIDATION.md, item 27.
 //
 // Each case writes a CSV time-series of cell-centred fields to
 // "<case>_output.csv" (one block of rows per snapshot) and prints a
@@ -400,6 +411,99 @@ void runTerrainCase() {
     std::cout << "Wrote terrain_output.csv\n\n";
 }
 
+// Mass-conservation benchmark for SolverOptions::enableSurfaceTension,
+// methodology directly from Kim, Lee & Kim (2022, Nucl. Eng. Technol.
+// 54:4322-4328), Eq. (30): track a mass-error ratio
+// e(t) = |m(t) - (m(0)+m_in-m_out)| / (m(0)+m_in-m_out) * 100 against
+// time, across mesh resolutions, with the regularization on vs. off, on
+// the same Brito (2012) Kelvin-Helmholtz case study this project's other
+// regularization checks already use. The paper finds a prior artificial-
+// viscosity well-posedness fix (Fullmer et al. 2014) leaks total mass
+// because it diffuses each phase's mass equation with its own
+// coefficient; this project's enableSurfaceTension already applies its
+// biharmonic term to eL and the EXACT SAME quantity, negated, to eG (see
+// FourFieldSolver.cpp, updateContinuity()), the four-field analogue of
+// that paper's fix (a shared coefficient so the phases' diffusion terms
+// cancel when summed, since the phase fractions sum to 1 identically).
+// This benchmark verifies that claim empirically rather than by
+// inspection: see VALIDATION.md, item 27, for the full account and the
+// result already recorded from this exact methodology.
+void runMassConservationBenchmark() {
+    std::cout << "=== Mass-conservation benchmark for SolverOptions::enableSurfaceTension\n"
+                 "    (Kim, Lee & Kim 2022 methodology): mass-error ratio vs. time, across\n"
+                 "    mesh resolutions, regularization on vs. off. ===\n";
+
+    const double D = 0.051, thetaDeg = 0.0;
+    const double Vsl = 0.055365784383465656, Vsg = 2.6420445461549353;
+    const double rhoL = 859.8021132828677, rhoG = 1.1694722577783099;
+    const double muL = 0.054, muG = 1.02e-05, sigmaST = 0.0275;
+    const double e10 = 0.5;
+    const double L = std::clamp(60.0 * D, 0.6, 20.0);
+    const double tEnd = 3.0;
+    const double snapshotInterval = tEnd / 150.0;
+
+    std::ofstream out("mass_conservation_output.csv");
+    out << "N,surfaceTension,time,eLiq_pct,eGas_pct\n";
+
+    for (int N : {60, 150, 300}) {
+        for (bool surfaceTension : {false, true}) {
+            mfs::FluidProperties fluid;
+            fluid.rhoLiquid = rhoL; fluid.muLiquid = muL; fluid.sigma = sigmaST; fluid.muGas = muG;
+            fluid.temperature = 293.0;
+            fluid.gasConstant = 101325.0 / (rhoG * fluid.temperature);
+            mfs::SolverOptions opt;
+            opt.enableSurfaceTension = surfaceTension;
+            mfs::FourFieldSolver solver(D, L, N, fluid, opt);
+            solver.setInclinationConstant(thetaDeg * mfs::constants::pi / 180.0);
+
+            mfs::BoundaryConditions bc;
+            bc.inletSuperficialLiquid = Vsl;
+            bc.inletSuperficialGas = Vsg;
+            bc.inletLiquidHoldup = e10;
+            bc.outletPressure = 101325.0;
+            bc.seedDisturbance = true;
+            bc.disturbanceAmplitude = 0.05;
+            bc.disturbanceFrequency = 0.8;
+            solver.setBoundaryConditions(bc);
+            solver.initializeStratified(e10);
+
+            const double mLiq0 = solver.totalLiquidMass();
+            const double mGas0 = solver.totalGasMass();
+            double liqInIntegral = 0.0, liqOutIntegral = 0.0, gasInIntegral = 0.0, gasOutIntegral = 0.0;
+            double eLiqMax = 0.0, eGasMax = 0.0;
+            double nextSnapshot = 0.0;
+
+            while (solver.time() < tEnd) {
+                const double dt = solver.stableTimeStep();
+                const auto mfBefore = solver.boundaryMassFluxes();
+                solver.step(dt);
+                liqInIntegral += mfBefore.liquidIn * dt;
+                liqOutIntegral += mfBefore.liquidOut * dt;
+                gasInIntegral += mfBefore.gasIn * dt;
+                gasOutIntegral += mfBefore.gasOut * dt;
+
+                const double mLiqExpected = mLiq0 + liqInIntegral - liqOutIntegral;
+                const double mGasExpected = mGas0 + gasInIntegral - gasOutIntegral;
+                const double eLiq = std::fabs(solver.totalLiquidMass() - mLiqExpected) /
+                                     std::max(std::fabs(mLiqExpected), 1e-30) * 100.0;
+                const double eGas = std::fabs(solver.totalGasMass() - mGasExpected) /
+                                     std::max(std::fabs(mGasExpected), 1e-30) * 100.0;
+                eLiqMax = std::max(eLiqMax, eLiq);
+                eGasMax = std::max(eGasMax, eGas);
+
+                if (solver.time() >= nextSnapshot) {
+                    out << N << ',' << (surfaceTension ? 1 : 0) << ',' << solver.time() << ','
+                        << eLiq << ',' << eGas << '\n';
+                    nextSnapshot += snapshotInterval;
+                }
+            }
+            std::cout << "N=" << N << "  surfaceTension=" << surfaceTension
+                      << "  eLiq_max=" << eLiqMax << "%  eGas_max=" << eGasMax << "%\n";
+        }
+    }
+    std::cout << "Wrote mass_conservation_output.csv\n\n";
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -417,6 +521,8 @@ int main(int argc, char** argv) {
         runHorizontalMovingMeshComparison();
     } else if (caseName == "horizontal_limiter") {
         runHorizontalLimiterComparison();
+    } else if (caseName == "mass_conservation") {
+        runMassConservationBenchmark();
     } else if (caseName == "all") {
         runHorizontalCase(/*useAmr=*/false, /*useMovingMesh=*/false, "horizontal_output.csv");
         runVerticalCase();
@@ -424,10 +530,11 @@ int main(int argc, char** argv) {
         runHorizontalAmrComparison();
         runHorizontalMovingMeshComparison();
         runHorizontalLimiterComparison();
+        runMassConservationBenchmark();
     } else {
         std::cerr << "Unknown case '" << caseName
                    << "'. Use one of: horizontal, vertical, terrain, horizontal_amr, "
-                      "horizontal_movingmesh, horizontal_limiter, all\n";
+                      "horizontal_movingmesh, horizontal_limiter, mass_conservation, all\n";
         return 1;
     }
     return 0;
