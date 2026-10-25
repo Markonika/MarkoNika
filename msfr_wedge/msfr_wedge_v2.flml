@@ -1,0 +1,411 @@
+<?xml version='1.0' encoding='utf-8'?>
+<fluidity_options>
+  <simulation_name>
+    <string_value lines="1">msfr_wedge_v2</string_value>
+  </simulation_name>
+  <problem_type>
+    <string_value lines="1">fluids</string_value>
+  </problem_type>
+  <geometry>
+    <dimension>
+      <integer_value rank="0">3</integer_value>
+    </dimension>
+    <mesh name="CoordinateMesh">
+      <from_file file_name="msfr_wedge_v2">
+        <format name="gmsh"/>
+        <stat>
+          <include_in_stat/>
+        </stat>
+      </from_file>
+    </mesh>
+    <mesh name="VelocityMesh">
+      <from_mesh>
+        <mesh name="CoordinateMesh"/>
+        <stat>
+          <exclude_from_stat/>
+        </stat>
+      </from_mesh>
+    </mesh>
+    <mesh name="PressureMesh">
+      <from_mesh>
+        <mesh name="CoordinateMesh"/>
+        <stat>
+          <exclude_from_stat/>
+        </stat>
+      </from_mesh>
+    </mesh>
+    <quadrature>
+      <degree>
+        <integer_value rank="0">3</integer_value>
+      </degree>
+    </quadrature>
+  </geometry>
+  <io>
+    <dump_format>
+      <string_value>vtk</string_value>
+    </dump_format>
+    <dump_period>
+      <constant>
+        <real_value rank="0">1.0</real_value>
+      </constant>
+    </dump_period>
+    <output_mesh name="VelocityMesh"/>
+    <checkpointing>
+      <checkpoint_period_in_dumps>
+        <integer_value rank="0">5</integer_value>
+      </checkpoint_period_in_dumps>
+    </checkpointing>
+    <stat/>
+  </io>
+  <timestepping>
+    <current_time>
+      <real_value rank="0">0</real_value>
+    </current_time>
+    <timestep>
+      <real_value rank="0">0.02</real_value>
+    </timestep>
+    <finish_time>
+      <real_value rank="0">10.0</real_value>
+    </finish_time>
+    <nonlinear_iterations>
+      <integer_value rank="0">2</integer_value>
+    </nonlinear_iterations>
+  </timestepping>
+  <physical_parameters/>
+  <material_phase name="FuelSalt">
+    <!--
+      Thermophysical properties at the 675 degC mean core temperature,
+      sourced from Fang et al. (2024), Nucl. Eng. Des. 424, 113294, Table 1.
+    -->
+    <equation_of_state>
+      <fluids>
+        <linear>
+          <reference_density>
+            <real_value rank="0">4147.29</real_value>
+          </reference_density>
+        </linear>
+      </fluids>
+    </equation_of_state>
+    <scalar_field rank="0" name="Pressure">
+      <prognostic>
+        <mesh name="PressureMesh"/>
+        <spatial_discretisation>
+          <continuous_galerkin/>
+        </spatial_discretisation>
+        <scheme>
+          <poisson_pressure_solution>
+            <string_value lines="1">only first timestep</string_value>
+          </poisson_pressure_solution>
+          <use_projection_method/>
+        </scheme>
+        <solver>
+          <iterative_method name="cg"/>
+          <preconditioner name="mg"/>
+          <relative_error>
+            <real_value rank="0">1.0e-6</real_value>
+          </relative_error>
+          <max_iterations>
+            <integer_value rank="0">1000</integer_value>
+          </max_iterations>
+          <never_ignore_solver_failures/>
+          <diagnostics>
+            <monitors/>
+          </diagnostics>
+        </solver>
+        <boundary_conditions name="Outlet">
+          <surface_ids>
+            <integer_value rank="1" shape="1">3</integer_value>
+          </surface_ids>
+          <type name="dirichlet">
+            <constant>
+              <real_value rank="0">0.0</real_value>
+            </constant>
+          </type>
+        </boundary_conditions>
+        <output/>
+        <stat/>
+        <convergence>
+          <include_in_convergence/>
+        </convergence>
+        <detectors>
+          <exclude_from_detectors/>
+        </detectors>
+        <particles>
+          <exclude_from_particles/>
+        </particles>
+        <steady_state>
+          <exclude_from_steady_state/>
+        </steady_state>
+        <no_interpolation/>
+      </prognostic>
+    </scalar_field>
+    <scalar_field rank="0" name="Density">
+      <diagnostic>
+        <algorithm name="Internal" material_phase_support="multiple"/>
+        <mesh name="VelocityMesh"/>
+        <output/>
+        <stat/>
+        <convergence>
+          <include_in_convergence/>
+        </convergence>
+        <detectors>
+          <include_in_detectors/>
+        </detectors>
+        <particles>
+          <exclude_from_particles/>
+        </particles>
+        <steady_state>
+          <include_in_steady_state/>
+        </steady_state>
+      </diagnostic>
+    </scalar_field>
+    <vector_field rank="1" name="Velocity">
+      <prognostic>
+        <mesh name="VelocityMesh"/>
+        <equation name="LinearMomentum"/>
+        <spatial_discretisation>
+          <continuous_galerkin>
+            <stabilisation>
+              <no_stabilisation/>
+            </stabilisation>
+            <mass_terms>
+              <lump_mass_matrix/>
+            </mass_terms>
+            <advection_terms/>
+            <stress_terms>
+              <tensor_form/>
+            </stress_terms>
+          </continuous_galerkin>
+          <conservative_advection>
+            <real_value rank="0">0.0</real_value>
+          </conservative_advection>
+        </spatial_discretisation>
+        <temporal_discretisation>
+          <theta>
+            <real_value rank="0">0.5</real_value>
+          </theta>
+          <relaxation>
+            <real_value rank="0">0.5</real_value>
+          </relaxation>
+        </temporal_discretisation>
+        <solver>
+          <iterative_method name="gmres">
+            <restart>
+              <integer_value rank="0">30</integer_value>
+            </restart>
+          </iterative_method>
+          <preconditioner name="sor"/>
+          <relative_error>
+            <real_value rank="0">1.0e-6</real_value>
+          </relative_error>
+          <max_iterations>
+            <integer_value rank="0">1000</integer_value>
+          </max_iterations>
+          <never_ignore_solver_failures/>
+          <diagnostics>
+            <monitors/>
+          </diagnostics>
+        </solver>
+        <initial_condition name="WholeMesh">
+          <constant>
+            <real_value rank="1" dim1="dim" shape="3">0 0 0</real_value>
+          </constant>
+        </initial_condition>
+        <!--
+          Inlet (surface 2): circular pipe, diameter 0.30 m (NOT sourced
+          -- placeholder, see generate_mesh_v2.py header), centered on
+          axial z=-1.0 m, attached at the core's outer wall. True 2D
+          Poiseuille (circular-pipe) parabolic profile: speed depends on
+          the distance from the PIPE's own centerline (not a 1D duct
+          coordinate as in v1, since the opening is now a disk, not a
+          rectangular slot). Flow direction is along the pipe's own axis,
+          inward toward the core. Peak magnitude set so the
+          cross-section-averaged speed matches the mean flow velocity at
+          minimum core radius from Fang et al. 2024 Table 1 (1.308 m/s)
+          -- profile shape follows the "fully developed" inlet condition
+          used by Fang et al. and Rouch et al.
+
+          Geometry constants below (theta_mid, Z_INLET_CENTER, R_PIPE)
+          must match generate_mesh_v2.py exactly.
+        -->
+        <boundary_conditions name="Inlet">
+          <surface_ids>
+            <integer_value rank="1" shape="1">2</integer_value>
+          </surface_ids>
+          <type name="dirichlet">
+            <align_bc_with_cartesian>
+              <x_component>
+                <python>
+                  <string_value type="code" language="python" lines="20">def val(X, t):
+  import math
+  # must match generate_mesh_v2.py: PIPE_MARGIN*PIPE_DIAMETER/R_MAX, /2
+  theta_mid = 0.5 * (1.5 * 0.30 / 1.53)
+  z_center = -1.0
+  r_pipe = 0.15
+  axis = (0.0, math.cos(theta_mid), math.sin(theta_mid))
+  rel = (X[0] - z_center, X[1], X[2])
+  t_proj = rel[1] * axis[1] + rel[2] * axis[2]
+  perp = (rel[0], rel[1] - t_proj * axis[1], rel[2] - t_proj * axis[2])
+  local_r = math.sqrt(perp[0]**2 + perp[1]**2 + perp[2]**2)
+  shape = max(0.0, 1.0 - (local_r / r_pipe)**2)
+  u_mean = 1.308
+  u_peak = 2.0 * u_mean   # true 2D Poiseuille: peak = 2x mean
+  speed = u_peak * shape
+  return -speed * axis[0]</string_value>
+                </python>
+              </x_component>
+              <y_component>
+                <python>
+                  <string_value type="code" language="python" lines="20">def val(X, t):
+  import math
+  theta_mid = 0.5 * (1.5 * 0.30 / 1.53)
+  z_center = -1.0
+  r_pipe = 0.15
+  axis = (0.0, math.cos(theta_mid), math.sin(theta_mid))
+  rel = (X[0] - z_center, X[1], X[2])
+  t_proj = rel[1] * axis[1] + rel[2] * axis[2]
+  perp = (rel[0], rel[1] - t_proj * axis[1], rel[2] - t_proj * axis[2])
+  local_r = math.sqrt(perp[0]**2 + perp[1]**2 + perp[2]**2)
+  shape = max(0.0, 1.0 - (local_r / r_pipe)**2)
+  u_mean = 1.308
+  u_peak = 2.0 * u_mean
+  speed = u_peak * shape
+  return -speed * axis[1]</string_value>
+                </python>
+              </y_component>
+              <z_component>
+                <python>
+                  <string_value type="code" language="python" lines="20">def val(X, t):
+  import math
+  theta_mid = 0.5 * (1.5 * 0.30 / 1.53)
+  z_center = -1.0
+  r_pipe = 0.15
+  axis = (0.0, math.cos(theta_mid), math.sin(theta_mid))
+  rel = (X[0] - z_center, X[1], X[2])
+  t_proj = rel[1] * axis[1] + rel[2] * axis[2]
+  perp = (rel[0], rel[1] - t_proj * axis[1], rel[2] - t_proj * axis[2])
+  local_r = math.sqrt(perp[0]**2 + perp[1]**2 + perp[2]**2)
+  shape = max(0.0, 1.0 - (local_r / r_pipe)**2)
+  u_mean = 1.308
+  u_peak = 2.0 * u_mean
+  speed = u_peak * shape
+  return -speed * axis[2]</string_value>
+                </python>
+              </z_component>
+            </align_bc_with_cartesian>
+          </type>
+        </boundary_conditions>
+        <!--
+          Outlet (surface 3): no velocity BC here on purpose -- this is
+          the standard Fluidity "pressure outlet" pattern. Only the
+          Pressure field's Dirichlet BC (above) fixes the outlet; the
+          velocity is left free so the flow can leave the domain.
+        -->
+        <boundary_conditions name="Walls">
+          <surface_ids>
+            <integer_value rank="1" shape="1">6</integer_value>
+          </surface_ids>
+          <type name="dirichlet">
+            <align_bc_with_cartesian>
+              <x_component>
+                <constant>
+                  <real_value rank="0">0.0</real_value>
+                </constant>
+              </x_component>
+              <y_component>
+                <constant>
+                  <real_value rank="0">0.0</real_value>
+                </constant>
+              </y_component>
+              <z_component>
+                <constant>
+                  <real_value rank="0">0.0</real_value>
+                </constant>
+              </z_component>
+            </align_bc_with_cartesian>
+          </type>
+        </boundary_conditions>
+        <boundary_conditions name="SymmetryPlanes">
+          <surface_ids>
+            <integer_value rank="1" shape="2">4 5</integer_value>
+          </surface_ids>
+          <type name="no_normal_flow"/>
+        </boundary_conditions>
+        <tensor_field name="Viscosity" rank="2">
+          <prescribed>
+            <value name="WholeMesh">
+              <isotropic>
+                <constant>
+                  <!--
+                    PLACEHOLDER constant effective (molecular + eddy)
+                    viscosity, NOT a sourced value. True molecular
+                    viscosity is 0.011266 Pa.s (Fang et al. 2024 Table 1,
+                    giving Re~1.02e6), which is not resolvable on a
+                    practical first mesh without a turbulence model. This
+                    value (~200x molecular) targets an effective
+                    Re~5000, matching the scale of the project's existing
+                    validated driven_cavity_2d_vms_anisotropic case, so
+                    the flow is numerically tractable while remaining a
+                    meaningful recirculation/shear test case for mesh
+                    adaptivity. Replace with a proper k-epsilon RANS
+                    turbulence closure (schema support confirmed
+                    available: boundary_conditions/type/k_epsilon) once
+                    this geometry+mesh+BC pipeline is validated.
+                  -->
+                  <real_value rank="0">2.287</real_value>
+                </constant>
+              </isotropic>
+            </value>
+            <output/>
+            <particles>
+              <exclude_from_particles/>
+            </particles>
+          </prescribed>
+        </tensor_field>
+        <output/>
+        <stat>
+          <include_in_stat/>
+          <previous_time_step>
+            <exclude_from_stat/>
+          </previous_time_step>
+          <nonlinear_field>
+            <exclude_from_stat/>
+          </nonlinear_field>
+        </stat>
+        <convergence>
+          <include_in_convergence/>
+        </convergence>
+        <detectors>
+          <include_in_detectors/>
+        </detectors>
+        <particles>
+          <exclude_from_particles/>
+        </particles>
+        <steady_state>
+          <include_in_steady_state/>
+        </steady_state>
+        <consistent_interpolation/>
+      </prognostic>
+    </vector_field>
+    <scalar_field rank="0" name="CFLNumber">
+      <diagnostic>
+        <algorithm name="Internal" material_phase_support="multiple"/>
+        <mesh name="VelocityMesh"/>
+        <output/>
+        <stat/>
+        <convergence>
+          <include_in_convergence/>
+        </convergence>
+        <detectors>
+          <include_in_detectors/>
+        </detectors>
+        <particles>
+          <exclude_from_particles/>
+        </particles>
+        <steady_state>
+          <exclude_from_steady_state/>
+        </steady_state>
+      </diagnostic>
+    </scalar_field>
+  </material_phase>
+</fluidity_options>
