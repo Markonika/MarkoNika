@@ -301,7 +301,7 @@
           Ramped smoothly from 0 to full speed over RAMP_T=1.0s (smoother-
           step, zero initial slope) rather than a step/constant: a direct
           test of this case with a constant inlet BC hit a catastrophic
-          first-timestep CFL spike (3.2e12 -- the zero initial condition
+          first-timestep CFL spike (3.2e12 - the zero initial condition
           meeting a full-speed Dirichlet BC on one of this mesh's known
           lower-quality tets near the geometric-clip boundary), which the
           adaptive timestep then took hundreds of steps to recover from
@@ -520,12 +520,30 @@
           </constant>
         </anisotropic_symmetric>
       </tensor_field>
-      <adapt_at_first_timestep>
-        <number_of_adapts>
-          <integer_value rank="0">2</integer_value>
-        </number_of_adapts>
-        <output_adapted_mesh/>
-      </adapt_at_first_timestep>
+      <!--
+        Deliberately NOT using adapt_at_first_timestep: it forces adapts
+        before the first real timestep, while Velocity is still exactly
+        the zero initial condition. Adapting on the Hessian of a uniform
+        zero field is degenerate (no curvature anywhere), so the error
+        metric pushes toward maximum coarsening everywhere - confirmed
+        directly: with it enabled, the mesh collapsed from ~15,000 nodes
+        to 727 (hitting MaximumEdgeLengths across the whole domain), the
+        inlet patch was crushed from 500 triangles to 4, and Velocity
+        stayed EXACTLY 0.0 at every point through the entire run (verified
+        in VTU dumps out to t=20) - the flow never got a chance to
+        develop on a mesh that coarse. Removing this block and letting
+        the first periodic adapt (period_in_timesteps=25 below) wait
+        until real flow has developed fixes it: a direct test without
+        this block showed CFL settling normally (~3, matching the
+        non-adaptive case) through steps 1-25, then the periodic adapt at
+        step 25 refined 15,000->31,000 nodes in response to actual flow
+        features and the run continued with sane nonzero CFL afterward
+        (0.24 at step 26). This is the same pitfall the
+        flow_past_sphere_Re1000 example (which this adaptivity block was
+        modelled on) works around with a separate prescribed proxy field
+        for its own first-timestep adapt - simpler here to just not
+        force an adapt before flow exists.
+      -->
       <zoltan_options>
         <load_imbalance_tolerance>
           <real_value rank="0">1.1</real_value>
