@@ -8,6 +8,13 @@ matrixdump
 matrixdump.info
 first_timestep_adapted_mesh.msh
 
+# Throwaway diagnostic .flml variants (ad-hoc copies of a real case with
+# one block removed/changed, used to isolate a bug by comparison) -- not
+# tracked; the fix lands in the real .flml once found, these get deleted
+*_test.flml
+*_debug.flml
+msfr_wedge_real_tet_noinitadapt.flml
+
 # Large generated mesh files (regenerable by running gmsh on
 # vtb_source/msfr_v2.geo, then export_fullcore_vtu.py) -- not tracked
 msfr_fullcore_real.msh
