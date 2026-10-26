@@ -108,6 +108,480 @@
         </linear>
       </fluids>
     </equation_of_state>
+    <!--
+      Standard k-epsilon RANS closure (Ferziger and Peric 2002 p.295),
+      replacing the earlier flat placeholder viscosity. Structure and
+      model constants (C_mu, C_eps_1, C_eps_2, sigma_k, sigma_eps,
+      sigma_p) follow Fluidity's own worked example,
+      examples/backward_facing_step_2d/backward_facing_step_2d.flml -
+      these are the standard literature values, not case-specific.
+
+      BackgroundViscosity below is confirmed DYNAMIC viscosity (Pa.s),
+      not kinematic: parameterisation/k_epsilon.F90's low-Re damping
+      functions compute R_y = density*sqrt(k)*y/bg_visc, which is only
+      dimensionless if bg_visc is dynamic. With a turbulence model now
+      handling the turbulent diffusion, Velocity's own Viscosity field
+      (further down) switches from the old flat placeholder to a
+      DIAGNOSTIC field combining this molecular value with the computed
+      EddyViscosity - so we can finally use the TRUE molecular
+      viscosity (0.011266 Pa.s, Fang et al. 2024 Table 1, true Re~1.02e6)
+      instead of the old artificially-inflated Re=40,000 placeholder.
+
+      Near-wall treatment: low-Re damping (enable_lowRe_damping, which
+      needs a DistanceToWall field) is NOT enabled here, matching the
+      worked example - standard high-Re k-epsilon with the implicit
+      log-law assumption. Worth revisiting once near-wall mesh resolution
+      is assessed post-adaptivity; not done now to stay close to the one
+      validated template available.
+
+      Inlet k/epsilon values are a standard engineering estimate (NOT
+      measured or literature-sourced for this reactor), from assumed 5%
+      turbulence intensity I and a length scale l=0.07*D_h using the real
+      inlet channel width dh_inlet=0.235 m (idaholab/virtual_test_bed
+      msfr_v2.geo) as D_h:
+        k = 1.5*(I*U)^2 = 1.5*(0.05*1.308)^2 = 0.006416 m^2/s^2
+        l = 0.07*0.235 = 0.01645 m
+        epsilon = C_mu^0.75 * k^1.5 / l = 0.005133 m^2/s^3
+    -->
+    <subgridscale_parameterisations>
+      <k-epsilon>
+        <scalar_field rank="0" name="TurbulentKineticEnergy">
+          <prognostic>
+            <mesh name="VelocityMesh"/>
+            <equation name="KEpsilon">
+              <density name="Density">
+                <discretisation_options>
+                  <spatial_discretisation>
+                    <control_volumes>
+                      <face_value name="FirstOrderUpwind"/>
+                    </control_volumes>
+                  </spatial_discretisation>
+                  <temporal_discretisation>
+                    <theta>
+                      <real_value rank="0">1.0</real_value>
+                    </theta>
+                    <control_volumes/>
+                  </temporal_discretisation>
+                </discretisation_options>
+              </density>
+            </equation>
+            <spatial_discretisation>
+              <control_volumes>
+                <face_value name="FirstOrderUpwind"/>
+                <diffusion_scheme name="ElementGradient"/>
+              </control_volumes>
+              <conservative_advection>
+                <real_value rank="0">0</real_value>
+              </conservative_advection>
+            </spatial_discretisation>
+            <!--
+              theta=1.0 (fully implicit backward Euler), not the 0.5
+              Crank-Nicolson the worked example used: a direct test with
+              0.5 blew up (TurbulentDissipation reaching ~1e6 and going
+              negative to -1.3e6 within 6 timesteps, aborting the run) -
+              Fluidity's k-epsilon only clips k/epsilon defensively
+              INSIDE internal source-term/length-scale formulas
+              (parameterisation/k_epsilon.F90), not on the solved field
+              itself, so a Crank-Nicolson-level of implicitness wasn't
+              enough to keep the stiff production/destruction source
+              terms bounded on this case's real (much lower, no longer
+              artificially inflated) molecular viscosity. Backward Euler
+              is the standard first remedy for this failure mode.
+            -->
+            <temporal_discretisation>
+              <theta>
+                <real_value rank="0">1.0</real_value>
+              </theta>
+            </temporal_discretisation>
+            <solver>
+              <iterative_method name="gmres">
+                <restart>
+                  <integer_value rank="0">30</integer_value>
+                </restart>
+              </iterative_method>
+              <preconditioner name="sor"/>
+              <relative_error>
+                <real_value rank="0">1.e-7</real_value>
+              </relative_error>
+              <max_iterations>
+                <integer_value rank="0">1000</integer_value>
+              </max_iterations>
+              <never_ignore_solver_failures/>
+              <diagnostics>
+                <monitors/>
+              </diagnostics>
+            </solver>
+            <initial_condition name="WholeMesh">
+              <constant>
+                <real_value rank="0">0.006416</real_value>
+              </constant>
+            </initial_condition>
+            <boundary_conditions name="Inlet">
+              <surface_ids>
+                <integer_value rank="1" shape="1">1</integer_value>
+              </surface_ids>
+              <type name="dirichlet">
+                <constant>
+                  <real_value rank="0">0.006416</real_value>
+                </constant>
+              </type>
+            </boundary_conditions>
+            <tensor_field name="Diffusivity" rank="2">
+              <diagnostic>
+                <algorithm name="Internal" material_phase_support="multiple"/>
+                <output/>
+                <stat>
+                  <exclude_from_stat/>
+                </stat>
+                <particles>
+                  <exclude_from_particles/>
+                </particles>
+              </diagnostic>
+            </tensor_field>
+            <scalar_field name="Source" rank="0">
+              <diagnostic>
+                <algorithm name="Internal" material_phase_support="multiple"/>
+                <output/>
+                <stat/>
+                <detectors>
+                  <include_in_detectors/>
+                </detectors>
+                <particles>
+                  <exclude_from_particles/>
+                </particles>
+              </diagnostic>
+            </scalar_field>
+            <scalar_field name="Absorption" rank="0">
+              <diagnostic>
+                <algorithm name="Internal" material_phase_support="multiple"/>
+                <output/>
+                <stat/>
+                <detectors>
+                  <include_in_detectors/>
+                </detectors>
+                <particles>
+                  <exclude_from_particles/>
+                </particles>
+              </diagnostic>
+            </scalar_field>
+            <output/>
+            <stat/>
+            <convergence>
+              <include_in_convergence/>
+            </convergence>
+            <detectors>
+              <include_in_detectors/>
+            </detectors>
+            <particles>
+              <exclude_from_particles/>
+            </particles>
+            <steady_state>
+              <include_in_steady_state/>
+            </steady_state>
+            <consistent_interpolation/>
+          </prognostic>
+        </scalar_field>
+        <scalar_field rank="0" name="TurbulentDissipation">
+          <prognostic>
+            <mesh name="VelocityMesh"/>
+            <equation name="KEpsilon">
+              <density name="Density">
+                <discretisation_options>
+                  <spatial_discretisation>
+                    <control_volumes>
+                      <face_value name="FirstOrderUpwind"/>
+                    </control_volumes>
+                  </spatial_discretisation>
+                  <temporal_discretisation>
+                    <theta>
+                      <real_value rank="0">1.0</real_value>
+                    </theta>
+                    <control_volumes/>
+                  </temporal_discretisation>
+                </discretisation_options>
+              </density>
+            </equation>
+            <spatial_discretisation>
+              <control_volumes>
+                <face_value name="FirstOrderUpwind"/>
+                <diffusion_scheme name="ElementGradient"/>
+              </control_volumes>
+              <conservative_advection>
+                <real_value rank="0">0</real_value>
+              </conservative_advection>
+            </spatial_discretisation>
+            <!--
+              theta=1.0 (fully implicit backward Euler), not the 0.5
+              Crank-Nicolson the worked example used: a direct test with
+              0.5 blew up (TurbulentDissipation reaching ~1e6 and going
+              negative to -1.3e6 within 6 timesteps, aborting the run) -
+              Fluidity's k-epsilon only clips k/epsilon defensively
+              INSIDE internal source-term/length-scale formulas
+              (parameterisation/k_epsilon.F90), not on the solved field
+              itself, so a Crank-Nicolson-level of implicitness wasn't
+              enough to keep the stiff production/destruction source
+              terms bounded on this case's real (much lower, no longer
+              artificially inflated) molecular viscosity. Backward Euler
+              is the standard first remedy for this failure mode.
+            -->
+            <temporal_discretisation>
+              <theta>
+                <real_value rank="0">1.0</real_value>
+              </theta>
+            </temporal_discretisation>
+            <solver>
+              <iterative_method name="gmres">
+                <restart>
+                  <integer_value rank="0">30</integer_value>
+                </restart>
+              </iterative_method>
+              <preconditioner name="sor"/>
+              <relative_error>
+                <real_value rank="0">1.e-7</real_value>
+              </relative_error>
+              <max_iterations>
+                <integer_value rank="0">1000</integer_value>
+              </max_iterations>
+              <never_ignore_solver_failures/>
+              <diagnostics>
+                <monitors/>
+              </diagnostics>
+            </solver>
+            <initial_condition name="WholeMesh">
+              <constant>
+                <real_value rank="0">0.005133</real_value>
+              </constant>
+            </initial_condition>
+            <boundary_conditions name="Inlet">
+              <surface_ids>
+                <integer_value rank="1" shape="1">1</integer_value>
+              </surface_ids>
+              <type name="dirichlet">
+                <constant>
+                  <real_value rank="0">0.005133</real_value>
+                </constant>
+              </type>
+            </boundary_conditions>
+            <tensor_field name="Diffusivity" rank="2">
+              <diagnostic>
+                <algorithm name="Internal" material_phase_support="multiple"/>
+                <output/>
+                <stat>
+                  <exclude_from_stat/>
+                </stat>
+                <particles>
+                  <exclude_from_particles/>
+                </particles>
+              </diagnostic>
+            </tensor_field>
+            <scalar_field name="Source" rank="0">
+              <diagnostic>
+                <algorithm name="Internal" material_phase_support="multiple"/>
+                <output/>
+                <stat/>
+                <detectors>
+                  <include_in_detectors/>
+                </detectors>
+                <particles>
+                  <exclude_from_particles/>
+                </particles>
+              </diagnostic>
+            </scalar_field>
+            <scalar_field name="Absorption" rank="0">
+              <diagnostic>
+                <algorithm name="Internal" material_phase_support="multiple"/>
+                <output/>
+                <stat/>
+                <detectors>
+                  <include_in_detectors/>
+                </detectors>
+                <particles>
+                  <exclude_from_particles/>
+                </particles>
+              </diagnostic>
+            </scalar_field>
+            <output/>
+            <stat/>
+            <convergence>
+              <include_in_convergence/>
+            </convergence>
+            <detectors>
+              <include_in_detectors/>
+            </detectors>
+            <particles>
+              <exclude_from_particles/>
+            </particles>
+            <steady_state>
+              <include_in_steady_state/>
+            </steady_state>
+            <consistent_interpolation/>
+          </prognostic>
+        </scalar_field>
+        <tensor_field rank="2" name="BackgroundViscosity">
+          <prescribed>
+            <mesh name="VelocityMesh"/>
+            <value name="WholeMesh">
+              <anisotropic_symmetric>
+                <constant>
+                  <real_value symmetric="true" rank="2" dim1="dim" dim2="dim" shape="3 3">0.011266 0.0 0.0 0.0 0.011266 0.0 0.0 0.0 0.011266</real_value>
+                </constant>
+              </anisotropic_symmetric>
+            </value>
+            <output/>
+            <particles>
+              <exclude_from_particles/>
+            </particles>
+          </prescribed>
+        </tensor_field>
+        <tensor_field rank="2" name="EddyViscosity">
+          <diagnostic>
+            <algorithm name="Internal" material_phase_support="multiple"/>
+            <mesh name="VelocityMesh"/>
+            <output/>
+            <stat>
+              <exclude_from_stat/>
+            </stat>
+            <particles>
+              <exclude_from_particles/>
+            </particles>
+          </diagnostic>
+        </tensor_field>
+        <scalar_field rank="0" name="ScalarEddyViscosity">
+          <diagnostic>
+            <algorithm name="Internal" material_phase_support="multiple"/>
+            <mesh name="VelocityMesh"/>
+            <output/>
+            <stat/>
+            <convergence>
+              <include_in_convergence/>
+            </convergence>
+            <detectors>
+              <include_in_detectors/>
+            </detectors>
+            <particles>
+              <exclude_from_particles/>
+            </particles>
+            <steady_state>
+              <include_in_steady_state/>
+            </steady_state>
+          </diagnostic>
+        </scalar_field>
+        <scalar_field rank="0" name="LengthScale">
+          <diagnostic>
+            <algorithm name="Internal" material_phase_support="multiple"/>
+            <mesh name="VelocityMesh"/>
+            <output/>
+            <stat/>
+            <convergence>
+              <include_in_convergence/>
+            </convergence>
+            <detectors>
+              <include_in_detectors/>
+            </detectors>
+            <particles>
+              <exclude_from_particles/>
+            </particles>
+            <steady_state>
+              <include_in_steady_state/>
+            </steady_state>
+          </diagnostic>
+        </scalar_field>
+        <scalar_field rank="0" name="f_1">
+          <diagnostic>
+            <algorithm name="Internal" material_phase_support="multiple"/>
+            <mesh name="VelocityMesh"/>
+            <output/>
+            <stat/>
+            <convergence>
+              <include_in_convergence/>
+            </convergence>
+            <detectors>
+              <include_in_detectors/>
+            </detectors>
+            <particles>
+              <exclude_from_particles/>
+            </particles>
+            <steady_state>
+              <include_in_steady_state/>
+            </steady_state>
+          </diagnostic>
+        </scalar_field>
+        <scalar_field rank="0" name="f_2">
+          <diagnostic>
+            <algorithm name="Internal" material_phase_support="multiple"/>
+            <mesh name="VelocityMesh"/>
+            <output/>
+            <stat/>
+            <convergence>
+              <include_in_convergence/>
+            </convergence>
+            <detectors>
+              <include_in_detectors/>
+            </detectors>
+            <particles>
+              <exclude_from_particles/>
+            </particles>
+            <steady_state>
+              <include_in_steady_state/>
+            </steady_state>
+          </diagnostic>
+        </scalar_field>
+        <scalar_field rank="0" name="f_mu">
+          <diagnostic>
+            <algorithm name="Internal" material_phase_support="multiple"/>
+            <mesh name="VelocityMesh"/>
+            <output/>
+            <stat/>
+            <convergence>
+              <include_in_convergence/>
+            </convergence>
+            <detectors>
+              <include_in_detectors/>
+            </detectors>
+            <particles>
+              <exclude_from_particles/>
+            </particles>
+            <steady_state>
+              <include_in_steady_state/>
+            </steady_state>
+          </diagnostic>
+        </scalar_field>
+        <max_damping_value>
+          <real_value rank="0">10.0</real_value>
+        </max_damping_value>
+        <C_mu>
+          <real_value rank="0">.09</real_value>
+        </C_mu>
+        <C_eps_1>
+          <real_value rank="0">1.44</real_value>
+        </C_eps_1>
+        <C_eps_2>
+          <real_value rank="0">1.92</real_value>
+        </C_eps_2>
+        <sigma_k>
+          <real_value rank="0">1</real_value>
+        </sigma_k>
+        <sigma_eps>
+          <real_value rank="0">1.3</real_value>
+        </sigma_eps>
+        <sigma_p>
+          <real_value rank="0">1.0</real_value>
+        </sigma_p>
+        <time_discretisation>
+          <theta>
+            <real_value rank="0">0.5</real_value>
+          </theta>
+          <source_term_implementation>
+            <production_term>source</production_term>
+            <destruction_term>absorbtion</destruction_term>
+            <buoyancy_term>source</buoyancy_term>
+          </source_term_implementation>
+        </time_discretisation>
+        <mass_terms>
+          <lump_mass/>
+        </mass_terms>
+      </k-epsilon>
+    </subgridscale_parameterisations>
     <scalar_field rank="0" name="Pressure">
       <prognostic>
         <mesh name="PressureMesh"/>
@@ -237,8 +711,15 @@
               <lump_mass_matrix/>
             </mass_terms>
             <advection_terms/>
+            <!--
+              partial_stress_form (not tensor_form): matches the pairing
+              used by Fluidity's own worked k-epsilon example
+              (backward_facing_step_2d.flml) - not independently
+              re-derived, just following the one validated precedent
+              available for this combination.
+            -->
             <stress_terms>
-              <tensor_form/>
+              <partial_stress_form/>
             </stress_terms>
           </continuous_galerkin>
           <conservative_advection>
@@ -375,43 +856,29 @@
           </surface_ids>
           <type name="no_normal_flow"/>
         </boundary_conditions>
+        <!--
+          Viscosity is now DIAGNOSTIC, not prescribed: with k-epsilon
+          enabled above, Fluidity computes this internally by combining
+          BackgroundViscosity (true molecular, 0.011266 Pa.s) with the
+          turbulence model's own EddyViscosity, replacing the old flat
+          placeholder (which targeted an artificial effective Re=40,000
+          since there was no turbulence model to handle the real
+          Re~1.02e6). That placeholder's full reasoning (including the
+          Re=40,000 derivation against the archived INL VTB reference
+          data) is preserved in git history on this line for anyone
+          wanting to compare the two approaches.
+        -->
         <tensor_field name="Viscosity" rank="2">
-          <prescribed>
-            <value name="WholeMesh">
-              <isotropic>
-                <constant>
-                  <!--
-                    PLACEHOLDER constant effective (molecular + eddy)
-                    viscosity, NOT a sourced value - same caveat as v2.
-                    True molecular viscosity is 0.011266 Pa.s (Fang et al.
-                    2024 Table 1, giving the real Re~1.02e6), not
-                    resolvable without a turbulence model. Retargeted from
-                    v2's effective Re~5000 (arbitrary) to effective
-                    Re=40,000, matching the one real quantitative
-                    reference dataset we have (INL VTB Nek5000-vs-Pronghorn
-                    tuning page, archived in
-                    reference_data/inl_vtb_griffin_pronghorn_re40k/),
-                    using mu = U*L*rho/Re with U=1.308 m/s (inlet speed,
-                    sourced), L=r_core=1.054 m (minimum core radius -
-                    matches that reference plot's own radial axis), and
-                    rho=4147.29 kg/m^3: mu = 1.308*1.054*4147.29/40000 =
-                    0.1430 Pa.s. The L choice (r_core, rather than e.g. a
-                    hydraulic diameter) is ours, not stated by the
-                    reference source, so treat this Re match as
-                    approximate. Replace with a proper k-epsilon RANS
-                    turbulence closure (schema support confirmed
-                    available: boundary_conditions/type/k_epsilon) once
-                    this geometry+mesh+BC pipeline is validated.
-                  -->
-                  <real_value rank="0">0.1430</real_value>
-                </constant>
-              </isotropic>
-            </value>
+          <diagnostic>
+            <algorithm name="Internal" material_phase_support="multiple"/>
             <output/>
+            <stat>
+              <include_in_stat/>
+            </stat>
             <particles>
               <exclude_from_particles/>
             </particles>
-          </prescribed>
+          </diagnostic>
         </tensor_field>
         <output/>
         <stat>
