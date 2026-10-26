@@ -6,6 +6,7 @@ msfr_wedge*_[0-9]*.vtu
 msfr_wedge*_[0-9]*.pvtu
 matrixdump
 matrixdump.info
+first_timestep_adapted_mesh.msh
 
 # Large generated mesh files (regenerable by running gmsh on
 # vtb_source/msfr_v2.geo, then export_fullcore_vtu.py) -- not tracked

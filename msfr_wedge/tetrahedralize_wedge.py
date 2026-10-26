@@ -26,6 +26,30 @@ print("Reading", SRC)
 mesh = meshio.read(SRC)
 pts = mesh.points
 
+# Snap near-coincident points together (within SNAP_TOL) before anything
+# else. The 378 degenerate wall quads (boundary-layer cells pinched to
+# zero thickness at sharp corners) left behind clusters of points that
+# are NOT exactly coincident but only ~1e-4 to 1e-5 m apart -- close
+# enough that gmsh's tet mesher is forced to fill the gap with sliver
+# tetrahedra (found down to 73 micron edges and near-zero-volume flat
+# slivers, both at the same corners), which blew up the first-timestep
+# CFL number to ~1e9-1e12 in a direct Fluidity test. SNAP_TOL=2e-4 m
+# (0.2mm) is comfortably below the real boundary-layer mesh's smallest
+# intended feature (~1.2mm, from h_bl=0.025 m over n_bl=6 cells at
+# ratio_bl=1.5) so this shouldn't erase any real geometry, only these
+# degenerate-corner artifacts.
+SNAP_TOL = 2e-4
+key = np.round(pts / SNAP_TOL).astype(np.int64)
+_, inverse = np.unique(key, axis=0, return_inverse=True)
+first_of_bucket = {}
+snap_map = np.empty(len(pts), dtype=np.int64)
+for i, bucket in enumerate(inverse.ravel()):
+    rep = first_of_bucket.setdefault(bucket, i)
+    snap_map[i] = rep
+n_snapped = int((snap_map != np.arange(len(pts))).sum())
+print(f"Snapped {n_snapped} near-coincident points (tol={SNAP_TOL} m)")
+
+
 def tri_area(tri):
     p = pts[list(tri)]
     return 0.5 * np.linalg.norm(np.cross(p[1] - p[0], p[2] - p[0]))
@@ -46,14 +70,14 @@ n_dropped = 0
 for block, tagarray in zip(mesh.cells, mesh.cell_data["gmsh:physical"]):
     if block.type == "triangle":
         for conn, tag in zip(block.data, tagarray):
-            tri = tuple(conn)
+            tri = tuple(int(snap_map[n]) for n in conn)
             if tri_area(tri) > AREA_EPS:
                 tris_by_tag[int(tag)].append(tri)
             else:
                 n_dropped += 1
     elif block.type == "quad":
         for conn, tag in zip(block.data, tagarray):
-            a, b, c, d = conn
+            a, b, c, d = (int(snap_map[n]) for n in conn)
             for tri in [(a, b, c), (a, c, d)]:
                 if tri_area(tri) > AREA_EPS:
                     tris_by_tag[int(tag)].append(tri)
