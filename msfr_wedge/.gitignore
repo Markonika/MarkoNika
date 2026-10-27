@@ -4,6 +4,10 @@ run*.log
 *checkpoint*
 msfr_wedge*_[0-9]*.vtu
 msfr_wedge*_[0-9]*.pvtu
+# false-positive exception: "_2d_" above accidentally matches the dump
+# pattern (a digit right after an underscore) -- this is a real geometry
+# deliverable, not a timestep dump
+!msfr_wedge_midplane_2d_geometry.vtu
 matrixdump
 matrixdump.info
 first_timestep_adapted_mesh.msh
