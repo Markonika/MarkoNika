@@ -24,3 +24,9 @@ msfr_wedge_real_tet_noinitadapt.flml
 # vtb_source/msfr_v2.geo, then export_fullcore_vtu.py) -- not tracked
 msfr_fullcore_real.msh
 msfr_fullcore_real_geometry.vtu
+
+# Run-specific result snapshots (regenerable from a VTU dump via
+# preview_adaptive_mesh.py / preview_flow_t1.py) -- holding off on
+# pushing these per explicit request, not because they're sensitive
+mesh_compare_*.png
+mesh_zoom_*.png
