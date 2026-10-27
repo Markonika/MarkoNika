@@ -538,7 +538,21 @@
         </sigma_p>
         <time_discretisation>
           <theta>
-            <real_value rank="0">0.5</real_value>
+            <!--
+              Backward Euler (was 0.5/Crank-Nicolson). This is a
+              separate theta from TurbulentKineticEnergy/
+              TurbulentDissipation's own transport-equation theta
+              (already 1.0) - this one governs the production/
+              destruction SOURCE TERMS specifically (see
+              k_epsilon.F90 assemble_rhs_ele, which blends old/new
+              k,epsilon via this theta before evaluating P_k and
+              destruction). Left at Crank-Nicolson, this under-damps
+              the nonlinear k^2/epsilon feedback and was the root
+              cause of EddyViscosity/Pressure blowing up geometrically
+              (EddyViscosity max 60->5871 Pa.s, Pressure max 23k->1.82M
+              Pa over t=1->5s) in the first validation run.
+            -->
+            <real_value rank="0">1.0</real_value>
           </theta>
           <source_term_implementation>
             <production_term>source</production_term>
@@ -608,11 +622,21 @@
                 <value name="WholeMesh">
                   <constant>
                     <!--
-                      PLACEHOLDER, same reasoning as the 3D case: not
-                      calibrated against this case's actual pressure
-                      range yet.
+                      Recalibrated off the dynamic-pressure scale
+                      0.5*rho*U^2 for this case (rho=4147 kg/m3,
+                      U~1.3-2.6 m/s accounting for local speed-up in
+                      the bend -> scale ~3500-14000 Pa), replacing the
+                      stale 0.04 Pa placeholder copied from the
+                      flow_past_sphere_Re1000 example. 0.04 Pa against
+                      a multi-thousand-Pa field is a ~1e-8 relative
+                      tolerance, which was forcing near-uniform
+                      maximum refinement everywhere regardless of
+                      where real flow features were. 150 Pa is ~1-4%
+                      of the dynamic-pressure scale; revisit once a
+                      clean (post k-epsilon-fix) run shows the
+                      converged pressure range directly.
                     -->
-                    <real_value rank="0">0.04</real_value>
+                    <real_value rank="0">150.0</real_value>
                   </constant>
                 </value>
                 <output/>
@@ -875,7 +899,15 @@
       <tensor_field name="MinimumEdgeLengths">
         <anisotropic_symmetric>
           <constant>
-            <real_value symmetric="true" rank="2" dim1="dim" dim2="dim" shape="2 2">0.01 0.0 0.0 0.01</real_value>
+            <!--
+              Loosened from 0.01 m: with the Pressure
+              InterpolationErrorBound fix and the k-epsilon source-term
+              theta fix, the mesh should no longer need to sit at the
+              minimum almost everywhere just to chase a spuriously
+              growing field. 0.02 m directly cuts element count/cost
+              where real flow features don't demand finer resolution.
+            -->
+            <real_value symmetric="true" rank="2" dim1="dim" dim2="dim" shape="2 2">0.02 0.0 0.0 0.02</real_value>
           </constant>
         </anisotropic_symmetric>
       </tensor_field>
