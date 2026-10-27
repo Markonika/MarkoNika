@@ -30,3 +30,5 @@ msfr_fullcore_real_geometry.vtu
 # pushing these per explicit request, not because they're sensitive
 mesh_compare_*.png
 mesh_zoom_*.png
+midplane_2d_velocity_t*.png
+midplane_2d_pressure_t*.png
