@@ -18,6 +18,8 @@ first_timestep_adapted_mesh.msh
 # tracked; the fix lands in the real .flml once found, these get deleted
 *_test.flml
 *_debug.flml
+*_diag.flml
+*_finedump.flml
 msfr_wedge_real_tet_noinitadapt.flml
 
 # Large generated mesh files (regenerable by running gmsh on
