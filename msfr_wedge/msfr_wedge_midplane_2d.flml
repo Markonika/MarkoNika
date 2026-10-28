@@ -104,6 +104,48 @@
         <real_value rank="0">1.2</real_value>
       </increase_tolerance>
     </adaptive_timestep>
+    <!--
+      Steady-state auto-termination, per user request to investigate
+      the steady (not transient) flow: Fluidity has no separate steady
+      solver, so this still marches the ramped transient forward but
+      stops once it actually converges, instead of guessing finish_time.
+      Checked on Velocity only (Pressure is deliberately
+      exclude_from_steady_state above - Velocity (~0-4 m/s) and Pressure
+      (~O(1e3-1e4) Pa) are too different in scale to share one absolute
+      tolerance meaningfully, and velocity convergence is the more
+      physically direct signal that the flow has settled; Density is
+      also included but is constant here, so it's a no-op check).
+      l2_norm (domain-averaged), not infinity_norm: the mesh has a
+      handful of known degenerate sliver elements (see git history -
+      edges down to ~0.15mm vs the 20mm MinimumEdgeLengths floor) that
+      could keep a worst-point infinity_norm check from ever settling
+      due to localized numerical noise at those elements, without that
+      reflecting the bulk flow's actual state.
+      acceleration_form (rate of change, not raw change) - NOT optional:
+      a first attempt without it falsely declared "steady state" after
+      the very first timestep (t=0.02s, Velocity still ~0.007 m/s),
+      because the inlet's smootherstep ramp has zero slope at t=0, so
+      the raw step-to-step change looked negligible before the flow had
+      done anything. The ramp's rate of change (d/dt of 3t^2-2t^3 =
+      6t(1-t)) grows from zero instead of shrinking toward it, so this
+      doesn't misfire the same way. Caveat not yet empirically checked:
+      the same derivative is ALSO zero at t=ramp_t=1.0s (smootherstep is
+      flat at both ends by construction) - if the bulk domain's own rate
+      of change happens to be small at exactly that moment too, this
+      could in principle still false-trigger there; watching for that on
+      the next run.
+      Tolerance 0.013 (m/s per unit time here, under acceleration_form)
+      ~ 1% of the inlet mean velocity (1.308 m/s) - a reasonable "no
+      more meaningful change" threshold, not independently validated
+      against this case's actual noise floor.
+    -->
+    <steady_state>
+      <tolerance>
+        <real_value rank="0">0.013</real_value>
+        <l2_norm/>
+      </tolerance>
+      <acceleration_form/>
+    </steady_state>
   </timestepping>
   <physical_parameters/>
   <material_phase name="FuelSalt">
@@ -353,14 +395,38 @@
           </surface_ids>
           <type name="dirichlet">
             <align_bc_with_surface>
+              <!--
+                Parabolic profile, not flat/uniform: the literature this
+                case is built from (idaholab/virtual_test_bed MSFR
+                Nek5000 CFD model - same source as msfr_v2.geo) imposes
+                a parabolic velocity profile at the inlet face, not a
+                flat one (confirmed across the Virtual Test Bed MSFR
+                Nek5000 page, its OSTI report, and the MSFR turbulence-
+                tuning page). 2D planar Poiseuille: u(x) =
+                1.5*u_mean*(1-((x-x_c)/R)^2), so the centreline peak is
+                1.5x the mean and it goes to zero at the duct walls (mean
+                over the profile is preserved at u_mean=1.308 m/s). x_c
+                and R measured directly from this file's own inlet
+                boundary (BoundaryID==1 line in
+                msfr_wedge_midplane_2d_remeshed_geometry.vtu): x in
+                [1.905603, 2.140603], width 0.235 m - matching the
+                dh_inlet=0.235m already used for this case's k-epsilon
+                length-scale estimate, so this is the same inlet channel,
+                not a different value.
+              -->
               <normal_component>
                 <python>
                   <string_value type="code" language="python" lines="20">def val(X, t):
-  u_target = 1.308
+  u_mean = 1.308
   ramp_t = 1.0
   frac = min(1.0, t / ramp_t)
   s = frac * frac * (3.0 - 2.0 * frac)  # smootherstep: zero slope at t=0
-  return -u_target * s</string_value>
+  x_c = 2.02310323
+  R = 0.1175
+  xi = (X[0] - x_c) / R
+  xi = max(-1.0, min(1.0, xi))
+  parabolic = 1.5 * u_mean * (1.0 - xi * xi)
+  return -parabolic * s</string_value>
                 </python>
               </normal_component>
               <tangent_component_1>
