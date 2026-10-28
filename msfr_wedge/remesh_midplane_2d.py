@@ -1,5 +1,23 @@
 #!/usr/bin/env python3
-"""Regenerate the 2D midplane cross-section mesh properly.
+"""SUPERSEDED by remesh_midplane_2d_triangle.py - kept for reference only.
+
+This script's gmsh-based fill preserved the traced boundary loop's points
+as hard geometric constraints verbatim, including some that were
+extremely close together (~0.0001-0.0009 m) but not exactly coincident -
+near-duplicate points vtkCutter leaves behind in slice_midplane_2d.py when
+cutting through two adjacent, slightly irregular 3D boundary triangles
+near the cut plane. gmsh faithfully preserved those tiny gaps as real
+features and seeded sliver triangles next to them (found by actually
+running Fluidity on the result: edges down to ~0.0001 m vs. the intended
+0.02 m minimum, causing the CFL-limited adaptive timestep to collapse
+~160x). remesh_midplane_2d_triangle.py fixes this by merging those
+near-duplicate points before meshing, and uses Triangle (Shewchuk) instead
+of gmsh for the actual fill, for its provable minimum-angle quality
+guarantee.
+
+Original docstring, for context:
+
+Regenerate the 2D midplane cross-section mesh properly.
 
 slice_midplane_2d.py produced a 2D mesh by directly reusing whatever
 triangles a plane-cutter happened to leave behind when it sliced through
