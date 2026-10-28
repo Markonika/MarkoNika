@@ -215,7 +215,30 @@
           <use_projection_method/>
         </scheme>
         <solver>
-          <iterative_method name="cg"/>
+          <!--
+            Switched from cg to gmres: investigated a reproducible
+            blow-up (KSP_DIVERGED_INDEFINITE_MAT at a deterministic
+            point, t~3.676s - confirmed via two independent runs
+            hitting the exact same simulated time, and via dumps every
+            0.02s bracketing it) in the WALE-based run on the Triangle-
+            remeshed mesh. Confirmed NOT mesh-related: the mesh is
+            bit-identical between the last healthy dump and the first
+            corrupted one, and triangle quality near the anomaly
+            (on the Axis boundary, x=0) is unremarkable (min 0.49).
+            CG requires the assembled PressurePoissonMatrix to stay
+            symmetric positive-definite; something (most likely the
+            P1-P1 stabilisation term's velocity/viscosity-dependent
+            coefficient interacting with WALE's evolving eddy
+            viscosity) pushes it indefinite at this point even though
+            the mesh hasn't changed. GMRES doesn't require positive-
+            definiteness, so it should survive this without needing to
+            find why cmc_m loses it - not yet confirmed by a run.
+          -->
+          <iterative_method name="gmres">
+            <restart>
+              <integer_value rank="0">30</integer_value>
+            </restart>
+          </iterative_method>
           <preconditioner name="mg"/>
           <relative_error>
             <real_value rank="0">1.0e-6</real_value>
