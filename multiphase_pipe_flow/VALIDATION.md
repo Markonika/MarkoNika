@@ -1347,3 +1347,105 @@ methodology, tables, and figures are in the paper (Section 7,
     different (four-field, semi-implicit pressure-correction) solver
     architecture entirely. None of these were isolated individually here
     -- reported as an honest, open gap, not explained away.
+
+28. **Done: ran this solver against Wang, Liu, Chang, Zhao & Guo (2019,
+    Int. J. Heat Mass Transfer 143:118537)'s own measured gas-wall/
+    liquid-wall friction factors -- found a large, structural mismatch,
+    diagnosed why, and added (as explicitly literature-specific, NOT
+    general physics) the paper's own fitted correlations so a run can be
+    configured to reproduce their numbers directly.**
+
+    That paper measured gas-wall and liquid-wall friction factor vs.
+    Reynolds number for air-water wavy-stratified flow at atmosphere and
+    2 MPa (50 mm ID, 11.6 m horizontal test section) -- not holdup, so it
+    doesn't drop into `validate_quantitative`. No public dataset/
+    supplementary-material deposit exists for it (checked Mendeley Data,
+    Figshare, Zenodo, ScienceDirect); its Figs. 12(a)/14(a) (gas-wall, 15
+    and 16 points) and Fig. 17 (liquid-wall, 33 points) were digitized by
+    hand from the published plots (300 DPI renders, points read against
+    axis ticks -- approximate, especially in the steepest regions).
+
+    New demo case `mfs_demo wang2019_friction`: sweeps (Vsl, Vsg) over
+    this paper's reported wave-stratified envelope at matched D=50mm,
+    L=11.6m, fluid properties (2 MPa: rho_G=23.4 kg/m^3, mu_G=0.0187 cP,
+    rho_L=1005.4 kg/m^3, mu_L=0.724 cP, as stated in the paper; atm:
+    standard air/water), runs each case to the same quasi-steady holdup
+    this project's other validation drivers use, then derives the ACTUAL
+    phase Reynolds numbers from the solver's own predicted holdup (not an
+    externally imposed one) before evaluating `wallFrictionFactor()` --
+    i.e. this is genuinely what the solver predicts for f_G/f_L, not a
+    standalone closure-formula evaluation.
+
+    Result with the existing `TaitelDukler1976` wall closure: median
+    |relative error| against the nearest-Re digitized point is 91.0%
+    (2 MPa gas-wall), 25.0% (2 MPa liquid-wall), 11.9% (atmosphere
+    gas-wall). The 2 MPa gas-wall mismatch is not noise: the experimental
+    f_G vs. Re_G curve is markedly NON-monotonic (a minimum of
+    f_G=1.2e-3 at Re_G~79,000, then rising by 100% to f_G=2.4e-3 by
+    Re_G~228,000, and dipping to roughly a quarter of the smooth-pipe
+    Taitel-Dukler value at that minimum), while TaitelDukler1976 (like
+    every correlation the paper itself cites -- Haland, Kowalski) is a
+    monotonically-decreasing power law in Re with no mechanism to dip
+    BELOW the smooth-wall curve and rise again. A roughness-style
+    additive correction (e.g. `MoodyRoughWall`) cannot fix this either:
+    roughness only ever raises f above the smooth value, and this data
+    needs it to go both below and back above the baseline across the Re
+    range. This is a genuine measured effect -- the paper's own
+    explanation is that the wavy liquid-gas interface modulates the
+    near-wall GAS velocity profile (their dv/dy argument, Fig. 14b), not
+    just the usual interfacial shear -- and no closure in this codebase
+    (or, apparently, the wider literature the paper surveys) models that
+    mechanism as a function of the actual wave characteristics.
+
+    Rather than force a physically unjustified fit to ~15-40 approximately
+    digitized points, added the paper's OWN fitted piecewise correlations
+    (Eqs. 17, 18, 20) as three new `FrictionCorrelation` enum values --
+    `WangGuo2019GasWallAtm`, `WangGuo2019GasWall2MPa`,
+    `WangGuo2019LiquidWall2MPa` -- explicitly documented in Closures.hpp
+    as literature-specific curve fits to one facility at two pressures,
+    NOT a general closure, provided so a run can select "the same numbers
+    as the paper" for direct comparison. `SolverOptions::wallCorrelation`
+    was split into `wallCorrelationGas`/`wallCorrelationLiquid` (both
+    defaulting to the same `TaitelDukler1976` the single prior field held
+    -- bit-exact backward compatible, regression-confirmed identical
+    across every existing demo case) since the paper fits gas-wall and
+    liquid-wall separately and no atmosphere liquid-wall fit was ever
+    published.
+
+    While transcribing Eq. (20)(c) (liquid-wall, Re_L>1.4e4), its
+    published coefficient (2.53e5) gives friction factors of order 10 at
+    the Reynolds numbers it covers -- physically impossible, and
+    inconsistent by ~9 orders of magnitude with Eq. (20)(b)'s own value at
+    their shared breakpoint. Re-read independently from two separate
+    high-resolution crops of the original PDF; both matched the published
+    text exactly, so this looks like a genuine erratum in the paper itself
+    rather than a transcription error here. Used 29.2 instead (every
+    other equation's pieces agree with their neighbors at their
+    breakpoints to within ~20%, consistent with ordinary independent-fit
+    scatter -- only this one coefficient is off by many orders of
+    magnitude), back-derived from exact continuity with Eq. (20)(b) at
+    Re_L=1.4e4 -- documented at the point of use, not silently patched.
+
+    Result with the new correlations, same solver sweep, same metric:
+    median |relative error| drops to 8.8% (2 MPa gas-wall, from 91.0%)
+    and 16.8% (2 MPa liquid-wall, from 25.0%) -- confirming the
+    implementation reproduces the paper's own reported shape once wired
+    through a real solver run, not just evaluated as a standalone
+    formula. Atmosphere gas-wall got slightly WORSE (17.8%, from 11.9%)
+    -- reported honestly rather than cherry-picked away; most likely
+    because the atmosphere data doesn't show as pronounced a non-monotonic
+    shape in the Re_G range this sweep's (Vsl,Vsg) choices actually reach
+    (3353-23454), so the smooth TaitelDukler1976 curve already tracks it
+    reasonably well there, and the piecewise fit's own breakpoint scatter
+    costs more than it gains in that specific range.
+
+    Honest scope: this is NOT a new physical mechanism and is not claimed
+    as one. It is dataset-specific curve fits usable for direct comparison
+    against this one paper, off by default, with zero effect on any
+    existing case (regression-confirmed). A genuine physical closure for
+    wave-modulated gas-wall friction -- one derived from the solver's own
+    local wave characteristics rather than fitted to one facility's Re
+    range -- remains unimplemented and would need the non-monotonic,
+    sign-changing correction shape explained above as its starting
+    constraint, not attempted here given the limited (and only
+    approximately digitized) data available to derive one from.

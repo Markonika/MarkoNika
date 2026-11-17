@@ -61,6 +61,16 @@
 //                         eL/eG "equal and opposite" construction adds no
 //                         measurable mass leak beyond the baseline
 //                         scheme's own. See VALIDATION.md, item 27.
+//   mfs_demo wang2019_friction
+//                         This solver's own self-consistent predicted
+//                         gas-wall/liquid-wall friction factor (Re_G/f_G,
+//                         Re_L/f_L, from SolverOptions::wallCorrelation's
+//                         Taitel & Dukler 1976 closure evaluated at the
+//                         solver's OWN predicted holdup, not an externally
+//                         imposed one) over a (Vsl,Vsg) sweep at atmosphere
+//                         and 2 MPa, for comparison against the digitized
+//                         experimental data from Wang, Liu, Chang, Zhao &
+//                         Guo (2019), Int. J. Heat Mass Transfer 143:118537.
 //
 // Each case writes a CSV time-series of cell-centred fields to
 // "<case>_output.csv" (one block of rows per snapshot) and prints a
@@ -74,6 +84,7 @@
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 
 namespace {
@@ -504,6 +515,150 @@ void runMassConservationBenchmark() {
     std::cout << "Wrote mass_conservation_output.csv\n\n";
 }
 
+// Self-consistent gas-wall / liquid-wall friction-factor prediction, for
+// comparison against Wang, Liu, Chang, Zhao & Guo (2019, Int. J. Heat Mass
+// Transfer 143:118537) Figs. 12(a)/14(a) (gas-wall) and 17 (liquid-wall).
+// That paper reports MEASURED friction factors from their own air-water
+// wavy-stratified-flow experiments (50 mm ID pipe, 11.6 m test section) at
+// atmosphere and 2 MPa, vs. the gas/liquid-phase Reynolds number -- not a
+// superficial-velocity sweep, so this runs this project's own solver at
+// matched (D, L, fluid properties) over a grid of (Vsl, Vsg) spanning their
+// reported wave-stratified flow envelope (their Fig. 4), lets it reach a
+// quasi-steady holdup the same way validate_quantitative.cpp does, and
+// THEN derives the actual phase Reynolds numbers from the solver's own
+// predicted holdup (not an externally imposed one) before evaluating this
+// project's existing wallFrictionFactor() (SolverOptions::wallCorrelation,
+// Taitel & Dukler 1976) at those self-consistent conditions -- i.e. this is
+// genuinely what the solver itself predicts for f_G/f_L, not a standalone
+// re-evaluation of the closure formula at arbitrary Re values.
+void runWang2019FrictionComparison() {
+    std::cout << "=== Wang et al. (2019, IJHMT 143:118537) gas-wall / liquid-wall\n"
+                 "    friction-factor comparison: this solver's own self-consistent\n"
+                 "    predicted Re_G/f_G, Re_L/f_L across a (Vsl,Vsg) sweep spanning\n"
+                 "    their reported wave-stratified envelope, atmosphere and 2 MPa. ===\n";
+
+    struct Condition {
+        std::string label;
+        double rhoL, muL, rhoG, muG, outletPressure;
+        mfs::FrictionCorrelation gasWallLit; // the paper's own fitted correlation, this pressure
+    };
+    const std::vector<Condition> conditions = {
+        {"atm",  998.0,   1.0e-3,  1.2,  1.8e-5,  101325.0, mfs::FrictionCorrelation::WangGuo2019GasWallAtm},
+        {"2MPa", 1005.4,  7.24e-4, 23.4, 1.87e-5, 2.0e6,    mfs::FrictionCorrelation::WangGuo2019GasWall2MPa},
+    };
+
+    const double D = 0.050;
+    const double L = 11.6;
+    const int N = 60;
+
+    std::ofstream out("wang2019_friction_output.csv");
+    out << "pressure,Vsl,Vsg,eL,ReG,fG,fG_wangguo2019,ReL,fL,fL_wangguo2019,blew_up\n";
+
+    for (const auto& cond : conditions) {
+        const std::vector<double> VlsList = (cond.label == "atm")
+            ? std::vector<double>{0.023, 0.034, 0.049, 0.07, 0.1}
+            : std::vector<double>{0.01, 0.023, 0.034, 0.049, 0.07, 0.1};
+        const std::vector<double> VgsList = (cond.label == "atm")
+            ? std::vector<double>{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0}
+            : std::vector<double>{0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5};
+
+        for (double Vsl : VlsList) {
+            for (double Vsg : VgsList) {
+                mfs::FluidProperties fluid;
+                fluid.rhoLiquid = cond.rhoL;
+                fluid.muLiquid = cond.muL;
+                fluid.muGas = cond.muG;
+                fluid.sigma = 0.072;
+                fluid.temperature = 293.0;
+                fluid.gasConstant = cond.outletPressure / (cond.rhoG * fluid.temperature);
+
+                mfs::SolverOptions opt;
+                mfs::FourFieldSolver solver(D, L, N, fluid, opt);
+                solver.setInclinationConstant(0.0);
+
+                mfs::BoundaryConditions bc;
+                bc.inletSuperficialLiquid = Vsl;
+                bc.inletSuperficialGas = Vsg;
+                const double homogeneousGuess = Vsl / std::max(Vsl + Vsg, 1e-6);
+                bc.inletLiquidHoldup = std::clamp(homogeneousGuess, 0.02, 0.98);
+                bc.outletPressure = cond.outletPressure;
+                bc.seedDisturbance = true;
+                bc.disturbanceAmplitude = 0.03;
+                bc.disturbanceFrequency = 0.6;
+                solver.setBoundaryConditions(bc);
+                solver.initializeStratified(bc.inletLiquidHoldup);
+
+                const double umix = Vsl + Vsg;
+                const double residenceTime = L / std::max(umix, 0.02);
+                const double tEnd = std::clamp(10.0 * residenceTime, 1.0, 8.0);
+                const double warmupEnd = 0.5 * tEnd;
+                const int maxSteps = 300000;
+                const int iStart = (2 * N) / 3;
+
+                std::vector<double> holdupSamples;
+                double nextSample = warmupEnd;
+                const double sampleInterval = (tEnd - warmupEnd) / 30.0;
+                bool blewUp = false;
+                int step = 0;
+                while (solver.time() < tEnd && step < maxSteps) {
+                    const double dt = solver.stableTimeStep();
+                    solver.step(dt);
+                    ++step;
+                    for (double v : solver.state().el) {
+                        if (std::isnan(v) || std::isinf(v)) { blewUp = true; break; }
+                    }
+                    if (blewUp) break;
+                    if (solver.time() >= nextSample) {
+                        const auto& s = solver.state();
+                        double hSum = 0.0;
+                        int hN = 0;
+                        for (int i = iStart; i < N; ++i) { hSum += s.el[i] + s.ed[i]; ++hN; }
+                        if (hN > 0) holdupSamples.push_back(hSum / hN);
+                        nextSample += sampleInterval;
+                    }
+                }
+
+                if (blewUp || holdupSamples.empty()) {
+                    out << cond.label << ',' << Vsl << ',' << Vsg << ",,,,,,,,1\n";
+                    continue;
+                }
+                double hMean = 0.0;
+                for (double v : holdupSamples) hMean += v;
+                const double eL = hMean / holdupSamples.size();
+
+                const mfs::PipeGeometry geom(D);
+                const auto sg = geom.fromAreaFraction(eL);
+                const double uG = Vsg / std::max(1.0 - eL, 1e-6);
+                const double uL = Vsl / std::max(eL, 1e-6);
+                const double ReG = mfs::reynoldsNumber(cond.rhoG, uG, sg.D2, cond.muG);
+                const double ReL = mfs::reynoldsNumber(cond.rhoL, uL, sg.D1, cond.muL);
+                const double fG = mfs::wallFrictionFactor({cond.rhoG, uG, sg.D2, cond.muG},
+                                                            mfs::FrictionCorrelation::TaitelDukler1976);
+                const double fL = mfs::wallFrictionFactor({cond.rhoL, uL, sg.D1, cond.muL},
+                                                            mfs::FrictionCorrelation::TaitelDukler1976);
+                // The paper's own fitted correlation (Eqs. 17/18/20),
+                // evaluated at this same solver-predicted, self-consistent
+                // (ReG, ReL) -- see Closures.hpp's WangGuo2019* comments
+                // for why these are literature-specific, not general
+                // physics. No atmosphere liquid-wall fit was published, so
+                // fL_wangguo2019 is left blank for that condition.
+                const double fG_lit = mfs::wallFrictionFactor({cond.rhoG, uG, sg.D2, cond.muG}, cond.gasWallLit);
+                std::ostringstream fLlit;
+                if (cond.label == "2MPa") {
+                    const double v = mfs::wallFrictionFactor(
+                        {cond.rhoL, uL, sg.D1, cond.muL}, mfs::FrictionCorrelation::WangGuo2019LiquidWall2MPa);
+                    fLlit << v;
+                }
+
+                out << cond.label << ',' << Vsl << ',' << Vsg << ',' << eL << ','
+                    << ReG << ',' << fG << ',' << fG_lit << ','
+                    << ReL << ',' << fL << ',' << fLlit.str() << ",0\n";
+            }
+        }
+    }
+    std::cout << "Wrote wang2019_friction_output.csv\n\n";
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -523,6 +678,8 @@ int main(int argc, char** argv) {
         runHorizontalLimiterComparison();
     } else if (caseName == "mass_conservation") {
         runMassConservationBenchmark();
+    } else if (caseName == "wang2019_friction") {
+        runWang2019FrictionComparison();
     } else if (caseName == "all") {
         runHorizontalCase(/*useAmr=*/false, /*useMovingMesh=*/false, "horizontal_output.csv");
         runVerticalCase();
@@ -531,10 +688,12 @@ int main(int argc, char** argv) {
         runHorizontalMovingMeshComparison();
         runHorizontalLimiterComparison();
         runMassConservationBenchmark();
+        runWang2019FrictionComparison();
     } else {
         std::cerr << "Unknown case '" << caseName
                    << "'. Use one of: horizontal, vertical, terrain, horizontal_amr, "
-                      "horizontal_movingmesh, horizontal_limiter, mass_conservation, all\n";
+                      "horizontal_movingmesh, horizontal_limiter, mass_conservation, "
+                      "wang2019_friction, all\n";
         return 1;
     }
     return 0;

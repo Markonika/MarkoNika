@@ -36,7 +36,14 @@ struct BoundaryConditions {
 };
 
 struct SolverOptions {
-    FrictionCorrelation wallCorrelation = FrictionCorrelation::TaitelDukler1976;
+    // Split in two (both default to the same TaitelDukler1976 value the
+    // single prior `wallCorrelation` field held, so this is bit-exact
+    // backward compatible) because the literature-specific
+    // WangGuo2019GasWall*/WangGuo2019LiquidWall2MPa closures below are
+    // fitted separately per phase and cannot share one setting -- see
+    // Closures.hpp for why those exist and what they are (and are not).
+    FrictionCorrelation wallCorrelationGas = FrictionCorrelation::TaitelDukler1976;
+    FrictionCorrelation wallCorrelationLiquid = FrictionCorrelation::TaitelDukler1976;
     FrictionCorrelation interfacialCorrelation = FrictionCorrelation::AndreussiPersen1987;
 
     // Data-driven correction to the interfacial friction closure's

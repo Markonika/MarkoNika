@@ -241,9 +241,9 @@ void FourFieldSolver::computeClosures() {
         const double ugO = state_.ug[f];
 
         const double flw = wallFrictionFactor({rhoL, ulO, D1f, fluid_.muLiquid, options_.wallRoughness},
-                                               options_.wallCorrelation);
+                                               options_.wallCorrelationLiquid);
         const double fgw = wallFrictionFactor({rhoGf, ugO, D2f, fluid_.muGas, options_.wallRoughness},
-                                               options_.wallCorrelation);
+                                               options_.wallCorrelationGas);
 
         InterfacialFrictionInputs ifi{};
         ifi.densityGas = rhoGf;

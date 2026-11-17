@@ -40,7 +40,46 @@ enum class FrictionCorrelation {
     AndreussiPersen1987,   // Table 2, interfacial
     AndritsosHanratty1987, // Table 2, interfacial
     CohenHanratty1968,     // Table 2, interfacial, constant
-    Wallis1969             // Table 2, interfacial
+    Wallis1969,            // Table 2, interfacial
+
+    // Wang, Liu, Chang, Zhao & Guo (2019), Int. J. Heat Mass Transfer
+    // 143:118537, Eqs. (17), (18), (20) -- wall-only, gas-wall fitted
+    // separately at atmosphere and at 2 MPa, liquid-wall fitted only at
+    // 2 MPa (the paper does not report an atmosphere liquid-wall fit).
+    //
+    // These are NOT a general physical mechanism: they are piecewise
+    // power-law curve fits to ONE facility's measurements (50 mm ID,
+    // 11.6 m horizontal air-water test section) at exactly two pressures,
+    // and reproduce a markedly NON-monotonic f-vs-Re shape (the gas-wall
+    // factor at 2 MPa dips to a minimum around Re_G~79,000 then rises
+    // again at higher Re) that the paper itself attributes to the wavy
+    // liquid-gas interface modulating the GAS-side near-wall velocity
+    // profile -- a real, measured effect with no general closure for it
+    // in this codebase (TaitelDukler1976/MoodyRoughWall are both smooth-
+    // or fixed-roughness WALL models and cannot produce a dip below the
+    // smooth-pipe curve the way the data does; a true physical closure
+    // for this would need the wave characteristics as an explicit input,
+    // which these piecewise fits do not use at all -- they are functions
+    // of Re alone). Provided so a run can be configured to use "the same
+    // numbers as the paper" for direct comparison against it (see
+    // VALIDATION.md and src/main.cpp's `wang2019_friction` demo case);
+    // NOT recommended as a general-purpose wall-friction closure outside
+    // that comparison.
+    //
+    // Eq. (20)(c)'s published coefficient (2.53e5) gives a wall friction
+    // factor of order 10 at the Reynolds numbers it is meant to cover --
+    // physically impossible, and inconsistent (by ~9 orders of magnitude)
+    // with Eq. (20)(b)'s own value at their shared breakpoint
+    // (Re_L=1.4e4). This looks like a genuine erratum in the published
+    // paper, not a transcription slip here: both the coefficient and
+    // exponent were independently re-read from two separate high-
+    // resolution crops of the original PDF and matched the published text
+    // exactly. The coefficient used below (29.2) is instead back-derived
+    // from continuity with Eq. (20)(b) at that breakpoint -- see
+    // WangGuo2019LiquidWall2MPa's implementation comment in Closures.cpp.
+    WangGuo2019GasWallAtm,
+    WangGuo2019GasWall2MPa,
+    WangGuo2019LiquidWall2MPa
 };
 
 struct WallFrictionInputs {

@@ -2462,6 +2462,65 @@ elsewhere in this project rather than a high-pressure-specific failure.
 One dataset, one facility, chart-digitized rather than tabulated --
 treat this as a first, promising look, not a closed case.
 
+### Gas-wall / liquid-wall friction factor vs. Wang et al. (2019)
+
+A separate paper from the same group, Wang, Liu, Chang, Zhao & Guo
+(2019), *"Experimental study of gas-liquid two-phase wavy stratified
+flow in horizontal pipe at high pressure,"* Int. J. Heat Mass Transfer
+143:118537, measures gas-wall and liquid-wall friction factor directly
+(not holdup) vs. Reynolds number, at atmosphere and 2 MPa, in a 50 mm ID,
+11.6 m horizontal air-water facility. No public dataset exists for it
+(checked Mendeley Data, Figshare, Zenodo, ScienceDirect); its plotted
+data was digitized by hand (approximate, see VALIDATION.md item 28 for
+the method and caveats).
+
+**Running this solver (`mfs_demo wang2019_friction`) against it surfaced
+a real, structural mismatch, not just quantitative slop.** The paper's
+2 MPa gas-wall friction factor is non-monotonic in Re_G -- it dips to a
+minimum below the smooth-pipe value, then rises again at higher Re --
+which this project's existing `TaitelDukler1976` closure (a
+monotonically-decreasing power law, like every correlation the paper
+itself tests: Haland, Kowalski) cannot reproduce by construction: median
+error against the digitized data was 91% at 2 MPa. No simple roughness
+correction fixes this either, since roughness only ever raises friction
+above the smooth value, never below it.
+
+Added the paper's own fitted correlations as three new, explicitly
+literature-specific `FrictionCorrelation` values --
+`WangGuo2019GasWallAtm`, `WangGuo2019GasWall2MPa`,
+`WangGuo2019LiquidWall2MPa` -- documented in Closures.hpp as curve fits
+to one facility at two pressures, not general physics, for direct
+comparison use only. Selecting them (`SolverOptions::wallCorrelation`
+was split into `wallCorrelationGas`/`wallCorrelationLiquid` to allow
+this -- bit-exact backward compatible, both default to the prior
+single field's `TaitelDukler1976`) drops the median error to 8.8% (2 MPa
+gas-wall) and 16.8% (2 MPa liquid-wall), confirming the implementation
+is correct once run through the actual solver rather than just evaluated
+as a formula. Atmosphere gas-wall got slightly worse (17.8%, from
+11.9%) -- reported as-is, not cherry-picked away.
+
+One genuine erratum was found and fixed along the way: the paper's
+published Eq. (20)(c) coefficient gives friction factors of order 10 at
+the Reynolds numbers it covers, inconsistent by ~9 orders of magnitude
+with the adjacent piece at their shared breakpoint. Independently
+re-read from two separate high-resolution crops of the original PDF,
+both matching the published text -- this looks like the paper's own
+error, not a transcription slip. The value used instead (29.2) is
+back-derived from exact continuity with the neighboring piece.
+
+**What this does and doesn't mean for the solver's physics:** the real
+mechanism here -- a wavy liquid-gas interface modulating near-wall GAS
+turbulence even at the solid wall, not just the usual interfacial shear
+-- has no general closure anywhere in this codebase (or, per the paper's
+own literature survey, elsewhere). The three correlations added here are
+curve fits to one dataset at two discrete pressures, not a model of that
+mechanism; they let a run reproduce the paper's own numbers for direct
+comparison, nothing more. A genuine physical closure would need the
+local wave characteristics as an explicit input and a correction shape
+that goes both below and back above the smooth-wall baseline across the
+Reynolds range -- a real research task, not attempted here given how
+approximate the available digitized data is.
+
 ## Building
 
 ```sh

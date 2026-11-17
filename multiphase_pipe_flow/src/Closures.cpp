@@ -44,6 +44,37 @@ namespace {
         const double bracket = 2.0e4 * roughnessOverD + 1.0e6 / Re;
         return 0.001375 * (1.0 + std::cbrt(bracket));
     }
+
+    // Wang, Liu, Chang, Zhao & Guo (2019), Eq. (17): gas-wall, atmosphere.
+    double wangGuo2019GasWallAtm(double Re) {
+        Re = std::max(Re, constants::tiny);
+        if (Re < 5.0e3) return 1.35e4 * std::pow(Re, -1.68);
+        if (Re <= 1.5e5) return 1.76e-2 * std::pow(Re, -0.11);
+        return 8.22e8 * std::pow(Re, -2.17);
+    }
+
+    // Wang, Liu, Chang, Zhao & Guo (2019), Eq. (18): gas-wall, 2 MPa.
+    double wangGuo2019GasWall2MPa(double Re) {
+        Re = std::max(Re, constants::tiny);
+        if (Re < 1.6e4) return 7.43e8 * std::pow(Re, -2.59);
+        if (Re <= 7.9e4) return 7.45e3 * std::pow(Re, -1.38);
+        if (Re <= 1.6e5) return 3.44e-8 * std::pow(Re, 0.930);
+        return 2.05e-4 * std::pow(Re, 0.199);
+    }
+
+    // Wang, Liu, Chang, Zhao & Guo (2019), Eq. (20): liquid-wall, 2 MPa.
+    // The Re_L>1.4e4 branch's coefficient is corrected from the published
+    // 2.53e5 to 29.2 -- see the WangGuo2019LiquidWall2MPa comment in
+    // Closures.hpp for why. 29.2 is this project's own value, derived by
+    // requiring f_L from this branch to match Eq. (20)(b)'s value exactly
+    // at their shared breakpoint, Re_L=1.4e4 (where Eq. 20b gives
+    // f_L=3.83e4*14000^-1.587=1.008e-2, so 29.2=1.008e-2/14000^-0.835).
+    double wangGuo2019LiquidWall2MPa(double Re) {
+        Re = std::max(Re, constants::tiny);
+        if (Re < 2.5e3) return 9.40e6 * std::pow(Re, -2.283);
+        if (Re <= 1.4e4) return 3.83e4 * std::pow(Re, -1.587);
+        return 29.2 * std::pow(Re, -0.835);
+    }
 }
 
 double wallFrictionFactor(const WallFrictionInputs& in, FrictionCorrelation correlation) {
@@ -58,6 +89,12 @@ double wallFrictionFactor(const WallFrictionInputs& in, FrictionCorrelation corr
         }
         case FrictionCorrelation::MoodyRoughWall:
             return moodyRoughWallFactor(Re, in.roughness / std::max(in.hydraulicDiameter, constants::tiny));
+        case FrictionCorrelation::WangGuo2019GasWallAtm:
+            return wangGuo2019GasWallAtm(Re);
+        case FrictionCorrelation::WangGuo2019GasWall2MPa:
+            return wangGuo2019GasWall2MPa(Re);
+        case FrictionCorrelation::WangGuo2019LiquidWall2MPa:
+            return wangGuo2019LiquidWall2MPa(Re);
         case FrictionCorrelation::TaitelDukler1976:
         default:
             return taitelDuklerFactor(Re);
